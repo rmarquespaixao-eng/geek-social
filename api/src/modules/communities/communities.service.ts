@@ -143,7 +143,12 @@ export class CommunitiesService {
     if (existing.ownerId !== actorId) throw new CommunitiesError('NOT_OWNER')
     if (existing.deletedAt) throw new CommunitiesError('COMMUNITY_DELETED')
 
-    const data: Record<string, unknown> = { ...patch }
+    const data: Record<string, unknown> = {
+      name: patch.name,
+      description: patch.description,
+      category: patch.category,
+      visibility: patch.visibility,
+    }
     if (coverFile) {
       data.coverUrl = await this.uploadCover(communityId, coverFile)
     }

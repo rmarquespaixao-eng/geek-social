@@ -74,12 +74,15 @@ export async function parseMultipartCommunity(
   const parts = request.parts()
   for await (const part of parts) {
     if (part.type === 'file') {
-      const chunks: Buffer[] = []
-      for await (const chunk of part.file) chunks.push(chunk as Buffer)
-      const data = { buffer: Buffer.concat(chunks), mimeType: part.mimetype }
-      if (part.fieldname === 'cover') cover = data
-      else if (part.fieldname === 'icon') icon = data
-      // other file fields are drained (consumed above)
+      if (part.fieldname === 'cover' || part.fieldname === 'icon') {
+        const chunks: Buffer[] = []
+        for await (const chunk of part.file) chunks.push(chunk as Buffer)
+        const data = { buffer: Buffer.concat(chunks), mimeType: part.mimetype }
+        if (part.fieldname === 'cover') cover = data
+        else icon = data
+      } else {
+        for await (const _ of part.file) { /* drain without buffering */ }
+      }
     } else {
       raw[part.fieldname] = part.value
     }

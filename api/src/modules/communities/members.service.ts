@@ -59,7 +59,9 @@ export class MembersService {
     await this.db.transaction(async (tx) => {
       const exec = tx as unknown as DatabaseClient
       await this.membersRepo.deleteByCommunityAndUser(communityId, viewerId, exec)
-      await this.communitiesRepo.decrementMemberCount(communityId, exec)
+      if (membership.status === 'active') {
+        await this.communitiesRepo.decrementMemberCount(communityId, exec)
+      }
     })
   }
 

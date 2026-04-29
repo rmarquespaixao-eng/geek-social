@@ -18,14 +18,14 @@ export class TopicsService {
     viewerId: string,
     communityId: string,
     input: CreateTopicInput,
-  ): Promise<{ post: Post; meta: TopicMetaRow }> {
+  ): Promise<TopicRow> {
     const community = await this.communitiesService.getForViewer(communityId, viewerId)
 
     // Visibility check — must be a member of private/restricted
     await this.communitiesService.assertCanView(viewerId, community)
     await this.communitiesService.assertNotBanned(viewerId, communityId)
 
-    return this.db.transaction(async (tx) => {
+    const postId = await this.db.transaction(async (tx) => {
       const exec = tx as unknown as DatabaseClient
       const post = await this.postsRepo.create({
         userId: viewerId,
@@ -34,10 +34,14 @@ export class TopicsService {
         visibility: input.visibility ?? 'public',
         communityId,
       }, exec)
-      const meta = await this.topicsRepo.insertMeta(post.id, communityId, exec)
+      await this.topicsRepo.insertMeta(post.id, communityId, exec)
       await this.communitiesService.incrementTopicCount(communityId, exec)
-      return { post, meta }
+      return post.id
     })
+
+    const topic = await this.topicsRepo.findTopicById(postId)
+    if (!topic) throw new CommunitiesError('TOPIC_NOT_FOUND')
+    return topic
   }
 
   async listTopics(

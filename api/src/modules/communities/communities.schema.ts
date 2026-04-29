@@ -50,9 +50,8 @@ export const listPendingQuerySchema = z.object({
 
 // ── Param schemas ───────────────────────────────────────────────────
 
-/** Aceita UUID ou slug (`^[a-z0-9-]+$`). */
 export const idOrSlugParam = z.object({
-  id: z.string().regex(/^[a-z0-9-]+$/),
+  id: z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$|^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/),
 })
 
 export const uuidParam = z.object({

@@ -2,36 +2,20 @@ import type { FastifyRequest, FastifyReply } from 'fastify'
 import type { TopicsService } from './topics.service.js'
 import { mapCommunitiesError } from './communities.controller.js'
 import { serializeTopicSummary } from './communities.serializer.js'
-import { createTopicSchema } from './communities.schema.js'
+import type { CreateTopicInput } from './communities.schema.js'
 import type { AccessTokenClaims } from '../auth/auth.service.js'
 
 export class TopicsController {
   constructor(private readonly service: TopicsService) {}
 
   async createTopic(
-    request: FastifyRequest<{ Params: { id: string } }>,
+    request: FastifyRequest<{ Params: { id: string }; Body: CreateTopicInput }>,
     reply: FastifyReply,
   ) {
     const { userId } = request.user as AccessTokenClaims
     try {
-      const parsed = createTopicSchema.safeParse(request.body)
-      if (!parsed.success) {
-        return reply.status(400).send({ error: 'INVALID_INPUT', issues: parsed.error.issues })
-      }
-      const { post, meta } = await this.service.createTopic(userId, request.params.id, parsed.data)
-      return reply.status(201).send({
-        topic: {
-          postId: post.id,
-          communityId: request.params.id,
-          authorId: post.userId,
-          content: post.content,
-          pinned: meta.pinned,
-          locked: meta.locked,
-          movedFromCommunityId: meta.movedFromCommunityId,
-          createdAt: post.createdAt.toISOString(),
-          updatedAt: post.updatedAt.toISOString(),
-        },
-      })
+      const topic = await this.service.createTopic(userId, request.params.id, request.body)
+      return reply.status(201).send({ topic: serializeTopicSummary(topic) })
     } catch (e) {
       return mapCommunitiesError(e, reply)
     }

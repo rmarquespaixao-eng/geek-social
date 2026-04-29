@@ -5,6 +5,7 @@ import type { MemberRow } from './communities.repository.js'
 import type { CommunitiesRepository } from './communities.repository.js'
 import type { AuditLogRepository } from './audit-log.repository.js'
 import type { JoinRequestRow } from './communities.repository.js'
+import type { JoinRequestWithUser } from './join-requests.repository.js'
 import { CommunitiesError } from './communities.errors.js'
 
 export class JoinRequestsService {
@@ -87,7 +88,7 @@ export class JoinRequestsService {
     })
   }
 
-  async listPending(actorId: string, communityId: string): Promise<JoinRequestRow[]> {
+  async listPending(actorId: string, communityId: string): Promise<JoinRequestWithUser[]> {
     const community = await this.communitiesRepo.findById(communityId)
     if (!community) throw new CommunitiesError('COMMUNITY_NOT_FOUND')
 

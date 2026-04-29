@@ -1,7 +1,11 @@
 import { and, eq } from 'drizzle-orm'
 import type { DatabaseClient } from '../../shared/infra/database/postgres.client.js'
-import { communityJoinRequests } from '../../shared/infra/database/schema.js'
+import { communityJoinRequests, users } from '../../shared/infra/database/schema.js'
 import type { JoinRequestRow } from './communities.repository.js'
+
+export type JoinRequestWithUser = JoinRequestRow & {
+  user: { id: string; displayName: string; avatarUrl: string | null }
+}
 
 export class JoinRequestsRepository {
   constructor(private readonly db: DatabaseClient) {}
@@ -56,10 +60,21 @@ export class JoinRequestsRepository {
     return (row as JoinRequestRow | undefined) ?? null
   }
 
-  async listPending(communityId: string, opts?: { limit?: number }): Promise<JoinRequestRow[]> {
+  async listPending(communityId: string, opts?: { limit?: number }): Promise<JoinRequestWithUser[]> {
     const rows = await this.db
-      .select()
+      .select({
+        id: communityJoinRequests.id,
+        communityId: communityJoinRequests.communityId,
+        userId: communityJoinRequests.userId,
+        status: communityJoinRequests.status,
+        decidedBy: communityJoinRequests.decidedBy,
+        decidedAt: communityJoinRequests.decidedAt,
+        createdAt: communityJoinRequests.createdAt,
+        userDisplayName: users.displayName,
+        userAvatarUrl: users.avatarUrl,
+      })
       .from(communityJoinRequests)
+      .innerJoin(users, eq(users.id, communityJoinRequests.userId))
       .where(
         and(
           eq(communityJoinRequests.communityId, communityId),
@@ -67,7 +82,17 @@ export class JoinRequestsRepository {
         ),
       )
       .limit(opts?.limit ?? 50)
-    return rows as JoinRequestRow[]
+
+    return rows.map(r => ({
+      id: r.id,
+      communityId: r.communityId,
+      userId: r.userId,
+      status: r.status as 'pending' | 'approved' | 'rejected',
+      decidedBy: r.decidedBy,
+      decidedAt: r.decidedAt,
+      createdAt: r.createdAt,
+      user: { id: r.userId, displayName: r.userDisplayName, avatarUrl: r.userAvatarUrl },
+    }))
   }
 
   async markDecided(

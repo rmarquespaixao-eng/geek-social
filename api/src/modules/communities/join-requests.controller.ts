@@ -1,7 +1,7 @@
 import type { FastifyRequest, FastifyReply } from 'fastify'
 import type { JoinRequestsService } from './join-requests.service.js'
 import { mapCommunitiesError } from './communities.controller.js'
-import { serializeJoinRequest } from './communities.serializer.js'
+import { serializeJoinRequestWithUser } from './communities.serializer.js'
 import type { AccessTokenClaims } from '../auth/auth.service.js'
 
 export class JoinRequestsController {
@@ -11,7 +11,7 @@ export class JoinRequestsController {
     const { userId } = request.user as AccessTokenClaims
     try {
       const requests = await this.service.listPending(userId, request.params.id)
-      return reply.send({ requests: requests.map(serializeJoinRequest), nextCursor: null })
+      return reply.send({ requests: requests.map(serializeJoinRequestWithUser), nextCursor: null })
     } catch (e) {
       return mapCommunitiesError(e, reply)
     }

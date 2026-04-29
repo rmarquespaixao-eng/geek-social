@@ -1,4 +1,5 @@
 import type { CommunityRow, MemberRow, MemberWithUser, JoinRequestRow, TopicRow } from './communities.repository.js'
+import type { JoinRequestWithUser } from './join-requests.repository.js'
 
 // ── API shape types ─────────────────────────────────────────────────
 export type ApiCommunitySummary = {
@@ -46,6 +47,10 @@ export type ApiJoinRequest = {
   decidedBy: string | null
   decidedAt: string | null
   createdAt: string
+}
+
+export type ApiJoinRequestWithUser = ApiJoinRequest & {
+  user: { id: string; displayName: string; avatarUrl: string | null }
 }
 
 export type ApiTopicSummary = {
@@ -130,6 +135,13 @@ export function serializeJoinRequest(row: JoinRequestRow): ApiJoinRequest {
     decidedBy: row.decidedBy,
     decidedAt: row.decidedAt ? row.decidedAt.toISOString() : null,
     createdAt: row.createdAt.toISOString(),
+  }
+}
+
+export function serializeJoinRequestWithUser(row: JoinRequestWithUser): ApiJoinRequestWithUser {
+  return {
+    ...serializeJoinRequest(row),
+    user: row.user,
   }
 }
 

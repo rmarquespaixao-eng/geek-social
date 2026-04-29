@@ -253,6 +253,13 @@
       "when": 1777440000000,
       "tag": "0035_events",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1777450000000,
+      "tag": "0036_communities",
+      "breakpoints": true
     }
   ]
 }

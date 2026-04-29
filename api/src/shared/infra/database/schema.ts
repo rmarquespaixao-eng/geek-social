@@ -360,6 +360,13 @@ export const notificationTypeEnum = pgEnum('notification_type', [
   'rating_received',
   'counter_proposal_received',
   'proposal_rejected',
+  'event_reminder_48h',
+  'event_reminder_2h',
+  'event_cancelled',
+  'event_updated',
+  'event_conflict_after_edit',
+  'event_promoted_from_waitlist',
+  'event_invited',
 ])
 
 export const notifications = pgTable('notifications', {
@@ -418,4 +425,85 @@ export const listingRatings = pgTable('listing_ratings', {
   offerRaterUniq: uniqueIndex('listing_ratings_offer_rater_uniq').on(table.offerId, table.raterId),
   rateeIdx: index('listing_ratings_ratee_idx').on(table.rateeId),
   offerIdx: index('listing_ratings_offer_idx').on(table.offerId),
+}))
+
+// ── Eventos ("Rolê") ──────────────────────────────────────────────
+export const eventTypeEnum = pgEnum('event_type', ['presencial', 'online'])
+export const eventVisibilityEnum = pgEnum('event_visibility', ['public', 'friends', 'invite'])
+export const eventStatusEnum = pgEnum('event_status', ['scheduled', 'cancelled', 'ended'])
+export const eventParticipantStatusEnum = pgEnum('event_participant_status', [
+  'subscribed',
+  'confirmed',
+  'waitlist',
+  'left',
+])
+
+export const events = pgTable('events', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  hostUserId: uuid('host_user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  name: varchar('name', { length: 200 }).notNull(),
+  description: text('description'),
+  coverUrl: varchar('cover_url').notNull(),
+  startsAt: timestamp('starts_at', { withTimezone: true }).notNull(),
+  durationMinutes: integer('duration_minutes').notNull(),
+  endsAt: timestamp('ends_at', { withTimezone: true }).notNull(),
+  type: eventTypeEnum('type').notNull(),
+  visibility: eventVisibilityEnum('visibility').notNull().default('public'),
+  capacity: integer('capacity'),
+  status: eventStatusEnum('status').notNull().default('scheduled'),
+  cancellationReason: text('cancellation_reason'),
+  cancelledAt: timestamp('cancelled_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  visibilityStartsAtIdx: index('events_visibility_starts_at_idx').on(table.visibility, table.startsAt),
+  hostStartsAtIdx: index('events_host_starts_at_idx').on(table.hostUserId, table.startsAt),
+  statusEndsAtIdx: index('events_status_ends_at_idx').on(table.status, table.endsAt),
+}))
+
+export const eventAddresses = pgTable('event_addresses', {
+  eventId: uuid('event_id').primaryKey().references(() => events.id, { onDelete: 'cascade' }),
+  cep: varchar('cep', { length: 9 }).notNull(),
+  logradouro: varchar('logradouro', { length: 200 }).notNull(),
+  numero: varchar('numero', { length: 20 }).notNull(),
+  complemento: varchar('complemento', { length: 100 }),
+  bairro: varchar('bairro', { length: 100 }).notNull(),
+  cidade: varchar('cidade', { length: 100 }).notNull(),
+  estado: varchar('estado', { length: 2 }).notNull(),
+}, (table) => ({
+  cidadeIdx: index('event_addresses_cidade_idx').on(table.cidade),
+}))
+
+export const eventOnlineDetails = pgTable('event_online_details', {
+  eventId: uuid('event_id').primaryKey().references(() => events.id, { onDelete: 'cascade' }),
+  meetingUrl: varchar('meeting_url', { length: 500 }).notNull(),
+  extraDetails: text('extra_details'),
+})
+
+export const eventParticipants = pgTable('event_participants', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  eventId: uuid('event_id').notNull().references(() => events.id, { onDelete: 'cascade' }),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  status: eventParticipantStatusEnum('status').notNull(),
+  waitlistPosition: integer('waitlist_position'),
+  joinedAt: timestamp('joined_at', { withTimezone: true }).defaultNow().notNull(),
+  confirmedAt: timestamp('confirmed_at', { withTimezone: true }),
+  leftAt: timestamp('left_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  uniqueEventUser: uniqueIndex('event_participants_event_user_uniq').on(table.eventId, table.userId),
+  userStatusIdx: index('event_participants_user_status_idx').on(table.userId, table.status),
+  eventStatusIdx: index('event_participants_event_status_idx').on(table.eventId, table.status),
+  waitlistIdx: index('event_participants_waitlist_idx').on(table.eventId, table.waitlistPosition),
+}))
+
+export const eventInvites = pgTable('event_invites', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  eventId: uuid('event_id').notNull().references(() => events.id, { onDelete: 'cascade' }),
+  invitedUserId: uuid('invited_user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  invitedBy: uuid('invited_by').notNull().references(() => users.id),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  uniqueInvite: uniqueIndex('event_invites_event_user_uniq').on(table.eventId, table.invitedUserId),
 }))

@@ -19,6 +19,13 @@ export type NotificationType =
   | 'rating_received'
   | 'counter_proposal_received'
   | 'proposal_rejected'
+  | 'event_reminder_48h'
+  | 'event_reminder_2h'
+  | 'event_cancelled'
+  | 'event_updated'
+  | 'event_conflict_after_edit'
+  | 'event_promoted_from_waitlist'
+  | 'event_invited'
 
 export type Notification = {
   id: string

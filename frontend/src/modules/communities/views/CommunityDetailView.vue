@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import CommunityTopicCard from '../components/CommunityTopicCard.vue'
 import MemberRow from '../components/MemberRow.vue'
@@ -134,19 +134,9 @@ async function switchTab(tab: Tab) {
   }
 }
 
-onMounted(async () => {
-  // community will be loaded by useCommunity watcher; wait briefly then load topics.
-  // Watcher fires immediately; we rely on the watch to trigger load, but we also
-  // pre-load topics once the community is available.
-  const unwatch = watch(() => community.value, async (c) => {
-    if (c) {
-      await loadTopics()
-      unwatch()
-    }
-  }, { immediate: true })
-})
-
-import { watch } from 'vue'
+watch(community, (c) => {
+  if (c) loadTopics()
+}, { immediate: true, once: true })
 
 async function onJoin() {
   const c = community.value

@@ -169,12 +169,14 @@ const variantClass: Record<'primary' | 'danger' | 'ghost', string> = {
     <div class="flex">
       <!-- Stub (~30% width) -->
       <div
-        class="event-ticket-stub w-[30%] flex flex-col items-center justify-center py-4 px-2 border-r border-dashed border-slate-600/60 bg-[#181a30]"
+        class="event-ticket-stub w-[30%] flex flex-row items-center justify-center gap-2 py-4 px-2 border-r border-dashed border-slate-600/60 bg-[#181a30]"
       >
-        <p class="text-[10px] font-mono uppercase text-slate-500">{{ dayStub.weekday }}</p>
-        <p class="text-3xl font-mono font-bold text-amber-400 leading-none">{{ dayStub.day }}</p>
-        <p class="text-[10px] font-mono uppercase text-slate-400">{{ dayStub.month }}</p>
-        <p class="mt-2 text-sm font-mono text-slate-300">{{ dayStub.start }}</p>
+        <div class="flex flex-col items-center leading-none">
+          <p class="text-[10px] font-mono uppercase text-slate-500">{{ dayStub.weekday }}</p>
+          <p class="text-3xl font-mono font-bold text-amber-400 leading-none">{{ dayStub.day }}</p>
+          <p class="text-[10px] font-mono uppercase text-slate-400">{{ dayStub.month }}</p>
+        </div>
+        <p class="text-sm font-mono font-semibold text-slate-300 whitespace-nowrap">{{ dayStub.start }}</p>
       </div>
 
       <!-- Content body -->

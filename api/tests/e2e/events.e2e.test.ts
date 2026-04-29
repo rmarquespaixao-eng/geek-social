@@ -111,7 +111,11 @@ async function createEvent(
     },
     payload: Buffer.concat(segments),
   })
-  return { statusCode: res.statusCode, body: res.body ? safeParse(res.body) : null }
+  const parsed = res.body ? safeParse(res.body) : null
+  // POST /events agora responde { event: EventSummary } — achata p/ não quebrar usos `body.id`.
+  // Em respostas de erro (400/422) `parsed.event` é undefined → cai no fallback.
+  const body = parsed && typeof parsed === 'object' && 'event' in parsed ? parsed.event : parsed
+  return { statusCode: res.statusCode, body }
 }
 
 function safeParse(body: string): any {
@@ -151,9 +155,14 @@ describe('Events ("Rolê") E2E', () => {
     expect(res.statusCode).toBe(201)
     expect(res.body.id).toBeTruthy()
     expect(res.body.type).toBe('presencial')
-    expect(res.body.address).toBeTruthy()
-    expect(res.body.address.cidade).toBe('São Paulo')
+    expect(res.body.cidade).toBe('São Paulo')
     expect(res.body.coverUrl).toMatch(/^https:\/\/test\.local\//)
+
+    // Detalhe completo expõe address dentro do envelope
+    const detail = JSON.parse(
+      (await authedRequest(app, host.token, 'GET', `/events/${res.body.id}`)).body,
+    )
+    expect(detail.address.cidade).toBe('São Paulo')
   })
 
   it('POST /events — cria evento online com meeting URL (201)', async () => {
@@ -161,7 +170,11 @@ describe('Events ("Rolê") E2E', () => {
     const res = await createEvent(app, host, { type: 'online' })
     expect(res.statusCode).toBe(201)
     expect(res.body.type).toBe('online')
-    expect(res.body.online.meetingUrl).toBe('https://meet.example.com/abc')
+
+    const detail = JSON.parse(
+      (await authedRequest(app, host.token, 'GET', `/events/${res.body.id}`)).body,
+    )
+    expect(detail.onlineDetails.meetingUrl).toBe('https://meet.example.com/abc')
   })
 
   it('POST /events — falha 400 sem capa', async () => {
@@ -372,7 +385,7 @@ describe('Events ("Rolê") E2E', () => {
     // Simulamos via SQL por enquanto:
     await execSql(`UPDATE events SET status='ended' WHERE id=$1 AND ends_at < now()`, [ev.id])
     const detail = JSON.parse((await authedRequest(app, host.token, 'GET', `/events/${ev.id}`)).body)
-    expect(detail.status).toBe('ended')
+    expect(detail.event.status).toBe('ended')
   })
 
   // ─── Lembretes (cobertura via promoted-after-T-48h) ────────────────

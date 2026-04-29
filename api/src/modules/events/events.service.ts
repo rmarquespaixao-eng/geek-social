@@ -10,7 +10,11 @@ import type {
   EventRow,
   UpdateEventData,
 } from './events.repository.js'
-import type { ParticipantsRepository } from './participants.repository.js'
+import type {
+  ParticipantsRepository,
+  ParticipantRow,
+  ParticipantWithUser,
+} from './participants.repository.js'
 import type { InvitesRepository } from './invites.repository.js'
 import type { EventJobsScheduler } from './jobs/event-jobs.scheduler.js'
 import type {
@@ -162,6 +166,26 @@ export class EventsService {
     if (!detail) throw new EventsError('EVENT_NOT_FOUND')
     await this.assertCanView(viewerId, detail)
     return detail
+  }
+
+  /**
+   * Versão "para a view": carrega detail + participantes ativos + participação
+   * do viewer numa única chamada. Usada pelo controller GET /events/:id.
+   */
+  async getEventForViewer(
+    viewerId: string,
+    eventId: string,
+  ): Promise<{
+    detail: EventDetail
+    participants: ParticipantWithUser[]
+    viewerParticipation: ParticipantRow | null
+  }> {
+    const detail = await this.getEvent(viewerId, eventId)
+    const [participants, viewerParticipation] = await Promise.all([
+      this.participantsRepo.listByEvent(eventId),
+      this.participantsRepo.findByEventAndUser(eventId, viewerId),
+    ])
+    return { detail, participants, viewerParticipation }
   }
 
   async listEvents(viewerId: string, query: ListEventsQuery) {

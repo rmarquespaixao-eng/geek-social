@@ -8,6 +8,11 @@ import {
   myEventsQuerySchema,
   updateEventSchema,
 } from './events.schema.js'
+import {
+  serializeEventDetail,
+  serializeEventRowAsSummary,
+  serializeEventSummary,
+} from './events.serializer.js'
 import type { AccessTokenClaims } from '../auth/auth.service.js'
 
 const STATUS_BY_CODE: Record<string, number> = {
@@ -103,7 +108,7 @@ export class EventsController {
         return reply.status(422).send({ error: 'INVALID_COVER' })
       }
       const event = await this.service.createEvent(userId, parsed.data, cover)
-      return reply.status(201).send(event)
+      return reply.status(201).send({ event: serializeEventSummary(event, null) })
     } catch (e) {
       return mapEventsError(e, reply)
     }
@@ -114,14 +119,18 @@ export class EventsController {
     const q = listEventsQuerySchema.safeParse(request.query)
     if (!q.success) return reply.status(400).send({ error: 'INVALID_QUERY' })
     const result = await this.service.listEvents(userId, q.data)
-    return reply.send(result)
+    return reply.send({
+      events: result.events.map(serializeEventRowAsSummary),
+      nextCursor: result.nextCursor,
+    })
   }
 
   async get(request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) {
     const { userId } = request.user as AccessTokenClaims
     try {
-      const event = await this.service.getEvent(userId, request.params.id)
-      return reply.send(event)
+      const { detail, participants, viewerParticipation } =
+        await this.service.getEventForViewer(userId, request.params.id)
+      return reply.send(serializeEventDetail(detail, participants, viewerParticipation))
     } catch (e) {
       return mapEventsError(e, reply)
     }
@@ -145,7 +154,7 @@ export class EventsController {
       }
       const result = await this.service.updateEvent(userId, request.params.id, parsed.data, cover)
       return reply.send({
-        event: result.event,
+        event: serializeEventSummary(result.event, null),
         sensitiveChanged: result.sensitiveChanged,
       })
     } catch (e) {
@@ -172,7 +181,10 @@ export class EventsController {
     const q = myEventsQuerySchema.safeParse(request.query)
     if (!q.success) return reply.status(400).send({ error: 'INVALID_QUERY' })
     const result = await this.service.listHosted(userId, q.data)
-    return reply.send(result)
+    return reply.send({
+      events: result.events.map(serializeEventRowAsSummary),
+      nextCursor: result.nextCursor,
+    })
   }
 
   async listAttending(request: FastifyRequest, reply: FastifyReply) {
@@ -180,6 +192,9 @@ export class EventsController {
     const q = myEventsQuerySchema.safeParse(request.query)
     if (!q.success) return reply.status(400).send({ error: 'INVALID_QUERY' })
     const result = await this.service.listAttending(userId, q.data)
-    return reply.send(result)
+    return reply.send({
+      events: result.events.map(serializeEventRowAsSummary),
+      nextCursor: result.nextCursor,
+    })
   }
 }

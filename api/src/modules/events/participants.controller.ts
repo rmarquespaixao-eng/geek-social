@@ -1,6 +1,7 @@
 import type { FastifyRequest, FastifyReply } from 'fastify'
 import type { ParticipantsService } from './participants.service.js'
 import { mapEventsError } from './events.controller.js'
+import { serializeEventParticipant } from './events.serializer.js'
 import { listParticipantsQuerySchema } from './events.schema.js'
 import type { AccessTokenClaims } from '../auth/auth.service.js'
 
@@ -57,7 +58,10 @@ export class ParticipantsController {
     if (!q.success) return reply.status(400).send({ error: 'INVALID_QUERY' })
     try {
       const result = await this.service.listParticipants(userId, request.params.id, q.data)
-      return reply.send(result)
+      return reply.send({
+        participants: result.participants.map(serializeEventParticipant),
+        nextCursor: result.nextCursor,
+      })
     } catch (e) {
       return mapEventsError(e, reply)
     }

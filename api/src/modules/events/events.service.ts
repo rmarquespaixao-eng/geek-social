@@ -99,7 +99,7 @@ export class EventsService {
     if (input.type === 'presencial' && !input.address) {
       throw new EventsError('MISSING_ADDRESS_FOR_PRESENCIAL')
     }
-    if (input.type === 'online' && !input.online) {
+    if (input.type === 'online' && !input.onlineDetails) {
       throw new EventsError('MISSING_MEETING_URL_FOR_ONLINE')
     }
 
@@ -142,8 +142,8 @@ export class EventsService {
       if (input.type === 'presencial' && input.address) {
         await this.repo.insertAddress(ev.id, input.address, exec)
       }
-      if (input.type === 'online' && input.online) {
-        await this.repo.insertOnline(ev.id, input.online, exec)
+      if (input.type === 'online' && input.onlineDetails) {
+        await this.repo.insertOnline(ev.id, input.onlineDetails, exec)
       }
       return ev
     })
@@ -248,7 +248,7 @@ export class EventsService {
       // Mudando type para presencial precisa endereço
       throw new EventsError('MISSING_ADDRESS_FOR_PRESENCIAL')
     }
-    if (newType === 'online' && input.type === 'online' && !input.online) {
+    if (newType === 'online' && input.type === 'online' && !input.onlineDetails) {
       throw new EventsError('MISSING_MEETING_URL_FOR_ONLINE')
     }
 
@@ -272,7 +272,7 @@ export class EventsService {
       sensitiveChanged.push('capacity')
     }
     if (input.address) sensitiveChanged.push('address')
-    if (input.online) sensitiveChanged.push('online')
+    if (input.onlineDetails) sensitiveChanged.push('onlineDetails')
 
     const data: UpdateEventData = {}
     if (input.name !== undefined) data.name = input.name
@@ -302,8 +302,8 @@ export class EventsService {
       if (input.address && newType === 'presencial') {
         await this.repo.upsertAddress(eventId, input.address, exec)
       }
-      if (input.online && newType === 'online') {
-        await this.repo.upsertOnline(eventId, input.online, exec)
+      if (input.onlineDetails && newType === 'online') {
+        await this.repo.upsertOnline(eventId, input.onlineDetails, exec)
       }
       // Mudança de tipo: limpa a tabela "antiga"
       if (input.type && input.type !== existing.type) {
@@ -312,7 +312,7 @@ export class EventsService {
           if (input.address) await this.repo.upsertAddress(eventId, input.address, exec)
         } else {
           await this.repo.deleteAddress(eventId, exec)
-          if (input.online) await this.repo.upsertOnline(eventId, input.online, exec)
+          if (input.onlineDetails) await this.repo.upsertOnline(eventId, input.onlineDetails, exec)
         }
       }
     })

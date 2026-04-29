@@ -69,8 +69,8 @@ async function parseMultipartEvent(
     } else {
       const fieldname = part.fieldname
       const value = part.value
-      // Tenta parse JSON pra address/online vindos como string
-      if ((fieldname === 'address' || fieldname === 'online') && typeof value === 'string') {
+      // Tenta parse JSON pra address/onlineDetails vindos como string
+      if ((fieldname === 'address' || fieldname === 'onlineDetails') && typeof value === 'string') {
         try {
           raw[fieldname] = JSON.parse(value)
           continue

@@ -79,7 +79,7 @@ async function createEvent(
       estado: 'SP',
     })
   } else {
-    fields.online = JSON.stringify({
+    fields.onlineDetails = JSON.stringify({
       meetingUrl: 'https://meet.example.com/abc',
       extraDetails: 'Sala 1',
     })
@@ -183,7 +183,7 @@ describe('Events ("Rolê") E2E', () => {
     const boundary = '----X'
     const fields = {
       name: 'Sem capa', startsAt, durationMinutes: '60', type: 'online',
-      online: JSON.stringify({ meetingUrl: 'https://meet.example.com/abc' }),
+      onlineDetails: JSON.stringify({ meetingUrl: 'https://meet.example.com/abc' }),
     }
     const segments: Buffer[] = []
     for (const [k, v] of Object.entries(fields)) {

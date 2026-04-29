@@ -54,7 +54,7 @@ export const createEventSchema = z
     type: z.enum(eventTypes),
     ...baseEventFields,
     address: addressSchema.optional().nullable(),
-    online: onlineDetailsSchema.optional().nullable(),
+    onlineDetails: onlineDetailsSchema.optional().nullable(),
   })
   .superRefine((data, ctx) => {
     if (data.type === 'presencial') {
@@ -67,10 +67,10 @@ export const createEventSchema = z
       }
     }
     if (data.type === 'online') {
-      if (!data.online) {
+      if (!data.onlineDetails) {
         ctx.addIssue({
           code: 'custom',
-          path: ['online'],
+          path: ['onlineDetails'],
           message: 'MISSING_MEETING_URL_FOR_ONLINE',
         })
       }
@@ -93,7 +93,7 @@ export const updateEventSchema = z
     capacity: z.union([z.coerce.number().int().min(1), z.null()]).optional().nullable(),
     type: z.enum(eventTypes).optional(),
     address: addressSchema.optional().nullable(),
-    online: onlineDetailsSchema.optional().nullable(),
+    onlineDetails: onlineDetailsSchema.optional().nullable(),
   })
 
 export const cancelEventSchema = z
@@ -155,6 +155,6 @@ export const SENSITIVE_FIELDS = [
   'visibility',
   'capacity',
   'address',
-  'online',
+  'onlineDetails',
 ] as const
 export type SensitiveField = (typeof SENSITIVE_FIELDS)[number]

@@ -5,16 +5,26 @@ import type { CreateItemInput, UpdateItemInput } from './items.schema.js'
 import { listItemsQuerySchema } from './items.schema.js'
 import type { AccessTokenClaims } from '../auth/auth.service.js'
 
+const STATUS_BY_CODE: Record<string, number> = {
+  NOT_FOUND: 404,
+  REQUIRED_FIELD_MISSING: 422,
+  INVALID_FIELD_TYPE: 422,
+  INVALID_FIELD_VALUE: 422,
+  INVALID_RATING: 422,
+  STORAGE_NOT_CONFIGURED: 503,
+}
+
 export class ItemsController {
   constructor(private readonly service: ItemsService) {}
 
   private handleError(error: unknown, reply: FastifyReply) {
     if (error instanceof ItemsError) {
-      if (error.code === 'NOT_FOUND') return reply.status(404).send({ error: 'Item não encontrado' })
-      if (error.code === 'REQUIRED_FIELD_MISSING') return reply.status(422).send({ error: 'Campo obrigatório ausente' })
-      if (error.code === 'INVALID_FIELD_TYPE') return reply.status(422).send({ error: 'Tipo de campo inválido' })
-      if (error.code === 'INVALID_FIELD_VALUE') return reply.status(422).send({ error: 'Valor inválido para campo select' })
-      if (error.code === 'INVALID_RATING') return reply.status(422).send({ error: 'Rating deve ser entre 1 e 5' })
+      const status = STATUS_BY_CODE[error.code] ?? 400
+      reply.request.log.warn(
+        { url: reply.request.url, method: reply.request.method, code: error.code, status },
+        'ItemsError',
+      )
+      return reply.status(status).send({ error: error.code })
     }
     throw error
   }

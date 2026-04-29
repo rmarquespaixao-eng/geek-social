@@ -95,7 +95,6 @@ import { SteamService } from './modules/integrations/steam/steam.service.js'
 import { SteamController, steamRoutes } from './modules/integrations/steam/steam.controller.js'
 import { ImportBatchFinalizationRepository } from './modules/integrations/steam/import-batch-finalization.repository.js'
 import { createSteamImportGameWorker } from './shared/infra/jobs/workers/steam-import-game.worker.js'
-import { createSteamEnrichGameWorker } from './shared/infra/jobs/workers/steam-enrich-game.worker.js'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 
@@ -483,14 +482,6 @@ export async function buildApp() {
       usersRepo: usersRepository,
       storage: storageService,
       emitter: importEmitter,
-    })
-    await jobsQueue.registerWorker('steam.import-game', importHandler, { teamConcurrency: 4 })
-
-    const enrichHandler = createSteamEnrichGameWorker({
-      jobs: jobsQueue,
-      steamApi: steamApiClient,
-      itemsRepo: itemsRepository,
-      emitter: importEmitter,
       finalizationRepo,
       notifyOnDone: async ({ userId, collectionId, failed }) => {
         await notificationsService.notifySelf({
@@ -499,10 +490,12 @@ export async function buildApp() {
           entityId: collectionId,
         })
       },
-      batchStartedAtMs: () => Date.now(),
     })
-    // Throttle global do appdetails: 1 worker, 1 concorrente.
-    await jobsQueue.registerWorker('steam.enrich-game', enrichHandler, { teamConcurrency: 1 })
+    // teamConcurrency: 1 — pipeline serializado por jogo (info → appdetails →
+    // cover → DB). O appdetails da Steam tem rate limit (~200 calls / 5min);
+    // o `SteamApiClient.serializeAppDetailsCall` já garante 700ms entre
+    // chamadas (≈86/min), então 1 worker concorrente respeita o limite.
+    await jobsQueue.registerWorker('steam.import-game', importHandler, { teamConcurrency: 1 })
 
     // Events ("Rolê") — ativa o scheduler com a fila e registra workers de lembrete
     eventJobsScheduler.setQueue(jobsQueue)

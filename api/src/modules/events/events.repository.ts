@@ -237,6 +237,16 @@ export class EventsRepository {
     return row as EventRow
   }
 
+  /**
+   * Hard delete do evento. Cascade limpa `event_addresses`, `event_online_details`,
+   * `event_participants` e `event_invites` automaticamente (ver schema FKs).
+   * Notifications referenciando este event_id ficam órfãs (entityId é varchar
+   * sem FK) — frontend deve tolerar evento ausente ao renderizar a notificação.
+   */
+  async delete(id: string): Promise<void> {
+    await this.db.delete(events).where(eq(events.id, id))
+  }
+
   /** Finaliza eventos com `status='scheduled' AND ends_at < now()`. */
   async finalizePastEvents(): Promise<number> {
     const rows = await this.db

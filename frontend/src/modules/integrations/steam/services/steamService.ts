@@ -26,7 +26,7 @@ export type ImportStatus = {
   total: number
   completed: number
   failed: number
-  stage: 'importing' | 'enriching' | 'done'
+  stage: 'importing' | 'done'
   collectionId: string | null
   finishedAt: string | null
 }

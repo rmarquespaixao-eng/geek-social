@@ -3,7 +3,7 @@ import type {
 } from '../../../shared/contracts/steam-api.client.contract.js'
 import { SteamApiAuthError, SteamProfilePrivateError } from '../../../shared/contracts/steam-api.client.contract.js'
 
-const APPDETAILS_THROTTLE_MS = 1500
+const APPDETAILS_THROTTLE_MS = 700
 
 export class SteamApiClient implements ISteamApiClient {
   private lastAppDetailsCall = 0

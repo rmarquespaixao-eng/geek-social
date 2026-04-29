@@ -347,6 +347,35 @@ describe('Events ("Rolê") E2E', () => {
     expect(del.statusCode).toBe(204)
     const { notifications: notifs } = JSON.parse((await authedRequest(app, guest.token, 'GET', '/notifications')).body)
     expect(notifs.some((n: { type: string }) => n.type === 'event_cancelled')).toBe(true)
+    // Cancelado preserva o evento no banco com status='cancelled'
+    const detail = await authedRequest(app, host.token, 'GET', `/events/${ev.id}`)
+    expect(detail.statusCode).toBe(200)
+    expect(JSON.parse(detail.body).event.status).toBe('cancelled')
+  })
+
+  // ─── Hard delete ───────────────────────────────────────────────────
+  it('DELETE /events/:id/permanent — remove evento do banco e notifica inscritos', async () => {
+    const host = await createUser(app, { email: 'delh@test.com' })
+    const guest = await createUser(app, { email: 'delg@test.com' })
+    const ev = (await createEvent(app, host)).body
+    await authedRequest(app, guest.token, 'POST', `/events/${ev.id}/participants`)
+    const del = await authedRequest(app, host.token, 'DELETE', `/events/${ev.id}/permanent`)
+    expect(del.statusCode).toBe(204)
+    // Notificação enviada (status era 'scheduled')
+    const { notifications: notifs } = JSON.parse((await authedRequest(app, guest.token, 'GET', '/notifications')).body)
+    expect(notifs.some((n: { type: string }) => n.type === 'event_cancelled')).toBe(true)
+    // Evento sumiu de fato — GET retorna 404
+    const detail = await authedRequest(app, host.token, 'GET', `/events/${ev.id}`)
+    expect(detail.statusCode).toBe(404)
+  })
+
+  it('DELETE /events/:id/permanent — não-host devolve 403 NOT_HOST', async () => {
+    const host = await createUser(app, { email: 'delh2@test.com' })
+    const stranger = await createUser(app, { email: 'delstr@test.com' })
+    const ev = (await createEvent(app, host)).body
+    const del = await authedRequest(app, stranger.token, 'DELETE', `/events/${ev.id}/permanent`)
+    expect(del.statusCode).toBe(403)
+    expect(JSON.parse(del.body).error).toBe('NOT_HOST')
   })
 
   // ─── Convites ──────────────────────────────────────────────────────

@@ -15,7 +15,6 @@ export class PgBossAdapter implements IJobsQueue {
     if (this.started) return
     await this.boss.start()
     await this.boss.createQueue('steam.import-game')
-    await this.boss.createQueue('steam.enrich-game')
     await this.boss.createQueue('event.reminder_48h')
     await this.boss.createQueue('event.reminder_2h')
     this.started = true
@@ -55,30 +54,19 @@ export class PgBossAdapter implements IJobsQueue {
   async getBatchStats(importBatchId: string): Promise<BatchStats> {
     const db = this.boss.getDb()
     const { rows } = await db.executeSql(
-      `SELECT name, state, count(*)::int AS c
+      `SELECT state, count(*)::int AS c
        FROM pgboss.job
-       WHERE data->>'importBatchId' = $1
-       GROUP BY name, state`,
+       WHERE name = 'steam.import-game'
+         AND data->>'importBatchId' = $1
+       GROUP BY state`,
       [importBatchId],
     )
-    const stats: BatchStats = {
-      totalImports: 0, completedImports: 0, failedImports: 0,
-      totalEnriches: 0, completedEnriches: 0, failedEnriches: 0,
-    }
-    for (const row of rows as Array<{ name: string; state: string; c: number }>) {
-      const isImport = row.name === 'steam.import-game'
-      const isEnrich = row.name === 'steam.enrich-game'
-      if (!isImport && !isEnrich) continue
+    const stats: BatchStats = { totalImports: 0, completedImports: 0, failedImports: 0 }
+    for (const row of rows as Array<{ state: string; c: number }>) {
       const c = Number(row.c)
-      if (isImport) {
-        stats.totalImports += c
-        if (row.state === 'completed') stats.completedImports += c
-        if (row.state === 'failed' || row.state === 'cancelled') stats.failedImports += c
-      } else {
-        stats.totalEnriches += c
-        if (row.state === 'completed') stats.completedEnriches += c
-        if (row.state === 'failed' || row.state === 'cancelled') stats.failedEnriches += c
-      }
+      stats.totalImports += c
+      if (row.state === 'completed') stats.completedImports += c
+      if (row.state === 'failed' || row.state === 'cancelled') stats.failedImports += c
     }
     return stats
   }
@@ -88,7 +76,7 @@ export class PgBossAdapter implements IJobsQueue {
     const { rows } = await db.executeSql(
       `SELECT 1
        FROM pgboss.job
-       WHERE name IN ('steam.import-game', 'steam.enrich-game')
+       WHERE name = 'steam.import-game'
          AND state IN ('created', 'retry', 'active')
          AND data->>'userId' = $1
        LIMIT 1`,

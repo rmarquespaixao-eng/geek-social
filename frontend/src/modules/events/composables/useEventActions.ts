@@ -30,5 +30,6 @@ export function useEventActions() {
     confirm: (id: string): Promise<void | null> => run(() => store.confirm(id)),
     cancelEvent: (id: string, reason?: string): Promise<void | null> =>
       run(() => store.cancelEvent(id, reason)),
+    deleteEvent: (id: string): Promise<void | null> => run(() => store.deleteEvent(id)),
   }
 }

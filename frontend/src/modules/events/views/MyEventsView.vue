@@ -3,11 +3,13 @@ import { onMounted, ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import EventTicketCard from '../components/EventTicketCard.vue'
 import { useEventsStore } from '../stores/eventsStore'
+import { useEventActions } from '../composables/useEventActions'
 
 type Tab = 'attending' | 'hosted'
 
 const router = useRouter()
 const store = useEventsStore()
+const actions = useEventActions()
 const tab = ref<Tab>('attending')
 
 const events = computed(() =>
@@ -32,6 +34,23 @@ async function switchTab(t: Tab) {
 }
 function viewParticipants(id: string) {
   router.push(`/roles/${id}`)
+}
+
+// Cancelamento precisa de campo de motivo: redireciona pro detail.
+function onCancel(id: string) {
+  router.push(`/roles/${id}`)
+}
+
+// Excluir não precisa de input — modal inline + chamada direta.
+const deleteTargetId = ref<string | null>(null)
+function onDelete(id: string) {
+  deleteTargetId.value = id
+}
+async function confirmDelete() {
+  const id = deleteTargetId.value
+  if (!id) return
+  await actions.deleteEvent(id)
+  deleteTargetId.value = null
 }
 </script>
 
@@ -89,6 +108,8 @@ function viewParticipants(id: string) {
             :host-name="event.hostName"
             :cidade="event.cidade ?? undefined"
             @view-participants="viewParticipants"
+            @cancel="onCancel"
+            @delete="onDelete"
           />
         </div>
 
@@ -99,6 +120,40 @@ function viewParticipants(id: string) {
           {{ tab === 'attending' ? 'Você não está inscrito em nenhum Rolê.' : 'Você não criou nenhum Rolê.' }}
         </p>
       </section>
+    </div>
+
+    <!-- Delete confirm modal -->
+    <div
+      v-if="deleteTargetId"
+      class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+      data-testid="delete-modal"
+      @click.self="deleteTargetId = null"
+    >
+      <div class="w-full max-w-md bg-[#1e2038] rounded-xl p-5 space-y-3 border border-red-900/40">
+        <h3 class="text-sm font-bold text-slate-100">Excluir Rolê de vez?</h3>
+        <p class="text-xs text-slate-300 leading-relaxed">
+          O evento será apagado do sistema. Inscritos ainda ativos serão avisados que o rolê não vai mais
+          acontecer.
+          <span class="text-red-300 font-semibold">Essa ação não pode ser desfeita.</span>
+        </p>
+        <div class="flex justify-end gap-2 pt-1">
+          <button
+            type="button"
+            @click="deleteTargetId = null"
+            class="px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-400 hover:text-slate-200"
+          >
+            Voltar
+          </button>
+          <button
+            type="button"
+            data-testid="confirm-delete"
+            @click="confirmDelete"
+            class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-red-700 hover:bg-red-600 text-white"
+          >
+            Excluir definitivamente
+          </button>
+        </div>
+      </div>
     </div>
   </div>
 </template>

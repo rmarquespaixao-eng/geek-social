@@ -142,6 +142,10 @@ export class OffersController {
 function mapError(e: unknown, reply: FastifyReply) {
   if (e instanceof OffersError) {
     const status = STATUS_BY_CODE[e.code] ?? 400
+    reply.request.log.warn(
+      { url: reply.request.url, method: reply.request.method, code: e.code, status },
+      'OffersError',
+    )
     return reply.status(status).send({ error: e.code })
   }
   throw e

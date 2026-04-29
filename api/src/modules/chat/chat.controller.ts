@@ -18,28 +18,34 @@ import {
   setTemporarySchema,
 } from './chat.schema.js'
 
+const CHAT_STATUS_BY_CODE: Record<string, number> = {
+  NOT_FOUND: 404,
+  FORBIDDEN: 403,
+  ALREADY_EXISTS: 409,
+  ALREADY_MEMBER: 409,
+  NOT_PENDING: 409,
+  FRIENDS_USE_DM: 422,
+  NOT_FRIENDS: 422,
+  SELF_REQUEST: 422,
+  EMPTY_MESSAGE: 422,
+  BLOCKED: 403,
+  ATTACHMENT_TOO_LARGE: 413,
+  AUDIO_TOO_LONG: 400,
+  AUDIO_METADATA_REQUIRED: 400,
+  UNSUPPORTED_AUDIO_FORMAT: 400,
+  INVALID_WAVEFORM: 400,
+  NOT_DM: 422,
+  SOURCE_TEMPORARY: 422,
+}
+
 function handleChatError(error: unknown, reply: FastifyReply) {
   if (error instanceof ChatError) {
-    const statusMap: Record<string, number> = {
-      NOT_FOUND: 404,
-      FORBIDDEN: 403,
-      ALREADY_EXISTS: 409,
-      ALREADY_MEMBER: 409,
-      NOT_PENDING: 409,
-      FRIENDS_USE_DM: 422,
-      NOT_FRIENDS: 422,
-      SELF_REQUEST: 422,
-      EMPTY_MESSAGE: 422,
-      BLOCKED: 403,
-      ATTACHMENT_TOO_LARGE: 413,
-      AUDIO_TOO_LONG: 400,
-      AUDIO_METADATA_REQUIRED: 400,
-      UNSUPPORTED_AUDIO_FORMAT: 400,
-      INVALID_WAVEFORM: 400,
-      NOT_DM: 422,
-      SOURCE_TEMPORARY: 422,
-    }
-    return reply.status(statusMap[error.code] ?? 400).send({ error: error.code })
+    const status = CHAT_STATUS_BY_CODE[error.code] ?? 400
+    reply.request.log.warn(
+      { url: reply.request.url, method: reply.request.method, code: error.code, status },
+      'ChatError',
+    )
+    return reply.status(status).send({ error: error.code })
   }
   if (error instanceof ZodError) {
     return reply.status(400).send({ error: 'INVALID_INPUT', issues: error.issues })

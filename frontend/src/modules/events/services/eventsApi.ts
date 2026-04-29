@@ -94,8 +94,14 @@ export const eventsApi = {
     return data
   },
 
-  async deleteEvent(id: string, reason?: string): Promise<void> {
+  /** Cancela o rolê (soft): mantém no banco com `status='cancelled'`. */
+  async cancelEvent(id: string, reason?: string): Promise<void> {
     await api.delete(`/events/${id}`, { data: reason ? { reason } : undefined })
+  },
+
+  /** Hard delete: remove o rolê do banco. Notifica inscritos se ainda estava `scheduled`. */
+  async forceDeleteEvent(id: string): Promise<void> {
+    await api.delete(`/events/${id}/permanent`)
   },
 
   async listMyHosted(filters: { status?: string; cursor?: string | null; limit?: number } = {}): Promise<EventListPage> {

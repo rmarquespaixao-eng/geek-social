@@ -112,7 +112,8 @@ export const eventsRoutes: FastifyPluginAsyncZod<EventsRoutesOptions> = async (a
     schema: {
       operationId: 'events_cancel',
       tags: ['Events'],
-      summary: 'Cancelar rolê (host)',
+      summary: 'Cancelar rolê (host) — soft, mantém no banco com status=cancelled',
+      description: 'Marca o evento como `cancelled`, preserva no banco e notifica inscritos com `event_cancelled`. Para apagar de vez, use `DELETE /events/:id/permanent`.',
       security: [{ accessToken: [] }],
       params: idParam,
       body: cancelEventSchema,
@@ -120,6 +121,20 @@ export const eventsRoutes: FastifyPluginAsyncZod<EventsRoutesOptions> = async (a
     },
     preHandler: [authenticate],
     handler: eventsCtrl.cancel.bind(eventsCtrl),
+  })
+
+  app.delete('/:id/permanent', {
+    schema: {
+      operationId: 'events_delete_permanent',
+      tags: ['Events'],
+      summary: 'Excluir rolê de vez (host) — hard delete',
+      description: 'Hard delete: remove o evento + addresses/online/participants/invites por cascade. Limpa cover do S3 (best-effort). Se o evento ainda estava `scheduled` no momento da exclusão, notifica inscritos não-saídos com `event_cancelled` antes de remover.',
+      security: [{ accessToken: [] }],
+      params: idParam,
+      response: { 204: noContent },
+    },
+    preHandler: [authenticate],
+    handler: eventsCtrl.deletePermanent.bind(eventsCtrl),
   })
 
   // ── Participantes ──────────────────────────────────────────────

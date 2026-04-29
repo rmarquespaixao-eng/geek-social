@@ -158,23 +158,24 @@ onMounted(async () => {
   await refreshListings()
 })
 
-// Refresh silencioso (merge por id, sem loading/flicker) quando há import Steam ativo nesta coleção
+// Refresh silencioso (merge por id, sem loading/flicker) durante import Steam.
+// Pipeline unificado garante que cada progress event corresponde a 1 jogo já
+// totalmente preenchido (genre/dev/year inclusos), então refrescamos a cada
+// progresso. Debounce de 600ms agrupa rajadas e dá margem confortável dentro
+// do throttle de 1500ms do appdetails da Steam.
 const steam = useSteam()
 let lastRefetchedCompleted = 0
 let refreshScheduled = false
 watch(() => steam.currentImport, (curr) => {
   if (!curr || curr.collectionId !== collectionId.value) return
-  const isDone = curr.stage === 'done'
-  const enoughDelta = curr.completed - lastRefetchedCompleted >= 10
-  if (!isDone && !enoughDelta) return
+  if (curr.completed === lastRefetchedCompleted && curr.stage !== 'done') return
   if (refreshScheduled) return
   refreshScheduled = true
   lastRefetchedCompleted = curr.completed
-  // debounce simples: agrupa rajadas de eventos socket em 1 refresh por janela
   setTimeout(() => {
     refreshScheduled = false
     void itemsStore.refreshItems(collectionId.value)
-  }, 300)
+  }, 600)
 }, { deep: true })
 
 const collection = computed(() => collectionsStore.current)

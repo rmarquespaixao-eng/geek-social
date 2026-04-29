@@ -56,6 +56,11 @@ export type CancelEventResult = {
   notifiedUserIds: string[]
 }
 
+export type DeleteEventResult = {
+  notifiedUserIds: string[]
+  coverDeleted: boolean
+}
+
 export class EventsService {
   constructor(
     private readonly db: DatabaseClient,
@@ -437,6 +442,68 @@ export class EventsService {
     }
 
     return { event: updated, notifiedUserIds: participants.map(p => p.userId) }
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // Delete (hard) — host pode apagar o evento de vez
+  // ─────────────────────────────────────────────────────────────
+  /**
+   * Hard delete do evento, distinto de `cancelEvent` (que só vira status='cancelled').
+   * Diferenças:
+   *  - Remove do banco (cascade → participants, invites, address/online).
+   *  - Limpa a cover do S3 (best-effort, não falha se erro).
+   *  - Cancela jobs de lembrete pendentes.
+   *  - Notifica participantes não-saídos só se o evento ainda estava `scheduled`
+   *    (cancelled já foi notificado antes; ended já passou).
+   */
+  async deleteEvent(userId: string, eventId: string): Promise<DeleteEventResult> {
+    const existing = await this.repo.findById(eventId)
+    if (!existing) throw new EventsError('EVENT_NOT_FOUND')
+    if (existing.hostUserId !== userId) throw new EventsError('NOT_HOST')
+
+    // Notificações ANTES da exclusão — só pra evento ainda ativo. Nesse caso
+    // os destinatários precisam saber que o rolê não vai mais acontecer; reaproveita
+    // o tipo `event_cancelled` (semântica idêntica do ponto de vista do participante).
+    const notifiedUserIds: string[] = []
+    if (existing.status === 'scheduled') {
+      const participants = await this.repo.findAllNonLeftParticipants(eventId)
+      if (this.notificationsService) {
+        for (const p of participants) {
+          await this.notificationsService
+            .notifySelf({
+              userId: p.userId,
+              type: 'event_cancelled',
+              entityId: eventId,
+            })
+            .catch(() => {})
+        }
+      }
+      notifiedUserIds.push(...participants.map(p => p.userId))
+    }
+
+    // Cancela jobs de lembrete pendentes (best-effort).
+    if (this.jobsScheduler) {
+      await this.jobsScheduler.cancelRemindersForEvent(eventId).catch(() => {})
+    }
+
+    // Hard delete (cascade)
+    await this.repo.delete(eventId)
+
+    // Best-effort: limpa cover do S3.
+    let coverDeleted = false
+    if (this.storageService && existing.coverUrl) {
+      const key = this.storageService.keyFromUrl(existing.coverUrl)
+      if (key) {
+        try {
+          await this.storageService.delete(key)
+          coverDeleted = true
+        } catch {
+          // ignora — bucket pode estar fora, ou cover já foi removido
+        }
+      }
+    }
+
+    return { notifiedUserIds, coverDeleted }
   }
 
   // ─────────────────────────────────────────────────────────────

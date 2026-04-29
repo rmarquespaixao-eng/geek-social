@@ -1,6 +1,5 @@
 export type JobName =
   | 'steam.import-game'
-  | 'steam.enrich-game'
   | 'event.reminder_48h'
   | 'event.reminder_2h'
 
@@ -21,9 +20,6 @@ export type BatchStats = {
   totalImports: number
   completedImports: number
   failedImports: number
-  totalEnriches: number
-  completedEnriches: number
-  failedEnriches: number
 }
 
 export interface IJobsQueue {

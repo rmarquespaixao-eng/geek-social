@@ -4,13 +4,39 @@ import type { ISteamApiClient, SteamOwnedGame } from '../../../contracts/steam-a
 import type { IItemRepository } from '../../../contracts/item.repository.contract.js'
 import type { IStorageService } from '../../../contracts/storage.service.contract.js'
 import type { IImportProgressEmitter } from '../../../contracts/import-progress.emitter.contract.js'
-import type { ImportGameJobPayload, EnrichGameJobPayload } from '../jobs.types.js'
+import type { IImportBatchFinalizationRepository } from '../../../contracts/import-batch-finalization.repository.contract.js'
+import type { ImportGameJobPayload } from '../jobs.types.js'
 import type { CollectionsRepository } from '../../../../modules/collections/collections.repository.js'
 import type { UsersRepository } from '../../../../modules/users/users.repository.js'
+import { mapSteamGenreToPtBr } from '../../../../modules/integrations/steam/steam-genre.mapper.js'
 
 const SNAPSHOT_TTL_MS = 30 * 60 * 1000
 
 type SnapshotCache = Map<string, { games: Map<number, SteamOwnedGame>; expiresAt: number }>
+
+/**
+ * Início (timestamp) de cada batch — usado pra calcular durationMs no done.
+ * O `recordBatchStartedAt` é chamado no primeiro job que toca o batch.
+ */
+const STARTED_AT = new Map<string, number>()
+
+export function recordBatchStartedAt(batchId: string): void {
+  if (!STARTED_AT.has(batchId)) STARTED_AT.set(batchId, Date.now())
+}
+
+export function getBatchStartedAt(batchId: string): number {
+  return STARTED_AT.get(batchId) ?? Date.now()
+}
+
+export function clearBatchStartedAt(batchId: string): void {
+  STARTED_AT.delete(batchId)
+}
+
+export type DoneNotifier = (params: {
+  userId: string
+  collectionId: string
+  failed: number
+}) => Promise<void>
 
 export type SteamImportGameWorkerDeps = {
   jobs: IJobsQueue
@@ -20,8 +46,19 @@ export type SteamImportGameWorkerDeps = {
   usersRepo: UsersRepository
   storage: IStorageService
   emitter: IImportProgressEmitter
+  finalizationRepo: IImportBatchFinalizationRepository
+  notifyOnDone: DoneNotifier
 }
 
+/**
+ * Worker unificado de importação Steam: traz nome+playtime+cover, busca
+ * appdetails, mapeia genre pra pt-BR, e grava o item completo em uma única
+ * passada. Ao mover pro próximo jogo, o anterior já está totalmente preenchido.
+ *
+ * Rate-limit: o `SteamApiClient.serializeAppDetailsCall` enfileira chamadas
+ * de appdetails com 1500ms entre cada uma globalmente — `teamConcurrency: 1`
+ * (ver `app.ts`) e essa fila garantem que nunca se passe do limite da Steam.
+ */
 export function createSteamImportGameWorker(deps: SteamImportGameWorkerDeps) {
   const snapshotCache: SnapshotCache = new Map()
 
@@ -46,8 +83,7 @@ export function createSteamImportGameWorker(deps: SteamImportGameWorkerDeps) {
     return map.get(payload.appId) ?? null
   }
 
-  async function processCover(itemId: string, appId: number, hadExisting: boolean): Promise<string | null> {
-    if (hadExisting) return null // não sobrescreve cover quando item já existia
+  async function processCover(itemId: string, appId: number): Promise<string | null> {
     const buf = await deps.steamApi.downloadCover(appId)
     if (!buf) return null
     const processed = await sharp(buf)
@@ -58,85 +94,120 @@ export function createSteamImportGameWorker(deps: SteamImportGameWorkerDeps) {
     return url
   }
 
-  async function emitImportingProgress(payload: ImportGameJobPayload, currentName: string) {
-    const stats = await deps.jobs.getBatchStats(payload.importBatchId)
-    // O próprio import-game ainda está `active` no pg-boss; conta +1 pra ele.
-    const completedImports = stats.completedImports + 1
-    // Reportamos APENAS o progresso da fase de importação (jogos baixados).
-    // O enriquecimento (gênero/ano/dev) roda em background e só notifica via push no fim.
-    deps.emitter.emitProgress(payload.userId, {
-      batchId: payload.importBatchId,
-      total: payload.expectedTotal,
-      completed: completedImports,
-      failed: stats.failedImports,
-      stage: completedImports < payload.expectedTotal ? 'importing' : 'enriching',
-      currentName,
-    })
-  }
-
   return async function handle(payload: ImportGameJobPayload): Promise<void> {
+    recordBatchStartedAt(payload.importBatchId)
+
     const user = await deps.usersRepo.findById(payload.userId)
-    if (!user || !user.steamId) {
-      // user desconectou Steam — silenciosamente desiste
-      return
-    }
+    if (!user || !user.steamId) return // user desconectou Steam — silenciosamente desiste
+
     const collection = await deps.collectionsRepo.findById(payload.collectionId)
-    if (!collection || collection.userId !== payload.userId) {
-      // coleção foi deletada ou movida
-      return
-    }
+    if (!collection || collection.userId !== payload.userId) return // coleção foi deletada/movida
 
     const info = await getGameInfo(payload)
     if (!info) return
+
+    // Rate-limited: 1500ms entre chamadas (ver SteamApiClient).
+    // Se appdetails falha (jogo delistado, 5xx) → details=null e seguimos sem genre/dev/year.
+    let details: Awaited<ReturnType<ISteamApiClient['getAppDetails']>> = null
+    try {
+      details = await deps.steamApi.getAppDetails(payload.appId)
+    } catch {
+      details = null
+    }
+
+    // Steam devolve genre em inglês — passa pelo mapper pra cair em uma opção
+    // pt-BR válida do select `genre` (ou 'Outro').
+    const enrichedFields: Record<string, unknown> = {}
+    if (details) {
+      const mappedGenre = mapSteamGenreToPtBr(details.genres[0])
+      if (mappedGenre) enrichedFields.genre = mappedGenre
+      const dev = details.developers[0]
+      if (dev) enrichedFields.developer = dev
+      const yearMatch = details.releaseDateRaw?.match(/\b(\d{4})\b/)
+      if (yearMatch) enrichedFields.release_year = Number(yearMatch[1])
+    }
 
     const existing = await deps.itemsRepo.findByCollectionAndAppId(payload.collectionId, payload.appId)
     let itemId: string
 
     if (existing) {
-      const updates: Record<string, unknown> = {}
-      const newFields = { ...existing.fields }
-      const currentPlaytime = Number(existing.fields['playtime_minutes'] ?? 0)
-      if (currentPlaytime !== info.playtimeForever) {
-        newFields['playtime_minutes'] = info.playtimeForever
-        updates.fields = newFields
+      // Re-import: preserva campos do usuário (rating/comment/status/completion_date)
+      // mas atualiza playtime e enriched fields (caso a Steam tenha mudado).
+      const mergedFields: Record<string, unknown> = {
+        ...existing.fields,
+        ...enrichedFields,
+        steam_appid: payload.appId,
+        playtime_minutes: info.playtimeForever,
       }
-      if (existing.name !== info.name && info.name) {
-        updates.name = info.name
-      }
-      if (Object.keys(updates).length > 0) {
-        await deps.itemsRepo.update(existing.id, updates)
-      }
+      const updates: { fields?: Record<string, unknown>; name?: string } = { fields: mergedFields }
+      if (info.name && existing.name !== info.name) updates.name = info.name
+      await deps.itemsRepo.update(existing.id, updates)
       itemId = existing.id
     } else {
+      // Item novo: já cria com tudo preenchido (incluindo genre/dev/year do enrich).
       const created = await deps.itemsRepo.create({
         collectionId: payload.collectionId,
         name: info.name || `App ${payload.appId}`,
         fields: {
+          ...enrichedFields,
           steam_appid: payload.appId,
           playtime_minutes: info.playtimeForever,
           status: 'Na fila',
         },
       })
       itemId = created.id
+
+      // Cover só pra item novo. Existing preserva a cover anterior (do user
+      // ou de import antigo) — não estourar storage com re-upload sem motivo.
+      const coverUrl = await processCover(itemId, payload.appId)
+      if (coverUrl) await deps.itemsRepo.update(itemId, { coverUrl })
     }
 
-    const coverUrl = await processCover(itemId, payload.appId, !!existing)
-    if (coverUrl) {
-      await deps.itemsRepo.update(itemId, { coverUrl })
-    }
+    // Progresso: o job atual ainda está `active` no pgboss; soma +1.
+    const stats = await deps.jobs.getBatchStats(payload.importBatchId)
+    const completedSoFar = stats.completedImports + 1
+    const isLast = completedSoFar + stats.failedImports >= payload.expectedTotal
 
-    const enrichPayload: EnrichGameJobPayload = {
+    deps.emitter.emitProgress(payload.userId, {
+      batchId: payload.importBatchId,
+      total: payload.expectedTotal,
+      completed: completedSoFar,
+      failed: stats.failedImports,
+      stage: isLast ? 'done' : 'importing',
+      currentName: info.name,
+    })
+
+    if (!isLast) return
+
+    // Último: tenta finalizar (apenas o "vencedor" da inserção emite done).
+    const failedGames = stats.failedImports
+    const importedGames = Math.max(0, payload.expectedTotal - failedGames)
+    const won = await deps.finalizationRepo.finalizeOnce({
+      batchId: payload.importBatchId,
       userId: payload.userId,
       collectionId: payload.collectionId,
-      itemId,
-      appId: payload.appId,
-      importBatchId: payload.importBatchId,
-      expectedTotal: payload.expectedTotal,
-      expectedTotalImports: payload.expectedTotal,
-      expectedTotalEnriches: payload.expectedTotal,
-    }
-    await deps.jobs.enqueue('steam.enrich-game', enrichPayload, { retryLimit: 3, retryDelay: 30 })
+      total: payload.expectedTotal,
+      imported: importedGames,
+      updated: 0,
+      failed: failedGames,
+    })
+    if (!won) return
 
-    await emitImportingProgress(payload, info.name)
+    const startedAt = getBatchStartedAt(payload.importBatchId)
+    deps.emitter.emitDone(payload.userId, {
+      batchId: payload.importBatchId,
+      total: payload.expectedTotal,
+      imported: importedGames,
+      updated: 0,
+      failed: failedGames,
+      collectionId: payload.collectionId,
+      durationMs: Date.now() - startedAt,
+    })
+    await deps.notifyOnDone({
+      userId: payload.userId,
+      collectionId: payload.collectionId,
+      failed: failedGames,
+    })
+    clearBatchStartedAt(payload.importBatchId)
   }
 }

@@ -215,11 +215,21 @@ export class ItemsService {
       throw new ItemsError('INVALID_RATING')
     }
 
+    // PUT é PATCH semântico em `fields`: merge com os fields existentes do
+    // item antes de validar e persistir. Sem isso (a) hidden/system fields
+    // como steam_appid sumiriam ao salvar; (b) qualquer required field não
+    // re-enviado pelo form dispara REQUIRED_FIELD_MISSING (422) mesmo com o
+    // valor já gravado.
+    let mergedFields: Record<string, unknown> | undefined
     if (input.fields !== undefined) {
-      this.validateFields(input.fields, collection.fieldSchema)
+      mergedFields = { ...item.fields, ...input.fields }
+      this.validateFields(mergedFields, collection.fieldSchema)
     }
 
-    return this.itemRepo.update(itemId, input)
+    return this.itemRepo.update(itemId, {
+      ...input,
+      ...(mergedFields !== undefined ? { fields: mergedFields } : {}),
+    })
   }
 
   async delete(userId: string, collectionId: string, itemId: string): Promise<void> {

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 
 vi.mock('sharp', () => ({
   default: vi.fn(() => ({
@@ -8,8 +8,10 @@ vi.mock('sharp', () => ({
   })),
 }))
 
-import { createSteamImportGameWorker } from '../../../../src/shared/infra/jobs/workers/steam-import-game.worker.js'
-import type { SteamImportGameWorkerDeps } from '../../../../src/shared/infra/jobs/workers/steam-import-game.worker.js'
+import {
+  createSteamImportGameWorker, clearBatchStartedAt,
+  type SteamImportGameWorkerDeps,
+} from '../../../../src/shared/infra/jobs/workers/steam-import-game.worker.js'
 import type { Item } from '../../../../src/shared/contracts/item.repository.contract.js'
 import type { User } from '../../../../src/shared/contracts/user.repository.contract.js'
 import type { ImportGameJobPayload } from '../../../../src/shared/infra/jobs/jobs.types.js'
@@ -45,21 +47,29 @@ function basePayload(overrides: Partial<ImportGameJobPayload> = {}): ImportGameJ
   }
 }
 
+const APP_DETAILS_HOLLOW = {
+  appId: APP_ID, type: 'game', name: 'Hollow Knight',
+  shortDescription: null, releaseDateRaw: '24 Feb, 2017',
+  developers: ['Team Cherry'], publishers: ['Team Cherry'],
+  genres: [{ id: '23', description: 'Indie' }],
+}
+
 function buildDeps(overrides: Partial<SteamImportGameWorkerDeps> = {}): SteamImportGameWorkerDeps {
   return {
     jobs: {
       enqueue: vi.fn().mockResolvedValue('job-id'),
       registerWorker: vi.fn(),
       getBatchStats: vi.fn().mockResolvedValue({
-        totalImports: 2, completedImports: 1, failedImports: 0,
-        totalEnriches: 0, completedEnriches: 0, failedEnriches: 0,
+        // Cenário "não-último": 1 outro completed (eu sou +1 active = 2 total expected)
+        totalImports: 2, completedImports: 0, failedImports: 0,
       }),
       hasActiveBatchForUser: vi.fn(),
+      cancelEventJobs: vi.fn(),
       start: vi.fn(), stop: vi.fn(),
     },
     steamApi: {
       getOwnedGames: vi.fn(),
-      getAppDetails: vi.fn(),
+      getAppDetails: vi.fn().mockResolvedValue(APP_DETAILS_HOLLOW),
       downloadCover: vi.fn().mockResolvedValue(Buffer.from('cover-bin')),
     },
     itemsRepo: {
@@ -69,6 +79,7 @@ function buildDeps(overrides: Partial<SteamImportGameWorkerDeps> = {}): SteamImp
       findByCollectionAndAppId: vi.fn().mockResolvedValue(null),
       findExistingSteamItemsForUser: vi.fn(),
       update: vi.fn().mockResolvedValue(makeItem()),
+      searchByCollection: vi.fn(),
       delete: vi.fn(),
     },
     collectionsRepo: {
@@ -85,16 +96,23 @@ function buildDeps(overrides: Partial<SteamImportGameWorkerDeps> = {}): SteamImp
       emitProgress: vi.fn(),
       emitDone: vi.fn(),
     },
+    finalizationRepo: {
+      finalizeOnce: vi.fn().mockResolvedValue(true),
+      findByBatchId: vi.fn(),
+    },
+    notifyOnDone: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   }
 }
 
-describe('steam-import-game worker', () => {
-  it('INSERT path: cria item, baixa cover, atualiza cover_url, enfileira enrich', async () => {
+describe('steam-import-game worker (unified pipeline)', () => {
+  it('INSERT path: cria item já com genre/dev/year preenchidos do appdetails', async () => {
     const deps = buildDeps()
     const handle = createSteamImportGameWorker(deps)
+    clearBatchStartedAt('b-1')
     await handle(basePayload())
 
+    expect(deps.steamApi.getAppDetails).toHaveBeenCalledWith(APP_ID)
     expect(deps.itemsRepo.create).toHaveBeenCalledWith(expect.objectContaining({
       collectionId: COL_ID,
       name: 'Hollow Knight',
@@ -102,87 +120,148 @@ describe('steam-import-game worker', () => {
         steam_appid: APP_ID,
         playtime_minutes: 2820,
         status: 'Na fila',
+        genre: 'Indie',
+        developer: 'Team Cherry',
+        release_year: 2017,
       }),
     }))
     expect(deps.steamApi.downloadCover).toHaveBeenCalledWith(APP_ID)
-    expect(deps.storage.upload).toHaveBeenCalledWith(
-      'items/new-item/cover.webp',
-      expect.any(Buffer),
-      'image/webp',
-    )
-    expect(deps.itemsRepo.update).toHaveBeenCalledWith('new-item', { coverUrl: 'https://s3/items/new-item/cover.webp' })
-    expect(deps.jobs.enqueue).toHaveBeenCalledWith(
-      'steam.enrich-game',
-      expect.objectContaining({ itemId: 'new-item', appId: APP_ID, importBatchId: 'b-1' }),
-      expect.any(Object),
-    )
-    expect(deps.emitter.emitProgress).toHaveBeenCalled()
+    expect(deps.itemsRepo.update).toHaveBeenCalledWith('new-item', {
+      coverUrl: 'https://s3/items/new-item/cover.webp',
+    })
   })
 
-  it('UPDATE path: detecta item existente por appId, atualiza só playtime/name', async () => {
+  it('mapeia genre em inglês pra pt-BR ("Action" → "Ação")', async () => {
+    const deps = buildDeps({
+      steamApi: {
+        getOwnedGames: vi.fn(),
+        getAppDetails: vi.fn().mockResolvedValue({
+          ...APP_DETAILS_HOLLOW,
+          genres: [{ id: '1', description: 'Action' }],
+        }),
+        downloadCover: vi.fn().mockResolvedValue(Buffer.from('cover')),
+      },
+    })
+    const handle = createSteamImportGameWorker(deps)
+    clearBatchStartedAt('b-1')
+    await handle(basePayload())
+
+    expect(deps.itemsRepo.create).toHaveBeenCalledWith(expect.objectContaining({
+      fields: expect.objectContaining({ genre: 'Ação' }),
+    }))
+  })
+
+  it('UPDATE path: preserva campos do usuário (rating/comment/status) e atualiza playtime + enriched', async () => {
     const deps = buildDeps()
     ;(deps.itemsRepo.findByCollectionAndAppId as ReturnType<typeof vi.fn>).mockResolvedValue(makeItem({
       id: 'existing-id',
       name: 'Old Name',
-      fields: { steam_appid: APP_ID, playtime_minutes: 100, rating: 5, comment: 'meu comment' },
+      fields: {
+        steam_appid: APP_ID, playtime_minutes: 100,
+        status: 'Zerado', completion_date: '2026-01-15',
+      },
+      rating: 5, comment: 'top',
     }))
     const handle = createSteamImportGameWorker(deps)
+    clearBatchStartedAt('b-1')
     await handle(basePayload())
 
     expect(deps.itemsRepo.create).not.toHaveBeenCalled()
-    expect(deps.itemsRepo.update).toHaveBeenCalledWith('existing-id', expect.objectContaining({
+    const updateCall = (deps.itemsRepo.update as ReturnType<typeof vi.fn>).mock.calls.find(c => c[0] === 'existing-id')
+    expect(updateCall).toBeDefined()
+    expect(updateCall![1]).toMatchObject({
       name: 'Hollow Knight',
       fields: expect.objectContaining({
         playtime_minutes: 2820,
         steam_appid: APP_ID,
-        rating: 5,
-        comment: 'meu comment', // preservado
+        status: 'Zerado', // preservado
+        completion_date: '2026-01-15', // preservado
+        genre: 'Indie',
+        developer: 'Team Cherry',
+        release_year: 2017,
       }),
-    }))
-    // Não deveria baixar cover novo (item já existia → preserva cover)
+    })
+    // Cover não é re-baixada quando item já existia
     expect(deps.steamApi.downloadCover).not.toHaveBeenCalled()
   })
 
-  it('cover null (downloadCover retorna null): segue sem cover', async () => {
+  it('appdetails retorna null: cria item só com snapshot básico (sem genre/dev/year)', async () => {
     const deps = buildDeps({
       steamApi: {
         getOwnedGames: vi.fn(),
-        getAppDetails: vi.fn(),
+        getAppDetails: vi.fn().mockResolvedValue(null),
+        downloadCover: vi.fn().mockResolvedValue(Buffer.from('cover')),
+      },
+    })
+    const handle = createSteamImportGameWorker(deps)
+    clearBatchStartedAt('b-1')
+    await handle(basePayload())
+
+    expect(deps.itemsRepo.create).toHaveBeenCalledWith(expect.objectContaining({
+      fields: {
+        steam_appid: APP_ID,
+        playtime_minutes: 2820,
+        status: 'Na fila',
+      },
+    }))
+  })
+
+  it('appdetails throws: tolera silenciosamente, cria item sem enrich', async () => {
+    const deps = buildDeps({
+      steamApi: {
+        getOwnedGames: vi.fn(),
+        getAppDetails: vi.fn().mockRejectedValue(new Error('STEAM_RATE_LIMIT')),
+        downloadCover: vi.fn().mockResolvedValue(Buffer.from('cover')),
+      },
+    })
+    const handle = createSteamImportGameWorker(deps)
+    clearBatchStartedAt('b-1')
+    await handle(basePayload())
+
+    expect(deps.itemsRepo.create).toHaveBeenCalled()
+    const created = (deps.itemsRepo.create as ReturnType<typeof vi.fn>).mock.calls[0][0]
+    expect(created.fields).not.toHaveProperty('genre')
+  })
+
+  it('cover null: cria item sem cover, sem chamar storage', async () => {
+    const deps = buildDeps({
+      steamApi: {
+        getOwnedGames: vi.fn(),
+        getAppDetails: vi.fn().mockResolvedValue(APP_DETAILS_HOLLOW),
         downloadCover: vi.fn().mockResolvedValue(null),
       },
     })
     const handle = createSteamImportGameWorker(deps)
+    clearBatchStartedAt('b-1')
     await handle(basePayload())
+
     expect(deps.itemsRepo.create).toHaveBeenCalled()
     expect(deps.storage.upload).not.toHaveBeenCalled()
-    // não chama update com coverUrl (mas pode ter chamado pra outras coisas — checamos que coverUrl não foi setado)
     const calls = (deps.itemsRepo.update as ReturnType<typeof vi.fn>).mock.calls
-    const coverCall = calls.find(c => c[1].coverUrl)
-    expect(coverCall).toBeUndefined()
+    expect(calls.find(c => c[1]?.coverUrl)).toBeUndefined()
   })
 
-  it('coleção deletada: não cria item, não enfileira enrich', async () => {
+  it('coleção deletada: não cria item nem chama appdetails', async () => {
     const deps = buildDeps({
-      collectionsRepo: {
-        findById: vi.fn().mockResolvedValue(null),
-      } as never,
+      collectionsRepo: { findById: vi.fn().mockResolvedValue(null) } as never,
     })
     const handle = createSteamImportGameWorker(deps)
+    clearBatchStartedAt('b-1')
     await handle(basePayload())
+
     expect(deps.itemsRepo.create).not.toHaveBeenCalled()
-    expect(deps.jobs.enqueue).not.toHaveBeenCalled()
+    expect(deps.steamApi.getAppDetails).not.toHaveBeenCalled()
   })
 
   it('user desconectou Steam (steamId null): não processa', async () => {
     const deps = buildDeps({
-      usersRepo: {
-        findById: vi.fn().mockResolvedValue(makeUser({ steamId: null })),
-      } as never,
+      usersRepo: { findById: vi.fn().mockResolvedValue(makeUser({ steamId: null })) } as never,
     })
     const handle = createSteamImportGameWorker(deps)
+    clearBatchStartedAt('b-1')
     await handle(basePayload())
+
     expect(deps.itemsRepo.create).not.toHaveBeenCalled()
-    expect(deps.jobs.enqueue).not.toHaveBeenCalled()
   })
 
   it('coleção pertence a outro user: não processa', async () => {
@@ -192,17 +271,93 @@ describe('steam-import-game worker', () => {
       } as never,
     })
     const handle = createSteamImportGameWorker(deps)
+    clearBatchStartedAt('b-1')
     await handle(basePayload())
+
     expect(deps.itemsRepo.create).not.toHaveBeenCalled()
   })
 
-  it('emite progresso após processar', async () => {
+  it('emite progresso "importing" quando ainda não é o último', async () => {
     const deps = buildDeps()
     const handle = createSteamImportGameWorker(deps)
-    await handle(basePayload())
+    clearBatchStartedAt('b-1')
+    await handle(basePayload({ expectedTotal: 5 }))
+
     expect(deps.emitter.emitProgress).toHaveBeenCalledWith(USER_ID, expect.objectContaining({
       batchId: 'b-1',
-      stage: expect.any(String),
+      stage: 'importing',
+      currentName: 'Hollow Knight',
+    }))
+    expect(deps.emitter.emitDone).not.toHaveBeenCalled()
+    expect(deps.finalizationRepo.finalizeOnce).not.toHaveBeenCalled()
+  })
+
+  it('último do batch: finaliza e emite done', async () => {
+    const deps = buildDeps({
+      jobs: {
+        enqueue: vi.fn(),
+        registerWorker: vi.fn(),
+        // Outro já completou; este vai ser o segundo (último)
+        getBatchStats: vi.fn().mockResolvedValue({
+          totalImports: 2, completedImports: 1, failedImports: 0,
+        }),
+        hasActiveBatchForUser: vi.fn(),
+        cancelEventJobs: vi.fn(),
+        start: vi.fn(), stop: vi.fn(),
+      },
+    })
+    const handle = createSteamImportGameWorker(deps)
+    clearBatchStartedAt('b-1')
+    await handle(basePayload())
+
+    expect(deps.finalizationRepo.finalizeOnce).toHaveBeenCalledWith(expect.objectContaining({
+      batchId: 'b-1', userId: USER_ID, collectionId: COL_ID, total: 2, failed: 0,
+    }))
+    expect(deps.emitter.emitDone).toHaveBeenCalledWith(USER_ID, expect.objectContaining({
+      batchId: 'b-1', collectionId: COL_ID, failed: 0,
+    }))
+    expect(deps.notifyOnDone).toHaveBeenCalledWith(expect.objectContaining({
+      userId: USER_ID, collectionId: COL_ID, failed: 0,
+    }))
+  })
+
+  it('último do batch mas finalizationRepo retorna false (perdeu race): não emite done', async () => {
+    const deps = buildDeps({
+      jobs: {
+        enqueue: vi.fn(),
+        registerWorker: vi.fn(),
+        getBatchStats: vi.fn().mockResolvedValue({
+          totalImports: 2, completedImports: 1, failedImports: 0,
+        }),
+        hasActiveBatchForUser: vi.fn(),
+        cancelEventJobs: vi.fn(),
+        start: vi.fn(), stop: vi.fn(),
+      },
+      finalizationRepo: {
+        finalizeOnce: vi.fn().mockResolvedValue(false),
+        findByBatchId: vi.fn(),
+      },
+    })
+    const handle = createSteamImportGameWorker(deps)
+    clearBatchStartedAt('b-1')
+    await handle(basePayload())
+
+    expect(deps.emitter.emitDone).not.toHaveBeenCalled()
+    expect(deps.notifyOnDone).not.toHaveBeenCalled()
+  })
+
+  it('progresso emitido inclui currentName e contadores corretos', async () => {
+    const deps = buildDeps()
+    const handle = createSteamImportGameWorker(deps)
+    clearBatchStartedAt('b-1')
+    await handle(basePayload({ expectedTotal: 10 }))
+
+    expect(deps.emitter.emitProgress).toHaveBeenCalledWith(USER_ID, expect.objectContaining({
+      batchId: 'b-1',
+      total: 10,
+      completed: 1, // 0 já completos + este (active +1)
+      failed: 0,
+      stage: 'importing',
       currentName: 'Hollow Knight',
     }))
   })

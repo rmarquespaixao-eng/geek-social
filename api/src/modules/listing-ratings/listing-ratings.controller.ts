@@ -24,6 +24,10 @@ export class ListingRatingsController {
   private handleError(error: unknown, reply: FastifyReply) {
     if (error instanceof ListingRatingsError) {
       const status = STATUS_BY_CODE[error.code] ?? 400
+      reply.request.log.warn(
+        { url: reply.request.url, method: reply.request.method, code: error.code, status },
+        'ListingRatingsError',
+      )
       return reply.status(status).send({ error: error.code })
     }
     throw error

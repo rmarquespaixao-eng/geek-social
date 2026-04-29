@@ -130,7 +130,7 @@ export const useEventsStore = defineStore('events', () => {
   }
 
   async function cancelEvent(eventId: string, reason?: string): Promise<void> {
-    await eventsApi.deleteEvent(eventId, reason)
+    await eventsApi.cancelEvent(eventId, reason)
     const cached = cache.get(eventId)
     if (cached) {
       cached.status = 'cancelled'
@@ -143,6 +143,15 @@ export const useEventsStore = defineStore('events', () => {
         e.cancellationReason = reason ?? null
       }
     }
+  }
+
+  /** Hard delete: remove o rolê do cache e das listas. */
+  async function deleteEvent(eventId: string): Promise<void> {
+    await eventsApi.forceDeleteEvent(eventId)
+    cache.delete(eventId)
+    discoverEvents.value = discoverEvents.value.filter(e => e.id !== eventId)
+    hostedEvents.value = hostedEvents.value.filter(e => e.id !== eventId)
+    attendingEvents.value = attendingEvents.value.filter(e => e.id !== eventId)
   }
 
   // ========== WebSocket reactivity ==========
@@ -219,6 +228,7 @@ export const useEventsStore = defineStore('events', () => {
     leave,
     confirm,
     cancelEvent,
+    deleteEvent,
     applyNotification,
   }
 })

@@ -38,6 +38,10 @@ const STATUS_BY_CODE: Record<string, number> = {
 export function mapEventsError(e: unknown, reply: FastifyReply) {
   if (e instanceof EventsError) {
     const status = STATUS_BY_CODE[e.code] ?? 400
+    reply.request.log.warn(
+      { url: reply.request.url, method: reply.request.method, code: e.code, status },
+      'EventsError',
+    )
     return reply.status(status).send({ error: e.code })
   }
   throw e
@@ -181,6 +185,16 @@ export class EventsController {
     }
     try {
       await this.service.cancelEvent(userId, request.params.id, parsed.data?.reason ?? null)
+      return reply.status(204).send()
+    } catch (e) {
+      return mapEventsError(e, reply)
+    }
+  }
+
+  async deletePermanent(request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) {
+    const { userId } = request.user as AccessTokenClaims
+    try {
+      await this.service.deleteEvent(userId, request.params.id)
       return reply.status(204).send()
     } catch (e) {
       return mapEventsError(e, reply)

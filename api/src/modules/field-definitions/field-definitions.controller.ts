@@ -4,6 +4,25 @@ import { FieldDefinitionsError } from './field-definitions.service.js'
 import type { CreateFieldDefinitionInput } from './field-definitions.schema.js'
 import type { AccessTokenClaims } from '../auth/auth.service.js'
 
+const STATUS_BY_CODE: Record<string, number> = {
+  NOT_FOUND: 404,
+  INVALID_NAME: 422,
+  FIELD_KEY_ALREADY_EXISTS: 409,
+  FIELD_IN_USE: 409,
+}
+
+function handleError(error: unknown, reply: FastifyReply) {
+  if (error instanceof FieldDefinitionsError) {
+    const status = STATUS_BY_CODE[error.code] ?? 400
+    reply.request.log.warn(
+      { url: reply.request.url, method: reply.request.method, code: error.code, status },
+      'FieldDefinitionsError',
+    )
+    return reply.status(status).send({ error: error.code })
+  }
+  throw error
+}
+
 export class FieldDefinitionsController {
   constructor(private readonly service: FieldDefinitionsService) {}
 
@@ -18,17 +37,7 @@ export class FieldDefinitionsController {
     try {
       const def = await this.service.create(userId, request.body)
       return reply.status(201).send(def)
-    } catch (error) {
-      if (error instanceof FieldDefinitionsError) {
-        if (error.code === 'INVALID_NAME') {
-          return reply.status(422).send({ error: 'Nome inválido' })
-        }
-        if (error.code === 'FIELD_KEY_ALREADY_EXISTS') {
-          return reply.status(409).send({ error: 'Você já tem um campo com esse nome' })
-        }
-      }
-      throw error
-    }
+    } catch (error) { return handleError(error, reply) }
   }
 
   async delete(request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) {
@@ -36,12 +45,6 @@ export class FieldDefinitionsController {
     try {
       await this.service.delete(userId, request.params.id)
       return reply.status(204).send()
-    } catch (error) {
-      if (error instanceof FieldDefinitionsError) {
-        if (error.code === 'NOT_FOUND') return reply.status(404).send({ error: 'Definição não encontrada' })
-        if (error.code === 'FIELD_IN_USE') return reply.status(409).send({ error: 'Campo está em uso em uma coleção' })
-      }
-      throw error
-    }
+    } catch (error) { return handleError(error, reply) }
   }
 }

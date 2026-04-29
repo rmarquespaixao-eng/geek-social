@@ -156,18 +156,19 @@ export class SteamController {
       })
     }
     const stats = await this.jobs.getBatchStats(batchId)
-    if (stats.totalImports === 0 && stats.totalEnriches === 0) {
+    if (stats.totalImports === 0) {
       return reply.status(404).send({ error: 'BATCH_NOT_FOUND' })
     }
-    // Para a UI, reportamos somente o progresso da fase de importação.
-    // Enrichment roda em background sem refletir no banner.
-    const stillImporting = stats.completedImports < stats.totalImports
+    // Pipeline unificado: cada job já enriquece o item antes de marcar como
+    // completed. Não existe mais fase 'enriching' separada.
+    const totalDone = stats.completedImports + stats.failedImports
+    const stillImporting = totalDone < stats.totalImports
     return reply.send({
       batchId,
       total: stats.totalImports,
       completed: stats.completedImports,
       failed: stats.failedImports,
-      stage: stillImporting ? 'importing' : 'enriching',
+      stage: stillImporting ? 'importing' : 'done',
       collectionId: null,
       finishedAt: null,
     })

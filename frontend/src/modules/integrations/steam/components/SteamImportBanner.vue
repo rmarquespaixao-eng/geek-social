@@ -41,12 +41,6 @@
             {{ current.completed }} jogos importados
             <span v-if="current.failed > 0" class="text-(--color-danger)">— {{ current.failed }} falharam</span>
           </p>
-          <p
-            v-if="current.backgroundEnrichment"
-            class="text-xs text-(--color-text-muted) mt-1.5 leading-snug"
-          >
-            Estamos buscando detalhes (gênero, ano, dev) em segundo plano. Avisaremos quando terminar.
-          </p>
           <div class="flex gap-2 mt-2">
             <button
               class="text-xs px-3 py-1.5 rounded-lg bg-(--color-accent-amber) text-(--color-bg-base) hover:brightness-110"

@@ -14,6 +14,7 @@ const actions = useEventActions()
 
 const showCancelModal = ref(false)
 const cancelReason = ref('')
+const showDeleteModal = ref(false)
 
 async function onSubscribe() {
   await actions.subscribe(eventId.value)
@@ -34,6 +35,12 @@ async function confirmCancel() {
   await actions.cancelEvent(eventId.value, cancelReason.value || undefined)
   showCancelModal.value = false
   await reload()
+}
+async function confirmDelete() {
+  await actions.deleteEvent(eventId.value)
+  showDeleteModal.value = false
+  // Evento sumiu — manda usuário pra lista; reload(); aqui daria 404.
+  router.replace('/roles')
 }
 </script>
 
@@ -62,6 +69,7 @@ async function confirmCancel() {
           @confirm="onConfirm"
           @edit="onEdit"
           @cancel="showCancelModal = true"
+          @delete="showDeleteModal = true"
         />
 
         <section class="bg-[#1e2038] rounded-2xl p-4 space-y-2" data-testid="event-description">
@@ -124,6 +132,10 @@ async function confirmCancel() {
     >
       <div class="w-full max-w-md bg-[#1e2038] rounded-xl p-5 space-y-3 border border-[#252640]">
         <h3 class="text-sm font-bold text-slate-100">Cancelar Rolê</h3>
+        <p class="text-xs text-slate-400">
+          O evento ficará marcado como cancelado, mas continua visível pra inscritos.
+          Pra remover de vez, use "Excluir Rolê".
+        </p>
         <textarea
           v-model="cancelReason"
           rows="3"
@@ -147,6 +159,40 @@ async function confirmCancel() {
             class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-red-500 hover:bg-red-400 text-white"
           >
             Cancelar Rolê
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Delete (hard) modal -->
+    <div
+      v-if="showDeleteModal"
+      class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+      data-testid="delete-modal"
+      @click.self="showDeleteModal = false"
+    >
+      <div class="w-full max-w-md bg-[#1e2038] rounded-xl p-5 space-y-3 border border-red-900/40">
+        <h3 class="text-sm font-bold text-slate-100">Excluir Rolê de vez?</h3>
+        <p class="text-xs text-slate-300 leading-relaxed">
+          O evento será apagado do sistema. Inscritos ainda ativos serão avisados que o rolê não vai mais
+          acontecer.
+          <span class="text-red-300 font-semibold">Essa ação não pode ser desfeita.</span>
+        </p>
+        <div class="flex justify-end gap-2 pt-1">
+          <button
+            type="button"
+            @click="showDeleteModal = false"
+            class="px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-400 hover:text-slate-200"
+          >
+            Voltar
+          </button>
+          <button
+            type="button"
+            data-testid="confirm-delete"
+            @click="confirmDelete"
+            class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-red-700 hover:bg-red-600 text-white"
+          >
+            Excluir definitivamente
           </button>
         </div>
       </div>

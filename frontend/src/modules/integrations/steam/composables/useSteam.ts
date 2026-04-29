@@ -10,7 +10,7 @@ export type ImportProgressEvent = {
   total: number
   completed: number
   failed: number
-  stage: 'importing' | 'enriching' | 'done'
+  stage: 'importing' | 'done'
   currentName?: string
 }
 
@@ -31,11 +31,6 @@ export type CurrentImport = {
   completed: number
   failed: number
   stage: 'importing' | 'done'
-  /**
-   * Quando true, a importação visual terminou mas o enriquecimento (gênero/ano/dev)
-   * continua processando em background. O usuário será notificado via push quando finalizar.
-   */
-  backgroundEnrichment: boolean
   currentName: string | null
 }
 
@@ -99,7 +94,6 @@ export const useSteam = defineStore('steam', () => {
       completed: 0,
       failed: 0,
       stage: 'importing',
-      backgroundEnrichment: false,
       currentName: null,
     }
     return result
@@ -108,27 +102,21 @@ export const useSteam = defineStore('steam', () => {
   async function fetchImportStatus(batchId: string): Promise<void> {
     try {
       const status = await steamService.getImportStatus(batchId)
-      // Backend reporta `enriching` quando a importação terminou mas o enrichment
-      // ainda está rodando — para o usuário, isso já conta como "concluído".
-      const visualStage: 'importing' | 'done' = status.stage === 'importing' ? 'importing' : 'done'
-      const backgroundEnrichment = status.stage === 'enriching'
       if (!currentImport.value || currentImport.value.batchId !== batchId) {
         currentImport.value = {
           batchId: status.batchId,
           collectionId: status.collectionId ?? '',
           total: status.total,
-          completed: visualStage === 'done' ? status.total : status.completed,
+          completed: status.completed,
           failed: status.failed,
-          stage: visualStage,
-          backgroundEnrichment,
+          stage: status.stage,
           currentName: null,
         }
       } else {
         currentImport.value.total = status.total
-        currentImport.value.completed = visualStage === 'done' ? status.total : status.completed
+        currentImport.value.completed = status.completed
         currentImport.value.failed = status.failed
-        currentImport.value.stage = visualStage
-        currentImport.value.backgroundEnrichment = backgroundEnrichment
+        currentImport.value.stage = status.stage
         if (status.collectionId) currentImport.value.collectionId = status.collectionId
       }
     } catch {
@@ -141,36 +129,27 @@ export const useSteam = defineStore('steam', () => {
   }
 
   function handleProgress(payload: ImportProgressEvent): void {
-    // Backend manda stage='enriching' assim que o último import termina.
-    // Para o usuário, isso já conta como "concluído" (visualmente).
-    const visualStage: 'importing' | 'done' = payload.stage === 'importing' ? 'importing' : 'done'
-    const backgroundEnrichment = payload.stage === 'enriching'
-
     if (!currentImport.value) {
       currentImport.value = {
         batchId: payload.batchId,
         collectionId: '',
         total: payload.total,
-        completed: visualStage === 'done' ? payload.total : payload.completed,
+        completed: payload.completed,
         failed: payload.failed,
-        stage: visualStage,
-        backgroundEnrichment,
+        stage: payload.stage,
         currentName: payload.currentName ?? null,
       }
       return
     }
     if (currentImport.value.batchId !== payload.batchId) return
     currentImport.value.total = payload.total
-    currentImport.value.completed = visualStage === 'done' ? payload.total : payload.completed
+    currentImport.value.completed = payload.completed
     currentImport.value.failed = payload.failed
-    currentImport.value.stage = visualStage
-    currentImport.value.backgroundEnrichment = backgroundEnrichment
+    currentImport.value.stage = payload.stage
     if (payload.currentName) currentImport.value.currentName = payload.currentName
   }
 
   function handleDone(payload: ImportDoneEvent): void {
-    // Quando o `done` real chega (enrichment finalizado), o banner pode já ter
-    // sido fechado — apenas atualizamos contagens caso ainda esteja visível.
     if (!currentImport.value || currentImport.value.batchId !== payload.batchId) {
       currentImport.value = {
         batchId: payload.batchId,
@@ -179,7 +158,6 @@ export const useSteam = defineStore('steam', () => {
         completed: payload.imported,
         failed: payload.failed,
         stage: 'done',
-        backgroundEnrichment: false,
         currentName: null,
       }
       return
@@ -189,7 +167,6 @@ export const useSteam = defineStore('steam', () => {
     currentImport.value.completed = payload.imported
     currentImport.value.failed = payload.failed
     currentImport.value.stage = 'done'
-    currentImport.value.backgroundEnrichment = false
   }
 
   function init(): void {

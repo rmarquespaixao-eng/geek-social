@@ -22,6 +22,7 @@ const emit = defineEmits<{
   confirm: [id: string]
   edit: [id: string]
   cancel: [id: string]
+  delete: [id: string]
   'view-participants': [id: string]
 }>()
 
@@ -233,6 +234,17 @@ const variantClass: Record<'primary' | 'danger' | 'ghost', string> = {
             class="px-2.5 py-1 rounded-md text-[11px] font-semibold bg-red-500/15 hover:bg-red-500/25 text-red-400 border border-red-500/30 transition-colors"
           >
             Cancelar Rolê
+          </button>
+
+          <button
+            v-if="isHost"
+            type="button"
+            data-testid="delete-event"
+            @click="emit('delete', event.id)"
+            class="px-2.5 py-1 rounded-md text-[11px] font-semibold bg-red-700/20 hover:bg-red-700/30 text-red-300 border border-red-700/40 transition-colors"
+            title="Apagar este rolê de vez. Inscritos ainda ativos serão avisados."
+          >
+            Excluir Rolê
           </button>
         </div>
       </div>

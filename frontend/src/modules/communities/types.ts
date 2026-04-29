@@ -32,7 +32,7 @@ export interface CommunitySummary {
   iconUrl: string
   coverUrl: string
   visibility: CommunityVisibility
-  ownerId: string
+  ownerId: string | null
   memberCount: number
   topicCount: number
   rules: string | null

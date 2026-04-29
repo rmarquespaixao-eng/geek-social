@@ -149,8 +149,15 @@ export function serializeEventDetail(
  * Para listagens (`GET /events`, `/me/hosted`, `/me/attending`) o repo entrega
  * apenas EventRow (sem joins de host/counts/address) — montamos um summary
  * "leve" preenchendo os campos opcionais com defaults seguros para o frontend.
+ *
+ * `viewerParticipation`, quando passado, hidrata `iAmIn` para que a UI saiba
+ * que o viewer já está inscrito em cada evento da lista (evita o caso do card
+ * mostrar "Inscrever-se" depois do user já ter se inscrito).
  */
-export function serializeEventRowAsSummary(row: EventRow): ApiEventSummary {
+export function serializeEventRowAsSummary(
+  row: EventRow,
+  viewerParticipation: ParticipantRow | null = null,
+): ApiEventSummary {
   return {
     id: row.id,
     hostUserId: row.hostUserId,
@@ -174,6 +181,6 @@ export function serializeEventRowAsSummary(row: EventRow): ApiEventSummary {
     confirmedCount: 0,
     waitlistCount: 0,
     cidade: null,
-    iAmIn: null,
+    iAmIn: toViewerParticipation(viewerParticipation),
   }
 }

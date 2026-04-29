@@ -119,8 +119,14 @@ export class EventsController {
     const q = listEventsQuerySchema.safeParse(request.query)
     if (!q.success) return reply.status(400).send({ error: 'INVALID_QUERY' })
     const result = await this.service.listEvents(userId, q.data)
+    const viewerParts = await this.service.loadViewerParticipations(
+      userId,
+      result.events.map(e => e.id),
+    )
     return reply.send({
-      events: result.events.map(serializeEventRowAsSummary),
+      events: result.events.map(e =>
+        serializeEventRowAsSummary(e, viewerParts.get(e.id) ?? null),
+      ),
       nextCursor: result.nextCursor,
     })
   }
@@ -181,8 +187,14 @@ export class EventsController {
     const q = myEventsQuerySchema.safeParse(request.query)
     if (!q.success) return reply.status(400).send({ error: 'INVALID_QUERY' })
     const result = await this.service.listHosted(userId, q.data)
+    const viewerParts = await this.service.loadViewerParticipations(
+      userId,
+      result.events.map(e => e.id),
+    )
     return reply.send({
-      events: result.events.map(serializeEventRowAsSummary),
+      events: result.events.map(e =>
+        serializeEventRowAsSummary(e, viewerParts.get(e.id) ?? null),
+      ),
       nextCursor: result.nextCursor,
     })
   }
@@ -192,8 +204,14 @@ export class EventsController {
     const q = myEventsQuerySchema.safeParse(request.query)
     if (!q.success) return reply.status(400).send({ error: 'INVALID_QUERY' })
     const result = await this.service.listAttending(userId, q.data)
+    const viewerParts = await this.service.loadViewerParticipations(
+      userId,
+      result.events.map(e => e.id),
+    )
     return reply.send({
-      events: result.events.map(serializeEventRowAsSummary),
+      events: result.events.map(e =>
+        serializeEventRowAsSummary(e, viewerParts.get(e.id) ?? null),
+      ),
       nextCursor: result.nextCursor,
     })
   }

@@ -204,6 +204,34 @@ export class ParticipantsRepository {
     }))
   }
 
+  /**
+   * Carrega de uma vez a participação do viewer em vários eventos.
+   * Retorna apenas registros não-left, mapeados por eventId.
+   * Usado pelas listagens para preencher `iAmIn`.
+   */
+  async findActiveByUserAndEvents(
+    userId: string,
+    eventIds: string[],
+  ): Promise<Map<string, ParticipantRow>> {
+    if (eventIds.length === 0) return new Map()
+    const rows = await this.db
+      .select()
+      .from(eventParticipants)
+      .where(
+        and(
+          eq(eventParticipants.userId, userId),
+          inArray(eventParticipants.eventId, eventIds),
+          inArray(
+            eventParticipants.status,
+            ['subscribed', 'confirmed', 'waitlist'] as ParticipantStatus[],
+          ),
+        ),
+      )
+    const out = new Map<string, ParticipantRow>()
+    for (const r of rows as ParticipantRow[]) out.set(r.eventId, r)
+    return out
+  }
+
   /** Verifica se o user está participando ativamente de um evento. */
   async findUserActiveEventsInRange(
     userId: string,

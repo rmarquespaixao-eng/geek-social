@@ -205,6 +205,17 @@ export class EventsService {
     return this.repo.findUpcomingByUser(userId, query)
   }
 
+  /**
+   * Carrega em batch a participação ativa do viewer em uma lista de eventos.
+   * Usado pelos endpoints de listagem para hidratar `iAmIn` em cada card.
+   */
+  async loadViewerParticipations(
+    viewerId: string,
+    eventIds: string[],
+  ): Promise<Map<string, ParticipantRow>> {
+    return this.participantsRepo.findActiveByUserAndEvents(viewerId, eventIds)
+  }
+
   // ─────────────────────────────────────────────────────────────
   // Visibility check (helper)
   // ─────────────────────────────────────────────────────────────

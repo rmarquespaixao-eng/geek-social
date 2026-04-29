@@ -3,8 +3,10 @@ import { z } from 'zod'
 export const createItemSchema = z.object({
   name: z.string().min(1).max(200),
   fields: z.record(z.string(), z.unknown()).default({}),
-  rating: z.number().int().min(1).max(5).optional(),
-  comment: z.string().max(2000).optional(),
+  // Frontend (ItemFormView) envia explicitamente `null` para "não preenchido",
+  // então campos opcionais aqui também precisam aceitar null.
+  rating: z.number().int().min(1).max(5).nullable().optional(),
+  comment: z.string().max(2000).nullable().optional(),
   shareToFeed: z.boolean().default(false),
 })
 

@@ -5,6 +5,7 @@ import fastifyMultipart from '@fastify/multipart'
 import fastifyCors from '@fastify/cors'
 import fastifySwagger from '@fastify/swagger'
 import {
+  hasZodFastifySchemaValidationErrors,
   jsonSchemaTransform,
   serializerCompiler,
   validatorCompiler,
@@ -106,6 +107,33 @@ export async function buildApp() {
 
   app.setValidatorCompiler(validatorCompiler)
   app.setSerializerCompiler(serializerCompiler)
+
+  // Centraliza o tratamento de erros de validação Zod das rotas:
+  // (1) responde com `{ error: 'INVALID_INPUT', issues: [...] }` para o frontend
+  //     poder exibir o motivo, em vez do "Bad Request"/"Unprocessable Entity"
+  //     genérico do Fastify;
+  // (2) loga os issues no console do server, facilitando o diagnóstico de 4xx
+  //     em qualquer endpoint sem ter que abrir DevTools cliente.
+  app.setErrorHandler((error, request, reply) => {
+    if (hasZodFastifySchemaValidationErrors(error)) {
+      const issues = error.validation.map(v => ({
+        path: v.instancePath || v.params?.issue?.path,
+        message: v.message,
+        keyword: v.keyword,
+        params: v.params,
+      }))
+      request.log.warn(
+        { url: request.url, method: request.method, issues },
+        'Zod validation failed',
+      )
+      return reply.status(400).send({ error: 'INVALID_INPUT', issues })
+    }
+    request.log.error({ err: error, url: request.url }, 'Unhandled error')
+    if (error.statusCode && error.statusCode >= 400 && error.statusCode < 500) {
+      return reply.status(error.statusCode).send({ error: error.message })
+    }
+    return reply.status(500).send({ error: 'INTERNAL_ERROR' })
+  })
 
   await app.register(fastifySwagger, {
     openapi: {

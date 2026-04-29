@@ -2,7 +2,8 @@ import { z } from 'zod'
 
 export const createCollectionSchema = z.object({
   name: z.string().min(1).max(100),
-  description: z.string().max(500).optional(),
+  // Frontend manda `null` quando o campo é limpo — aceita ambos.
+  description: z.string().max(500).nullable().optional(),
   type: z.enum(['games', 'books', 'cardgames', 'boardgames', 'custom']),
   visibility: z.enum(['public', 'private', 'friends_only']).default('public'),
   autoShareToFeed: z.boolean().optional(),
@@ -11,7 +12,7 @@ export const createCollectionSchema = z.object({
 
 export const updateCollectionSchema = z.object({
   name: z.string().min(1).max(100).optional(),
-  description: z.string().max(500).optional(),
+  description: z.string().max(500).nullable().optional(),
   visibility: z.enum(['public', 'private', 'friends_only']).optional(),
   autoShareToFeed: z.boolean().optional(),
 })

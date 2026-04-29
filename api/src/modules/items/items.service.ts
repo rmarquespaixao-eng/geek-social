@@ -100,7 +100,7 @@ export class ItemsService {
   async create(userId: string, collectionId: string, input: CreateItemInput): Promise<Item> {
     const collection = await this.assertCollectionOwnership(userId, collectionId)
 
-    if (input.rating !== undefined && (input.rating < 1 || input.rating > 5)) {
+    if (input.rating != null && (input.rating < 1 || input.rating > 5)) {
       throw new ItemsError('INVALID_RATING')
     }
 

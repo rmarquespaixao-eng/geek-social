@@ -150,6 +150,36 @@ const router = createRouter({
       component: () => import('@/modules/events/views/MyEventsView.vue'),
       meta: { requiresAuth: true },
     },
+    // ── Communities ──────────────────────────────────────────────────────────
+    {
+      path: '/comunidades',
+      name: 'community-discover',
+      component: () => import('@/modules/communities/views/CommunityDiscoverView.vue'),
+    },
+    {
+      path: '/comunidades/nova',
+      name: 'community-create',
+      component: () => import('@/modules/communities/views/CommunityCreateView.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/comunidades/:slug',
+      name: 'community-detail',
+      component: () => import('@/modules/communities/views/CommunityDetailView.vue'),
+    },
+    {
+      path: '/comunidades/:slug/editar',
+      name: 'community-edit',
+      component: () => import('@/modules/communities/views/CommunityEditView.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/minhas-comunidades',
+      name: 'my-communities',
+      component: () => import('@/modules/communities/views/MyCommunitiesView.vue'),
+      meta: { requiresAuth: true },
+    },
+    // ─────────────────────────────────────────────────────────────────────────
     {
       path: '/marketplace',
       redirect: '/vitrine',

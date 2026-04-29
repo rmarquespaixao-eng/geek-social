@@ -10,7 +10,7 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  submit: [payload: CreateCommunityPayload, cover: File, icon: File]
+  submit: [payload: CreateCommunityPayload, cover: File | null, icon: File | null]
   cancel: []
 }>()
 
@@ -96,14 +96,12 @@ function onSubmit() {
     iconError.value = 'Ícone obrigatório.'
     return
   }
-  // In edit mode, files are optional — caller must handle nulls.
-  // For create, both are required and guaranteed non-null here.
-  if (!isEditMode.value) {
-    emit('submit', { name: name.value, description: description.value, category: category.value, visibility: visibility.value }, cover.value!, icon.value!)
-  } else {
-    // Edit: pass dummy files if not replaced — caller checks isEditMode and uses separate update path.
-    emit('submit', { name: name.value, description: description.value, category: category.value, visibility: visibility.value }, cover.value ?? new File([], ''), icon.value ?? new File([], ''))
-  }
+  emit(
+    'submit',
+    { name: name.value, description: description.value, category: category.value, visibility: visibility.value },
+    cover.value ?? null,
+    icon.value ?? null,
+  )
 }
 </script>
 

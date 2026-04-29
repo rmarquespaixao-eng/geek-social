@@ -7,8 +7,8 @@ import type { CreateCommunityPayload } from '../types'
 const router = useRouter()
 const actions = useCommunityActions()
 
-async function onSubmit(payload: CreateCommunityPayload, cover: File, icon: File) {
-  // create() navigates to /comunidades/:slug on success.
+async function onSubmit(payload: CreateCommunityPayload, cover: File | null, icon: File | null) {
+  if (!cover || !icon) return
   await actions.create(payload, cover, icon)
 }
 </script>

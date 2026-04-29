@@ -16,12 +16,9 @@ const actions = useCommunityActions()
 // Guard: only owner may access this view. Router does not enforce role — we do it here.
 const isOwner = computed(() => viewerMembership.value?.role === 'owner')
 
-async function onSubmit(payload: CreateCommunityPayload, cover: File, icon: File) {
+async function onSubmit(payload: CreateCommunityPayload, cover: File | null, icon: File | null) {
   if (!community.value) return
-  // Pass files only if user picked new ones (non-empty File).
-  const newCover = cover.size > 0 ? cover : null
-  const newIcon = icon.size > 0 ? icon : null
-  await actions.update(community.value.id, payload, newCover, newIcon)
+  await actions.update(community.value.id, payload, cover, icon)
   if (!actions.error.value) {
     router.replace(`/comunidades/${community.value.slug}`)
   }

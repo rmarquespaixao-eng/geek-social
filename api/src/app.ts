@@ -88,6 +88,15 @@ import { InvitesService } from './modules/events/invites.service.js'
 import { EventJobsScheduler } from './modules/events/jobs/event-jobs.scheduler.js'
 import { eventsRoutes } from './modules/events/events.routes.js'
 import { communitiesRoutes } from './modules/communities/communities.routes.js'
+import { CommunitiesRepository } from './modules/communities/communities.repository.js'
+import { MembersRepository } from './modules/communities/members.repository.js'
+import { JoinRequestsRepository } from './modules/communities/join-requests.repository.js'
+import { TopicsRepository } from './modules/communities/topics.repository.js'
+import { AuditLogRepository } from './modules/communities/audit-log.repository.js'
+import { CommunitiesService } from './modules/communities/communities.service.js'
+import { MembersService } from './modules/communities/members.service.js'
+import { JoinRequestsService } from './modules/communities/join-requests.service.js'
+import { TopicsService } from './modules/communities/topics.service.js'
 import { createEventReminderWorker } from './modules/events/jobs/event-reminder.worker.js'
 import { runEventFinalize } from './modules/events/jobs/event-finalize.cron.js'
 import { SteamApiClient } from './modules/integrations/steam/steam.api.client.js'
@@ -450,7 +459,48 @@ export async function buildApp() {
   await app.register(marketplaceRoutes, { prefix: '/marketplace', listingsService })
   await app.register(listingRatingsRoutes, { prefix: '/ratings', listingRatingsService })
   await app.register(eventsRoutes, { prefix: '/events', eventsService, participantsService, invitesService })
-  await app.register(communitiesRoutes, { prefix: '/communities' })
+
+  // Communities
+  const communitiesRepository = new CommunitiesRepository(db)
+  const membersRepository = new MembersRepository(db)
+  const joinRequestsRepository = new JoinRequestsRepository(db)
+  const topicsRepository = new TopicsRepository(db)
+  const auditLogRepository = new AuditLogRepository(db)
+
+  const communitiesService = new CommunitiesService(
+    db,
+    communitiesRepository,
+    membersRepository,
+    auditLogRepository,
+    storageService,
+  )
+  const joinRequestsService = new JoinRequestsService(
+    db,
+    joinRequestsRepository,
+    membersRepository,
+    communitiesRepository,
+    auditLogRepository,
+  )
+  const membersService = new MembersService(
+    db,
+    membersRepository,
+    communitiesRepository,
+    joinRequestsService,
+  )
+  const topicsService = new TopicsService(
+    db,
+    topicsRepository,
+    postsRepository,
+    communitiesService,
+  )
+
+  await app.register(communitiesRoutes, {
+    prefix: '/communities',
+    communitiesService,
+    membersService,
+    joinRequestsService,
+    topicsService,
+  })
 
   // Steam integration (opcional — exige fila; STEAM_WEB_API_KEY pode estar vazia (link funciona, import falha com STEAM_AUTH_FAILED))
   if (env.JOBS_DATABASE_URL) {

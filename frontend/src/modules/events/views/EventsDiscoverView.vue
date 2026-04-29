@@ -104,17 +104,19 @@ function viewParticipants(id: string) {
       <section class="space-y-4" data-testid="events-list">
         <p v-if="loading && events.length === 0" class="text-slate-400 text-sm">Carregando…</p>
 
-        <EventTicketCard
-          v-for="event in events"
-          :key="event.id"
-          :event="event"
-          :host-name="event.hostName"
-          :cidade="event.cidade ?? undefined"
-          @subscribe="onSubscribe"
-          @leave="onLeave"
-          @confirm="onConfirm"
-          @view-participants="viewParticipants"
-        />
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <EventTicketCard
+            v-for="event in events"
+            :key="event.id"
+            :event="event"
+            :host-name="event.hostName"
+            :cidade="event.cidade ?? undefined"
+            @subscribe="onSubscribe"
+            @leave="onLeave"
+            @confirm="onConfirm"
+            @view-participants="viewParticipants"
+          />
+        </div>
 
         <div v-if="!loading && events.length === 0" class="text-center py-12 space-y-2">
           <p class="text-slate-400 text-lg">Nenhum Rolê encontrado</p>

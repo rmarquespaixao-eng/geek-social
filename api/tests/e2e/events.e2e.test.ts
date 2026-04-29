@@ -203,7 +203,8 @@ describe('Events ("Rolê") E2E', () => {
 
   it('POST /events — duração inválida retorna 400/422', async () => {
     const host = await createUser(app, { email: 'dur@test.com' })
-    const res = await createEvent(app, host, { durationMinutes: 75 as unknown as 60 })
+    // Abaixo do mínimo (15 min) — deve falhar.
+    const res = await createEvent(app, host, { durationMinutes: 5 as unknown as 60 })
     expect([400, 422]).toContain(res.statusCode)
   })
 

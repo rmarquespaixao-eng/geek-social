@@ -5,18 +5,6 @@ export type EventVisibility = 'public' | 'friends' | 'invite'
 export type EventStatus = 'scheduled' | 'cancelled' | 'ended'
 export type ParticipantStatus = 'subscribed' | 'confirmed' | 'waitlist' | 'left'
 
-export type DurationKey = '1h' | '2h' | '3h' | '4h' | '6h' | 'noite' | 'dia'
-
-export const DURATION_MAP: Record<DurationKey, number> = {
-  '1h': 60,
-  '2h': 120,
-  '3h': 180,
-  '4h': 240,
-  '6h': 360,
-  noite: 360,
-  dia: 600,
-}
-
 export interface EventAddress {
   cep: string
   logradouro: string

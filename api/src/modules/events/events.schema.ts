@@ -7,16 +7,11 @@ export const eventStatuses = ['scheduled', 'cancelled', 'ended'] as const
 export const participantStatuses = ['subscribed', 'confirmed', 'waitlist', 'left'] as const
 
 /**
- * Set fechado de durações permitidas (em minutos).
- *  - 60   → 1h
- *  - 120  → 2h
- *  - 180  → 3h
- *  - 240  → 4h
- *  - 360  → 6h ("noite toda")
- *  - 600  → 10h ("dia todo")
+ * Faixa permitida para a duração do evento (em minutos).
+ * Usuário pode escolher qualquer inteiro entre o mínimo e o máximo.
  */
-export const allowedDurations = [60, 120, 180, 240, 360, 600] as const
-export type AllowedDuration = (typeof allowedDurations)[number]
+export const MIN_DURATION_MINUTES = 15
+export const MAX_DURATION_MINUTES = 24 * 60
 
 // ── Sub-schemas ──────────────────────────────────────────────────────
 export const addressSchema = z.object({
@@ -34,16 +29,17 @@ export const onlineDetailsSchema = z.object({
   extraDetails: z.string().max(2000).optional().nullable(),
 })
 
+const durationMinutesSchema = z.coerce
+  .number()
+  .int()
+  .min(MIN_DURATION_MINUTES, { message: 'INVALID_DURATION' })
+  .max(MAX_DURATION_MINUTES, { message: 'INVALID_DURATION' })
+
 const baseEventFields = {
   name: z.string().trim().min(1).max(200),
   description: z.string().trim().max(5000).optional().nullable(),
   startsAt: z.coerce.date(),
-  durationMinutes: z.coerce
-    .number()
-    .int()
-    .refine((v): v is AllowedDuration => (allowedDurations as readonly number[]).includes(v), {
-      message: 'INVALID_DURATION',
-    }),
+  durationMinutes: durationMinutesSchema,
   visibility: z.enum(eventVisibilities).default('public'),
   capacity: z.union([z.coerce.number().int().min(1), z.null()]).optional().nullable(),
 }
@@ -82,13 +78,7 @@ export const updateEventSchema = z
     name: z.string().trim().min(1).max(200).optional(),
     description: z.string().trim().max(5000).optional().nullable(),
     startsAt: z.coerce.date().optional(),
-    durationMinutes: z.coerce
-      .number()
-      .int()
-      .refine((v): v is AllowedDuration => (allowedDurations as readonly number[]).includes(v), {
-        message: 'INVALID_DURATION',
-      })
-      .optional(),
+    durationMinutes: durationMinutesSchema.optional(),
     visibility: z.enum(eventVisibilities).optional(),
     capacity: z.union([z.coerce.number().int().min(1), z.null()]).optional().nullable(),
     type: z.enum(eventTypes).optional(),

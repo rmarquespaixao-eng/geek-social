@@ -81,14 +81,16 @@ function viewParticipants(id: string) {
       <section class="space-y-4">
         <p v-if="loading && events.length === 0" class="text-slate-400 text-sm">Carregando…</p>
 
-        <EventTicketCard
-          v-for="event in events"
-          :key="event.id"
-          :event="event"
-          :host-name="event.hostName"
-          :cidade="event.cidade ?? undefined"
-          @view-participants="viewParticipants"
-        />
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <EventTicketCard
+            v-for="event in events"
+            :key="event.id"
+            :event="event"
+            :host-name="event.hostName"
+            :cidade="event.cidade ?? undefined"
+            @view-participants="viewParticipants"
+          />
+        </div>
 
         <p
           v-if="!loading && events.length === 0"

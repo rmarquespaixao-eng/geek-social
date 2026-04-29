@@ -26,7 +26,7 @@ import type {
   SensitiveField,
   UpdateEventInput,
 } from './events.schema.js'
-import { SENSITIVE_FIELDS, allowedDurations } from './events.schema.js'
+import { SENSITIVE_FIELDS, MIN_DURATION_MINUTES, MAX_DURATION_MINUTES } from './events.schema.js'
 import { EventsError } from './events.errors.js'
 
 const ALLOWED_COVER_MIME = new Set(['image/jpeg', 'image/png', 'image/webp'])
@@ -90,7 +90,10 @@ export class EventsService {
     input: CreateEventInput,
     cover: CoverUpload,
   ): Promise<CreateEventResult> {
-    if (!(allowedDurations as readonly number[]).includes(input.durationMinutes)) {
+    if (
+      input.durationMinutes < MIN_DURATION_MINUTES ||
+      input.durationMinutes > MAX_DURATION_MINUTES
+    ) {
       throw new EventsError('INVALID_DURATION')
     }
     if (input.capacity != null && input.capacity < 1) {
@@ -234,7 +237,11 @@ export class EventsService {
     if (existing.hostUserId !== userId) throw new EventsError('NOT_HOST')
     if (existing.status !== 'scheduled') throw new EventsError('EVENT_CANCELLED')
 
-    if (input.durationMinutes != null && !(allowedDurations as readonly number[]).includes(input.durationMinutes)) {
+    if (
+      input.durationMinutes != null &&
+      (input.durationMinutes < MIN_DURATION_MINUTES ||
+        input.durationMinutes > MAX_DURATION_MINUTES)
+    ) {
       throw new EventsError('INVALID_DURATION')
     }
     if (input.capacity !== undefined && input.capacity !== null && input.capacity < 1) {

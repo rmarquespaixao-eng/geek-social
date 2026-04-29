@@ -4,12 +4,10 @@ import { useRoute, useRouter } from 'vue-router'
 import CommunityForm from '../components/CommunityForm.vue'
 import { useCommunity } from '../composables/useCommunity'
 import { useCommunityActions } from '../composables/useCommunityActions'
-import { useAuthStore } from '@/shared/auth/authStore'
 import type { CreateCommunityPayload } from '../types'
 
 const route = useRoute()
 const router = useRouter()
-const auth = useAuthStore()
 
 const slug = computed(() => String(route.params.slug ?? ''))
 const { community, viewerMembership, loading, error } = useCommunity(() => slug.value)

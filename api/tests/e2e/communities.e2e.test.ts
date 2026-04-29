@@ -323,4 +323,85 @@ describe.skip('Communities E2E — US1', () => {
     const found = listBody.communities.find((c: any) => c.id === communityId)
     expect(found).toBeUndefined()
   })
+
+  // ── Regression: R001 — restricted visibility gating ───────────────
+  it('R001 — non-member POST /topics on restricted community → 403 NOT_MEMBER', async () => {
+    const { body: createBody } = await createCommunity(app, owner, { visibility: 'restricted' })
+    const communityId = createBody.community.id
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/communities/${communityId}/topics`,
+      headers: { authorization: `Bearer ${member.token}`, 'content-type': 'application/json' },
+      payload: { content: 'Should not work', visibility: 'public' },
+    })
+
+    expect(res.statusCode).toBe(403)
+    expect(JSON.parse(res.body).error).toBe('NOT_MEMBER')
+  })
+
+  it('R001 — non-member GET /topics on restricted community → 403 NOT_MEMBER', async () => {
+    const { body: createBody } = await createCommunity(app, owner, { visibility: 'restricted' })
+    const communityId = createBody.community.id
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/communities/${communityId}/topics`,
+      headers: { authorization: `Bearer ${member.token}` },
+    })
+
+    expect(res.statusCode).toBe(403)
+    expect(JSON.parse(res.body).error).toBe('NOT_MEMBER')
+  })
+
+  // ── Regression: R002 — community topics excluded from global feed ──
+  it('R002 — GET /posts/feed does NOT return posts with communityId', async () => {
+    const { body: createBody } = await createCommunity(app, owner)
+    const communityId = createBody.community.id
+
+    await app.inject({
+      method: 'POST',
+      url: `/communities/${communityId}/topics`,
+      headers: { authorization: `Bearer ${owner.token}`, 'content-type': 'application/json' },
+      payload: { content: 'Community topic', visibility: 'public' },
+    })
+
+    const feedRes = await app.inject({
+      method: 'GET',
+      url: '/posts/feed',
+      headers: { authorization: `Bearer ${member.token}` },
+    })
+
+    const feedBody = JSON.parse(feedRes.body)
+    const communityPost = (feedBody.posts ?? []).find((p: any) => p.communityId === communityId)
+    expect(communityPost).toBeUndefined()
+  })
+
+  it('R002 — GET /posts/feed excludes topics from soft-deleted community', async () => {
+    const { body: createBody } = await createCommunity(app, owner)
+    const communityId = createBody.community.id
+
+    await app.inject({
+      method: 'POST',
+      url: `/communities/${communityId}/topics`,
+      headers: { authorization: `Bearer ${owner.token}`, 'content-type': 'application/json' },
+      payload: { content: 'Community topic before delete', visibility: 'public' },
+    })
+
+    await app.inject({
+      method: 'DELETE',
+      url: `/communities/${communityId}`,
+      headers: { authorization: `Bearer ${owner.token}` },
+    })
+
+    const feedRes = await app.inject({
+      method: 'GET',
+      url: '/posts/feed',
+      headers: { authorization: `Bearer ${member.token}` },
+    })
+
+    const feedBody = JSON.parse(feedRes.body)
+    const communityPost = (feedBody.posts ?? []).find((p: any) => p.communityId === communityId)
+    expect(communityPost).toBeUndefined()
+  })
 })

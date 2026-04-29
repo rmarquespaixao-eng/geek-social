@@ -225,14 +225,7 @@ describe('CommunitiesService', () => {
 
       await expect(
         service.updateCommunity('other-user', 'c1', { name: 'Hack' }),
-      ).rejects.toThrow(CommunitiesError)
-
-      const call = vi.mocked(service.updateCommunity)
-      try {
-        await service.updateCommunity('other-user', 'c1', { name: 'Hack' })
-      } catch (e) {
-        expect((e as CommunitiesError).code).toBe('NOT_OWNER')
-      }
+      ).rejects.toMatchObject({ code: 'NOT_OWNER' })
     })
   })
 
@@ -270,6 +263,46 @@ describe('CommunitiesService', () => {
 
       const result = await service.getForViewer(COMMUNITY_UUID, 'viewer-1')
       expect(result.visibility).toBe('private')
+    })
+
+    it('returns community for restricted visibility (metadata visible, topics gated by assertCanView)', async () => {
+      vi.mocked(repo.findById).mockResolvedValue(makeCommunity({ id: COMMUNITY_UUID, visibility: 'restricted' }))
+      vi.mocked(membersRepo.findByCommunityAndUser).mockResolvedValue(null)
+
+      const result = await service.getForViewer(COMMUNITY_UUID, 'viewer-1')
+      expect(result.visibility).toBe('restricted')
+    })
+  })
+
+  describe('assertCanView', () => {
+    const COMMUNITY_UUID = '00000000-0000-0000-0000-000000000002'
+
+    it('throws NOT_MEMBER for restricted community when viewer is not an active member', async () => {
+      vi.mocked(membersRepo.findByCommunityAndUser).mockResolvedValue(null)
+
+      await expect(
+        service.assertCanView('viewer-1', makeCommunity({ id: COMMUNITY_UUID, visibility: 'restricted' })),
+      ).rejects.toMatchObject({ code: 'NOT_MEMBER' })
+    })
+
+    it('throws NOT_MEMBER for anonymous viewer on restricted community', async () => {
+      await expect(
+        service.assertCanView(null, makeCommunity({ id: COMMUNITY_UUID, visibility: 'restricted' })),
+      ).rejects.toMatchObject({ code: 'NOT_MEMBER' })
+    })
+
+    it('passes for active member of restricted community', async () => {
+      vi.mocked(membersRepo.findByCommunityAndUser).mockResolvedValue(makeMember({ status: 'active' }))
+
+      await expect(
+        service.assertCanView('viewer-1', makeCommunity({ id: COMMUNITY_UUID, visibility: 'restricted' })),
+      ).resolves.toBeUndefined()
+    })
+
+    it('passes for public community regardless of membership', async () => {
+      await expect(
+        service.assertCanView(null, makeCommunity({ id: COMMUNITY_UUID, visibility: 'public' })),
+      ).resolves.toBeUndefined()
     })
   })
 

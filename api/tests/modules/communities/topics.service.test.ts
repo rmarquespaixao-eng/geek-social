@@ -93,9 +93,11 @@ function mockCommunitiesService(): CommunitiesService {
     assertCanView: vi.fn().mockResolvedValue(undefined),
     assertNotBanned: vi.fn().mockResolvedValue(undefined),
     isPrivateNonMember: vi.fn().mockResolvedValue(false),
+    isRestrictedNonMember: vi.fn().mockResolvedValue(false),
     listOwned: vi.fn(),
     listJoined: vi.fn(),
     listDiscover: vi.fn(),
+    incrementTopicCount: vi.fn().mockResolvedValue(undefined),
   } as unknown as CommunitiesService
 }
 
@@ -118,17 +120,44 @@ describe('TopicsService', () => {
     it('delegates to postsRepo.create with communityId', async () => {
       vi.mocked(postsRepo.create).mockResolvedValue(makePost())
       vi.mocked(topicsRepo.insertMeta).mockResolvedValue(makeMeta())
+      vi.mocked(topicsRepo.findTopicById).mockResolvedValue(makeTopicRow())
 
       await service.createTopic('user-1', 'c1', { content: 'Hello', visibility: 'public' })
 
       expect(postsRepo.create).toHaveBeenCalledWith(
         expect.objectContaining({ communityId: 'c1', userId: 'user-1' }),
+        expect.anything(),
       )
+    })
+
+    it('passes the transaction (exec) to postsRepo.create and topicsRepo.insertMeta', async () => {
+      let capturedTx: unknown = null
+      vi.mocked(postsRepo.create).mockImplementation(async (_data, tx) => {
+        capturedTx = tx
+        return makePost()
+      })
+      vi.mocked(topicsRepo.insertMeta).mockResolvedValue(makeMeta())
+      vi.mocked(topicsRepo.findTopicById).mockResolvedValue(makeTopicRow())
+
+      await service.createTopic('user-1', 'c1', { content: 'Hello', visibility: 'public' })
+
+      expect(capturedTx).not.toBeNull()
+      expect(topicsRepo.insertMeta).toHaveBeenCalledWith('post-1', 'c1', capturedTx)
+    })
+
+    it('rolls back post creation when insertMeta fails (atomicity)', async () => {
+      vi.mocked(postsRepo.create).mockResolvedValue(makePost())
+      vi.mocked(topicsRepo.insertMeta).mockRejectedValue(new Error('DB error'))
+
+      await expect(
+        service.createTopic('user-1', 'c1', { content: 'Hi', visibility: 'public' }),
+      ).rejects.toThrow('DB error')
     })
 
     it('inserts topic meta after creating post', async () => {
       vi.mocked(postsRepo.create).mockResolvedValue(makePost({ id: 'post-1' }))
       vi.mocked(topicsRepo.insertMeta).mockResolvedValue(makeMeta())
+      vi.mocked(topicsRepo.findTopicById).mockResolvedValue(makeTopicRow())
 
       await service.createTopic('user-1', 'c1', { content: 'Hello', visibility: 'public' })
 

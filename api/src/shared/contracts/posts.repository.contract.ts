@@ -17,6 +17,8 @@ export type Post = {
   visibility: PostVisibility
   itemId: string | null
   collectionId: string | null
+  communityId: string | null
+  deletedAt: Date | null
   media: PostMedia[]
   createdAt: Date
   updatedAt: Date
@@ -29,11 +31,13 @@ export type CreatePostData = {
   visibility: PostVisibility
   itemId?: string | null
   collectionId?: string | null
+  communityId?: string | null
 }
 
 export type UpdatePostData = {
   content?: string | null
   visibility?: PostVisibility
+  communityId?: string | null
 }
 
 export interface IPostsRepository {

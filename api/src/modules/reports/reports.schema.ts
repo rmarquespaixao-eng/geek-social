@@ -1,6 +1,6 @@
 import { z } from 'zod'
 
-export const reportTargetTypes = ['user', 'message', 'post', 'collection', 'conversation'] as const
+export const reportTargetTypes = ['user', 'message', 'post', 'collection', 'conversation', 'community_topic', 'community_comment'] as const
 export const reportReasons = ['spam', 'harassment', 'nsfw', 'hate', 'other'] as const
 
 export const createReportSchema = z.object({

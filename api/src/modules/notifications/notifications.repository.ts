@@ -26,6 +26,18 @@ export type NotificationType =
   | 'event_conflict_after_edit'
   | 'event_promoted_from_waitlist'
   | 'event_invited'
+  | 'community_join_requested'
+  | 'community_join_approved'
+  | 'community_join_rejected'
+  | 'community_invited'
+  | 'community_promoted_to_mod'
+  | 'community_demoted'
+  | 'community_banned'
+  | 'community_unbanned'
+  | 'community_new_topic'
+  | 'community_transfer_requested'
+  | 'community_transfer_accepted'
+  | 'community_transfer_rejected'
 
 export type Notification = {
   id: string

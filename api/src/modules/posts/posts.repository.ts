@@ -14,8 +14,9 @@ export class PostsRepository implements IPostsRepository {
       visibility: data.visibility,
       itemId: data.itemId ?? null,
       collectionId: data.collectionId ?? null,
+      communityId: data.communityId ?? null,
     }).returning()
-    return { ...result[0], media: [] } as Post
+    return { ...result[0], media: [], communityId: result[0].communityId ?? null, deletedAt: result[0].deletedAt ?? null } as Post
   }
 
   async findById(id: string): Promise<Post | null> {
@@ -24,12 +25,17 @@ export class PostsRepository implements IPostsRepository {
     const media = await this.db.select().from(postMedia)
       .where(eq(postMedia.postId, id))
       .orderBy(postMedia.displayOrder)
-    return { ...result[0], media: media as PostMedia[] } as Post
+    return { ...result[0], media: media as PostMedia[], communityId: result[0].communityId ?? null, deletedAt: result[0].deletedAt ?? null } as Post
   }
 
   async update(id: string, data: UpdatePostData): Promise<Post> {
     await this.db.update(posts)
-      .set({ ...data, updatedAt: new Date() })
+      .set({
+        content: data.content,
+        visibility: data.visibility,
+        communityId: data.communityId,
+        updatedAt: new Date(),
+      })
       .where(eq(posts.id, id))
     return (await this.findById(id))!
   }

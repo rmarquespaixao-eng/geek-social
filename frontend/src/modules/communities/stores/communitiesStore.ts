@@ -159,15 +159,16 @@ export const useCommunitiesStore = defineStore('communities', () => {
 
   async function join(id: string) {
     const result = await communitiesApi.joinCommunity(id)
-    // Patch viewerMembership in cached detail if present.
     const cached = byId.get(id)
-    if (cached && result.status === 'active' && result.membership) {
+    if (cached && result.membership) {
       cached.viewerMembership = {
         role: result.membership.role,
         status: result.membership.status,
         joinedAt: result.membership.joinedAt,
       }
-      cached.community.memberCount += 1
+      if (result.status === 'active') {
+        cached.community.memberCount += 1
+      }
     }
     return result
   }

@@ -196,13 +196,11 @@ export class CommunitiesService {
   async assertCanView(viewerId: string | null, community: CommunityRow): Promise<void> {
     if (community.visibility === 'public') return
     if (!viewerId) {
-      if (community.visibility === 'private') throw new CommunitiesError('NOT_MEMBER')
-      return // restricted: anonymous can see summary
+      throw new CommunitiesError('NOT_MEMBER')
     }
     const membership = await this.membersRepo.findByCommunityAndUser(community.id, viewerId)
-    if (!membership) {
-      if (community.visibility === 'private') throw new CommunitiesError('NOT_MEMBER')
-      return
+    if (!membership || membership.status !== 'active') {
+      throw new CommunitiesError('NOT_MEMBER')
     }
     if (membership.status === 'banned') throw new CommunitiesError('BANNED')
   }
@@ -212,12 +210,15 @@ export class CommunitiesService {
     if (membership && membership.status === 'banned') throw new CommunitiesError('BANNED')
   }
 
-  /**
-   * Returns whether the viewer is a non-member of a private community.
-   * Used by the controller to strip metadata before serialization.
-   */
   async isPrivateNonMember(community: CommunityRow, viewerId: string | null): Promise<boolean> {
     if (community.visibility !== 'private') return false
+    if (!viewerId) return true
+    const membership = await this.membersRepo.findByCommunityAndUser(community.id, viewerId)
+    return !membership || membership.status !== 'active'
+  }
+
+  async isRestrictedNonMember(community: CommunityRow, viewerId: string | null): Promise<boolean> {
+    if (community.visibility !== 'restricted') return false
     if (!viewerId) return true
     const membership = await this.membersRepo.findByCommunityAndUser(community.id, viewerId)
     return !membership || membership.status !== 'active'

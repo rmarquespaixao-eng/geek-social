@@ -1,7 +1,24 @@
-import { and, eq, inArray, sql, desc } from 'drizzle-orm'
+import { and, eq, inArray, sql, desc, lt, or } from 'drizzle-orm'
 import type { DatabaseClient } from '../../shared/infra/database/postgres.client.js'
 import { communityMembers, users } from '../../shared/infra/database/schema.js'
 import type { MemberRow, MemberWithUser } from './communities.repository.js'
+
+type MemberCursor = { joinedAt: Date; id: string }
+
+function encodeMemberCursor(c: MemberCursor): string {
+  return Buffer.from(JSON.stringify({ t: c.joinedAt.toISOString(), i: c.id })).toString('base64url')
+}
+
+function decodeMemberCursor(token: string | undefined): MemberCursor | null {
+  if (!token) return null
+  try {
+    const raw = Buffer.from(token, 'base64url').toString('utf-8')
+    const parsed = JSON.parse(raw) as { t: string; i: string }
+    return { joinedAt: new Date(parsed.t), id: parsed.i }
+  } catch {
+    return null
+  }
+}
 
 export type { MemberRow, MemberWithUser } from './communities.repository.js'
 
@@ -109,10 +126,21 @@ export class MembersRepository {
   async listByCommunity(
     communityId: string,
     opts?: { status?: 'pending' | 'active' | 'banned'; role?: 'owner' | 'moderator' | 'member'; limit?: number; cursor?: string },
-  ): Promise<MemberWithUser[]> {
+  ): Promise<{ members: MemberWithUser[]; nextCursor: string | null }> {
+    const limit = opts?.limit ?? 50
     const conditions = [eq(communityMembers.communityId, communityId)]
     if (opts?.status) conditions.push(eq(communityMembers.status, opts.status))
     if (opts?.role) conditions.push(eq(communityMembers.role, opts.role))
+
+    const cursor = decodeMemberCursor(opts?.cursor)
+    if (cursor) {
+      conditions.push(
+        or(
+          lt(communityMembers.joinedAt, cursor.joinedAt),
+          and(eq(communityMembers.joinedAt, cursor.joinedAt), sql`${communityMembers.id} < ${cursor.id}`),
+        )!,
+      )
+    }
 
     const rows = await this.db
       .select({
@@ -131,9 +159,14 @@ export class MembersRepository {
       .innerJoin(users, eq(users.id, communityMembers.userId))
       .where(and(...conditions))
       .orderBy(desc(communityMembers.joinedAt))
-      .limit(opts?.limit ?? 100)
+      .limit(limit + 1)
 
-    return rows.map(r => ({
+    const hasMore = rows.length > limit
+    const page = hasMore ? rows.slice(0, limit) : rows
+    const last = page[page.length - 1]
+    const nextCursor = hasMore && last ? encodeMemberCursor({ joinedAt: last.joinedAt, id: last.id }) : null
+
+    const members = page.map(r => ({
       id: r.id,
       communityId: r.communityId,
       userId: r.userId,
@@ -148,6 +181,8 @@ export class MembersRepository {
         avatarUrl: r.userAvatarUrl,
       },
     }))
+
+    return { members, nextCursor }
   }
 
   async countActiveByCommunity(communityId: string): Promise<number> {

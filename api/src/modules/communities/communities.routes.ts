@@ -31,7 +31,7 @@ export type CommunitiesRoutesOptions = {
 
 export const communitiesRoutes: FastifyPluginAsyncZod<CommunitiesRoutesOptions> = async (app, opts) => {
   const commCtrl = new CommunitiesController(opts.communitiesService, opts.membersService)
-  const membersCtrl = new MembersController(opts.membersService)
+  const membersCtrl = new MembersController(opts.membersService, opts.communitiesService)
   const joinReqCtrl = new JoinRequestsController(opts.joinRequestsService)
   const topicsCtrl = new TopicsController(opts.topicsService)
 

@@ -170,6 +170,11 @@ export class CommunitiesController {
         return reply.send({ community: serializeCommunityPrivate(community), viewerMembership: null, moderators: [] })
       }
 
+      const isRestrictedNonMember = await this.service.isRestrictedNonMember(community, viewerId)
+      if (isRestrictedNonMember) {
+        return reply.send({ community: serializeCommunityPrivate(community), viewerMembership: null, moderators: [] })
+      }
+
       const [membership, moderators] = await Promise.all([
         viewerId ? this.membersService.getMembership(community.id, viewerId) : null,
         this.service.findModerators(community.id),

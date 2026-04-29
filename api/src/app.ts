@@ -87,6 +87,7 @@ import { ParticipantsService } from './modules/events/participants.service.js'
 import { InvitesService } from './modules/events/invites.service.js'
 import { EventJobsScheduler } from './modules/events/jobs/event-jobs.scheduler.js'
 import { eventsRoutes } from './modules/events/events.routes.js'
+import { communitiesRoutes } from './modules/communities/communities.routes.js'
 import { createEventReminderWorker } from './modules/events/jobs/event-reminder.worker.js'
 import { runEventFinalize } from './modules/events/jobs/event-finalize.cron.js'
 import { SteamApiClient } from './modules/integrations/steam/steam.api.client.js'
@@ -449,6 +450,7 @@ export async function buildApp() {
   await app.register(marketplaceRoutes, { prefix: '/marketplace', listingsService })
   await app.register(listingRatingsRoutes, { prefix: '/ratings', listingRatingsService })
   await app.register(eventsRoutes, { prefix: '/events', eventsService, participantsService, invitesService })
+  await app.register(communitiesRoutes, { prefix: '/communities' })
 
   // Steam integration (opcional — exige fila; STEAM_WEB_API_KEY pode estar vazia (link funciona, import falha com STEAM_AUTH_FAILED))
   if (env.JOBS_DATABASE_URL) {

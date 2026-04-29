@@ -166,11 +166,11 @@ async function submitTopic() {
   if (!community.value || !topicContent.value.trim() || topicSubmitting.value) return
   topicSubmitting.value = true
   try {
-    const topic = await communitiesApi.createTopic(community.value.id, {
+    await communitiesApi.createTopic(community.value.id, {
       content: topicContent.value.trim(),
     })
-    topics.value = [topic, ...topics.value]
     topicContent.value = ''
+    await loadTopics()
     showTopicComposer.value = false
   } finally {
     topicSubmitting.value = false

@@ -1,4 +1,8 @@
-export type JobName = 'steam.import-game' | 'steam.enrich-game'
+export type JobName =
+  | 'steam.import-game'
+  | 'steam.enrich-game'
+  | 'event.reminder_48h'
+  | 'event.reminder_2h'
 
 export type JobOptions = {
   retryLimit?: number
@@ -31,6 +35,8 @@ export interface IJobsQueue {
   ): Promise<void>
   getBatchStats(importBatchId: string): Promise<BatchStats>
   hasActiveBatchForUser(userId: string): Promise<boolean>
+  /** Cancela todos os jobs pendentes (não-active) para um determinado evento. */
+  cancelEventJobs(eventId: string): Promise<void>
   start(): Promise<void>
   stop(): Promise<void>
 }

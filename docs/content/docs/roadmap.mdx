@@ -90,8 +90,18 @@ Tudo que está rodando hoje (referências cruzadas com a documentação técnica
 ### ✅ Notificações
 - Persistência + entrega real-time via Socket.IO
 - Web Push (VAPID) pra notificação fora do app
-- 16 tipos de notificação (sociais, vitrine, propostas, ratings, Steam)
+- 23 tipos de notificação (sociais, vitrine, propostas, ratings, Steam, eventos)
 - 📖 [Módulo Notifications](/docs/modules/notifications)
+
+### ✅ Rolê (Eventos)
+- Encontros entre usuários — presencial (com endereço) ou online (com link de reunião)
+- Visibilidade híbrida (`public` / `friends` / `invite`) com tabela de convites materializada
+- Inscrição com lista de espera + auto-promoção quando alguém sai
+- Detecção de conflito de horário via `tstzrange` (sobreposição de intervalos)
+- Lembretes automáticos T-48h (com ação `Confirmar`/`Sair`) e T-2h (ping) via pg-boss
+- Edição de campos sensíveis dispara notificação pros inscritos; conflitos pós-edição alertados
+- Cron horário finaliza eventos passados (`status=ended`)
+- 📖 [Módulo Events](/docs/modules/events)
 
 ### ✅ Reports
 - Denúncias em 5 superfícies (user, message, post, collection, conversation)

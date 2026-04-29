@@ -78,6 +78,16 @@ import { offersRoutes } from './modules/offers/offers.routes.js'
 import { PgBossAdapter } from './shared/infra/jobs/pgboss.adapter.js'
 import { runTemporaryCleanupRead, runTemporaryCleanupTtl } from './shared/infra/jobs/temporary-cleanup.cron.js'
 import { runOffersExpire } from './shared/infra/jobs/offers-expire.cron.js'
+import { EventsRepository } from './modules/events/events.repository.js'
+import { ParticipantsRepository } from './modules/events/participants.repository.js'
+import { InvitesRepository } from './modules/events/invites.repository.js'
+import { EventsService } from './modules/events/events.service.js'
+import { ParticipantsService } from './modules/events/participants.service.js'
+import { InvitesService } from './modules/events/invites.service.js'
+import { EventJobsScheduler } from './modules/events/jobs/event-jobs.scheduler.js'
+import { eventsRoutes } from './modules/events/events.routes.js'
+import { createEventReminderWorker } from './modules/events/jobs/event-reminder.worker.js'
+import { runEventFinalize } from './modules/events/jobs/event-finalize.cron.js'
 import { SteamApiClient } from './modules/integrations/steam/steam.api.client.js'
 import { SteamOpenIdAdapter } from './modules/integrations/steam/steam.openid.adapter.js'
 import { SteamService } from './modules/integrations/steam/steam.service.js'
@@ -281,6 +291,31 @@ export async function buildApp() {
   const listingRatingsService = new ListingRatingsService(listingRatingsRepository, offersRepository, notificationsService)
   notificationsService.setEmitter((userId, notification) => chatGateway.emitNotification(userId, notification))
 
+  // Events ("Rolê") — repos + services. Scheduler começa sem fila e recebe setQueue() depois.
+  const eventsRepository = new EventsRepository(db)
+  const participantsRepository = new ParticipantsRepository(db)
+  const invitesRepository = new InvitesRepository(db)
+  const eventJobsScheduler = new EventJobsScheduler(null)
+  const eventsService = new EventsService(
+    db,
+    eventsRepository,
+    participantsRepository,
+    invitesRepository,
+    storageService,
+    friendsRepository,
+    notificationsService,
+    eventJobsScheduler,
+  )
+  const participantsService = new ParticipantsService(
+    db,
+    eventsRepository,
+    participantsRepository,
+    invitesRepository,
+    friendsRepository,
+    notificationsService,
+  )
+  const invitesService = new InvitesService(eventsRepository, invitesRepository, notificationsService)
+
   // Cron de limpeza do chat temporário (DMs)
   const tempCleanupDeps = { conversationsService, messagesService, chatGateway }
   const tempReadInterval = setInterval(() => {
@@ -293,10 +328,15 @@ export async function buildApp() {
   const offersExpireInterval = setInterval(() => {
     runOffersExpire({ offersService }).catch(err => app.log.error({ err }, 'offers-expire failed'))
   }, 60 * 60 * 1000)
+  // Cron de finalização de eventos (status='ended' quando ends_at < now()) — roda a cada 1h
+  const eventsFinalizeInterval = setInterval(() => {
+    runEventFinalize({ eventsService }).catch(err => app.log.error({ err }, 'events-finalize failed'))
+  }, 60 * 60 * 1000)
   app.addHook('onClose', async () => {
     clearInterval(tempReadInterval)
     clearInterval(tempTtlInterval)
     clearInterval(offersExpireInterval)
+    clearInterval(eventsFinalizeInterval)
   })
 
   // Hook notifications into friends events
@@ -380,6 +420,7 @@ export async function buildApp() {
   await app.register(listingsRoutes, { prefix: '/listings', listingsService })
   await app.register(marketplaceRoutes, { prefix: '/marketplace', listingsService })
   await app.register(listingRatingsRoutes, { prefix: '/ratings', listingRatingsService })
+  await app.register(eventsRoutes, { prefix: '/events', eventsService, participantsService, invitesService })
 
   // Steam integration (opcional — exige fila; STEAM_WEB_API_KEY pode estar vazia (link funciona, import falha com STEAM_AUTH_FAILED))
   if (env.JOBS_DATABASE_URL) {
@@ -433,6 +474,27 @@ export async function buildApp() {
     })
     // Throttle global do appdetails: 1 worker, 1 concorrente.
     await jobsQueue.registerWorker('steam.enrich-game', enrichHandler, { teamConcurrency: 1 })
+
+    // Events ("Rolê") — ativa o scheduler com a fila e registra workers de lembrete
+    eventJobsScheduler.setQueue(jobsQueue)
+    await jobsQueue.registerWorker(
+      'event.reminder_48h',
+      createEventReminderWorker({
+        eventsRepo: eventsRepository,
+        notificationsService,
+        notificationType: 'event_reminder_48h',
+      }),
+      { teamConcurrency: 2 },
+    )
+    await jobsQueue.registerWorker(
+      'event.reminder_2h',
+      createEventReminderWorker({
+        eventsRepo: eventsRepository,
+        notificationsService,
+        notificationType: 'event_reminder_2h',
+      }),
+      { teamConcurrency: 2 },
+    )
 
     const steamController = new SteamController(
       steamService,

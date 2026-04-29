@@ -121,6 +121,36 @@ const router = createRouter({
       meta: { requiresAuth: true },
     },
     {
+      path: '/roles',
+      name: 'events-discover',
+      component: () => import('@/modules/events/views/EventsDiscoverView.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/roles/novo',
+      name: 'event-create',
+      component: () => import('@/modules/events/views/EventCreateView.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/roles/:id',
+      name: 'event-detail',
+      component: () => import('@/modules/events/views/EventDetailView.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/roles/:id/editar',
+      name: 'event-edit',
+      component: () => import('@/modules/events/views/EventEditView.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/meus-roles',
+      name: 'my-events',
+      component: () => import('@/modules/events/views/MyEventsView.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
       path: '/marketplace',
       redirect: '/vitrine',
     },

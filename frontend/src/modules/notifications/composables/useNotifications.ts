@@ -3,6 +3,22 @@ import { ref, computed } from 'vue'
 import * as notificationsService from '../services/notificationsService'
 import type { Notification } from '../services/notificationsService'
 import { getSocket } from '@/shared/socket/socket'
+import { useEventsStore } from '@/modules/events/stores/eventsStore'
+import type { EventNotificationType } from '@/modules/events/types'
+
+const EVENT_NOTIFICATION_TYPES: EventNotificationType[] = [
+  'event_reminder_48h',
+  'event_reminder_2h',
+  'event_cancelled',
+  'event_updated',
+  'event_conflict_after_edit',
+  'event_promoted_from_waitlist',
+  'event_invited',
+]
+
+function isEventNotification(type: string): type is EventNotificationType {
+  return (EVENT_NOTIFICATION_TYPES as string[]).includes(type)
+}
 
 export const useNotifications = defineStore('notifications', () => {
   const items = ref<Notification[]>([])
@@ -42,6 +58,18 @@ export const useNotifications = defineStore('notifications', () => {
 
   function handleNewNotification(notification: Notification): void {
     items.value.unshift(notification)
+    // Fan out event-* notifications to the events store so cached state stays fresh.
+    if (isEventNotification(notification.type)) {
+      try {
+        const events = useEventsStore()
+        events.applyNotification({
+          type: notification.type,
+          entityId: notification.entityId,
+        })
+      } catch {
+        // events store not available (e.g., during early init); ignore.
+      }
+    }
   }
 
   function init(): void {

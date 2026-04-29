@@ -258,7 +258,14 @@
       "idx": 36,
       "version": "7",
       "when": 1777450000000,
-      "tag": "0036_communities",
+      "tag": "0036_communities_enum_extensions",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1777451000000,
+      "tag": "0037_communities_tables",
       "breakpoints": true
     }
   ]

@@ -1,7 +1,7 @@
 import { sql } from 'drizzle-orm'
 import {
   pgTable, pgEnum, uuid, varchar, text,
-  boolean, timestamp, date, integer, smallint, jsonb, uniqueIndex, index, numeric,
+  boolean, timestamp, date, integer, smallint, jsonb, uniqueIndex, index, numeric, primaryKey,
 } from 'drizzle-orm/pg-core'
 import { communityCategories } from '../../../modules/communities/categories.js'
 
@@ -197,7 +197,7 @@ export const posts = pgTable('posts', {
   visibility: postVisibilityEnum('visibility').notNull(),
   itemId: uuid('item_id').references(() => items.id, { onDelete: 'cascade' }),
   collectionId: uuid('collection_id').references(() => collections.id, { onDelete: 'set null' }),
-  communityId: uuid('community_id').references(() => communities.id, { onDelete: 'cascade' }),
+  communityId: uuid('community_id').references(() => communities.id, { onDelete: 'restrict' }),
   deletedAt: timestamp('deleted_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
@@ -694,7 +694,7 @@ export const communityNotificationPrefs = pgTable('community_notification_prefs'
   communityId: uuid('community_id').notNull().references(() => communities.id, { onDelete: 'cascade' }),
   muted: boolean('muted').notNull().default(false),
 }, (table) => ({
-  pk: uniqueIndex('community_notification_prefs_pk').on(table.userId, table.communityId),
+  pk: primaryKey({ columns: [table.userId, table.communityId] }),
 }))
 
 export const communityBadges = pgTable('community_badges', {

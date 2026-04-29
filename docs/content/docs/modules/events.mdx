@@ -1,0 +1,164 @@
+---
+title: Rolê (Eventos)
+description: Sistema de encontros entre usuários — presencial ou online, com inscrição, lista de espera, lembretes 48h/2h, e cancelamento.
+---
+
+## Visão geral
+
+Rolê é o sistema de **encontros** do Geek Social. Qualquer usuário cria um Rolê (presencial ou online) e outros se inscrevem. Cobre desde mesa fechada de RPG entre 4 amigos até lançamento aberto de jogo numa cafeteria.
+
+Três tipos de visibilidade:
+- **`public`** — qualquer usuário logado vê e pode se inscrever
+- **`friends`** — só amigos do anfitrião
+- **`invite`** — só usuários explicitamente convidados (tabela `event_invites`)
+
+Tempo é definido como **início + duração** (dropdown fechado: 60, 120, 180, 240, 360, 600 minutos). `ends_at` é persistido como `starts_at + duration` pra simplificar índices e checagem de conflito.
+
+## Entidades principais
+
+| Tabela | Papel |
+|---|---|
+| [`events`](/docs/data-model/tables/events) | Container do Rolê (anfitrião, capa, datas, status, capacidade) |
+| [`event_addresses`](/docs/data-model/tables/event_addresses) | 1:1 condicional pra rolês `presencial` (CEP, logradouro, cidade…) |
+| [`event_online_details`](/docs/data-model/tables/event_online_details) | 1:1 condicional pra rolês `online` (link da reunião + detalhes) |
+| [`event_participants`](/docs/data-model/tables/event_participants) | N:N com status (`subscribed`/`confirmed`/`waitlist`/`left`) |
+| [`event_invites`](/docs/data-model/tables/event_invites) | Materializa quem foi convidado em rolês `visibility=invite` |
+
+## Endpoints
+
+14 rotas em `/events`:
+
+**Eventos (7):** create, list (descoberta com filtros), get detail, update (host only), cancel (host only), my hosted, my attending.
+
+**Participantes (4):** subscribe, leave, confirm presence (resposta ao lembrete T-48h), list participants.
+
+**Convites (3):** invite users, revoke invite, list invites — todos host only.
+
+## Fluxos
+
+### Criar Rolê presencial com capa
+
+<Mermaid chart={`sequenceDiagram
+  autonumber
+  participant U as Anfitrião
+  participant FE as Frontend
+  participant API as Backend
+  participant S3 as MinIO/S3
+  participant DB as PostgreSQL
+  participant Q as pg-boss
+
+  U->>FE: /roles/novo → preenche form, escolhe capa (jpg/png/webp ≤5MB)
+  FE->>API: POST /events (multipart) {<br/>name, startsAt, durationMinutes,<br/>type=presencial, address, capacity?, cover}
+  API->>API: Valida Zod (duration ∈ {60,120,...,600};<br/>endereço completo se presencial)
+  API->>S3: Upload da capa → events/{uuid}/cover-{rand}.webp
+  API->>DB: BEGIN
+  API->>DB: INSERT events
+  API->>DB: INSERT event_addresses
+  API->>DB: COMMIT
+  API->>Q: enqueue 'event.reminder_48h' (startAfter = startsAt - 48h)
+  API->>Q: enqueue 'event.reminder_2h'  (startAfter = startsAt - 2h)
+  API-->>FE: 201 { event }
+  FE->>FE: Redirect → /roles/{id}`} />
+
+### Inscrever-se com waitlist e auto-promoção
+
+<Mermaid chart={`sequenceDiagram
+  autonumber
+  participant U as Usuário
+  participant API as Backend
+  participant DB as PostgreSQL
+
+  U->>API: POST /events/{id}/participants
+  API->>DB: BEGIN
+  API->>DB: SELECT visibility (public? friends? invite?) — ACL
+  API->>DB: SELECT 1 WHERE tstzrange(starts_at, ends_at, '[)')<br/>&& tstzrange(:newStart, :newEnd, '[)') — conflito
+  alt Vagas livres
+    API->>DB: INSERT participants (status=subscribed)
+  else Cheio
+    API->>DB: SELECT max(waitlist_position) FOR UPDATE
+    API->>DB: INSERT participants (status=waitlist, waitlist_position=N+1)
+  end
+  API->>DB: COMMIT
+  API-->>U: 201 { status, position? }`} />
+
+Quando alguém **sai** de um Rolê com capacidade cheia:
+
+<Mermaid chart={`sequenceDiagram
+  autonumber
+  participant U as User saindo
+  participant API as Backend
+  participant DB as PostgreSQL
+  participant N as NotificationsService
+  participant WS as Socket.io
+
+  U->>API: DELETE /events/{id}/participants/me
+  API->>DB: BEGIN
+  API->>DB: UPDATE participants SET status=left, left_at=now()
+  API->>DB: SELECT primeiro waitlist FOR UPDATE SKIP LOCKED
+  alt Tem alguém na fila
+    API->>DB: UPDATE promovido SET status=subscribed, waitlist_position=null
+    API->>DB: UPDATE demais SET waitlist_position = waitlist_position - 1
+    API->>N: notify(promovido, type=event_promoted_from_waitlist)
+    Note over API: Se startsAt < 48h, enviar reminder_48h imediato
+  end
+  API->>DB: COMMIT
+  N->>WS: emit pro promovido<br/>("Sua vaga foi confirmada!")`} />
+
+### Confirmação T-48h
+
+Worker `event.reminder_48h` dispara automaticamente 48h antes do início. Pra cada participante ainda em `subscribed`/`confirmed`, cria notificação `event_reminder_48h` com **ação requerida**: o usuário clica `Confirmar` (status → `confirmed`) ou `Sair` (status → `left`). Se ignorar, segue como `subscribed` — não há auto-remoção. Worker pula evento se status virou `cancelled` ou `ended`.
+
+Worker `event.reminder_2h` dispara 2h antes — só ping informativo, sem ação.
+
+### Edição com notificação automática
+
+Anfitrião faz `PATCH /events/:id`. Se algum **campo sensível** mudou — `startsAt`, `durationMinutes`, `type`, endereço, `meetingUrl`, `capacity`, `visibility` — service:
+
+1. Persiste a mudança em transação
+2. Reagenda jobs de lembrete (cancela antigos, cria novos)
+3. Notifica todos os inscritos com `event_updated` (payload inclui lista de campos alterados)
+4. Pra cada inscrito, re-checa conflito; se passou a conflitar com outro Rolê dele, manda `event_conflict_after_edit` adicional — usuário decide qual manter (sem auto-remoção)
+
+Mudanças em capa/nome/descrição são silenciosas (não notificam).
+
+### Cancelamento
+
+Anfitrião faz `DELETE /events/:id` opcionalmente passando `{ reason: "..." }`. Service marca `status=cancelled`, cancela jobs pendentes (`pgboss.cancelEventJobs(eventId)`), e notifica todos os participantes com `event_cancelled`. Eventos cancelados ficam visíveis (read-only) — não são apagados.
+
+### Finalização automática
+
+Cron horário roda `UPDATE events SET status='ended' WHERE status='scheduled' AND ends_at < now()`. Eventos passados ficam visíveis no perfil de quem participou e no detalhe do próprio Rolê, mas botões de inscrição ficam desabilitados.
+
+## Notificações
+
+7 tipos novos no enum `notification_type`:
+
+| Tipo | Disparado quando | Ação |
+|---|---|---|
+| `event_reminder_48h` | T-48h, pra cada `subscribed`/`confirmed` | `Confirmar` / `Sair` |
+| `event_reminder_2h` | T-2h, pra cada `subscribed`/`confirmed` | só ping |
+| `event_cancelled` | Anfitrião cancela | só ping |
+| `event_updated` | Campo sensível editado | só ping (inclui `changedFields`) |
+| `event_conflict_after_edit` | Edição criou conflito com outro rolê do user | só ping |
+| `event_promoted_from_waitlist` | Vaga liberou e user subiu da fila | só ping |
+| `event_invited` | Convidado pra rolê com `visibility=invite` | só ping |
+
+Todas seguem o pipeline existente: row em `notifications` + emit via Socket.io (`chatGateway.emitNotification`).
+
+## Códigos de erro
+
+`EventsError.code`:
+
+- `403`: `NOT_HOST`, `NOT_INVITED`, `EVENT_CANCELLED`, `NOT_FRIEND_OF_HOST`
+- `404`: `EVENT_NOT_FOUND`, `PARTICIPATION_NOT_FOUND`
+- `409`: `TIME_CONFLICT`, `ALREADY_SUBSCRIBED`, `EVENT_ALREADY_STARTED`
+- `422`: `INVALID_DURATION`, `INVALID_CAPACITY`, `MISSING_ADDRESS_FOR_PRESENCIAL`, `MISSING_MEETING_URL_FOR_ONLINE`
+
+## Limitações conhecidas (alpha)
+
+- Sem comentários/chat dentro do Rolê — usuários conversam via DM
+- Sem recorrência (rolê semanal precisa ser recriado)
+- Sem export pra calendário externo (`.ics` / Google Calendar)
+- Sem geolocalização — filtro por cidade é texto livre
+- Capa é obrigatória (sem galeria pré-definida)
+- Soft-delete de user remove os Rolês dele (cascade) — em revisão pra v2

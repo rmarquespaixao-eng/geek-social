@@ -14,6 +14,13 @@ export type NotificationType =
   | 'offer_cancelled'
   | 'offer_expired'
   | 'dm_request_received'
+  | 'event_reminder_48h'
+  | 'event_reminder_2h'
+  | 'event_cancelled'
+  | 'event_updated'
+  | 'event_conflict_after_edit'
+  | 'event_promoted_from_waitlist'
+  | 'event_invited'
 
 export type Notification = {
   id: string

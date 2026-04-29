@@ -155,6 +155,7 @@ const router = createRouter({
       path: '/comunidades',
       name: 'community-discover',
       component: () => import('@/modules/communities/views/CommunityDiscoverView.vue'),
+      meta: { requiresAuth: true },
     },
     {
       path: '/comunidades/nova',
@@ -166,6 +167,7 @@ const router = createRouter({
       path: '/comunidades/:slug',
       name: 'community-detail',
       component: () => import('@/modules/communities/views/CommunityDetailView.vue'),
+      meta: { requiresAuth: true },
     },
     {
       path: '/comunidades/:slug/editar',

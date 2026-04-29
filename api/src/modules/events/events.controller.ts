@@ -119,13 +119,14 @@ export class EventsController {
     const q = listEventsQuerySchema.safeParse(request.query)
     if (!q.success) return reply.status(400).send({ error: 'INVALID_QUERY' })
     const result = await this.service.listEvents(userId, q.data)
-    const viewerParts = await this.service.loadViewerParticipations(
-      userId,
-      result.events.map(e => e.id),
-    )
+    const ids = result.events.map(e => e.id)
+    const [viewerParts, counts] = await Promise.all([
+      this.service.loadViewerParticipations(userId, ids),
+      this.service.loadParticipantCounts(ids),
+    ])
     return reply.send({
       events: result.events.map(e =>
-        serializeEventRowAsSummary(e, viewerParts.get(e.id) ?? null),
+        serializeEventRowAsSummary(e, viewerParts.get(e.id) ?? null, counts.get(e.id)),
       ),
       nextCursor: result.nextCursor,
     })
@@ -187,13 +188,14 @@ export class EventsController {
     const q = myEventsQuerySchema.safeParse(request.query)
     if (!q.success) return reply.status(400).send({ error: 'INVALID_QUERY' })
     const result = await this.service.listHosted(userId, q.data)
-    const viewerParts = await this.service.loadViewerParticipations(
-      userId,
-      result.events.map(e => e.id),
-    )
+    const ids = result.events.map(e => e.id)
+    const [viewerParts, counts] = await Promise.all([
+      this.service.loadViewerParticipations(userId, ids),
+      this.service.loadParticipantCounts(ids),
+    ])
     return reply.send({
       events: result.events.map(e =>
-        serializeEventRowAsSummary(e, viewerParts.get(e.id) ?? null),
+        serializeEventRowAsSummary(e, viewerParts.get(e.id) ?? null, counts.get(e.id)),
       ),
       nextCursor: result.nextCursor,
     })
@@ -204,13 +206,14 @@ export class EventsController {
     const q = myEventsQuerySchema.safeParse(request.query)
     if (!q.success) return reply.status(400).send({ error: 'INVALID_QUERY' })
     const result = await this.service.listAttending(userId, q.data)
-    const viewerParts = await this.service.loadViewerParticipations(
-      userId,
-      result.events.map(e => e.id),
-    )
+    const ids = result.events.map(e => e.id)
+    const [viewerParts, counts] = await Promise.all([
+      this.service.loadViewerParticipations(userId, ids),
+      this.service.loadParticipantCounts(ids),
+    ])
     return reply.send({
       events: result.events.map(e =>
-        serializeEventRowAsSummary(e, viewerParts.get(e.id) ?? null),
+        serializeEventRowAsSummary(e, viewerParts.get(e.id) ?? null, counts.get(e.id)),
       ),
       nextCursor: result.nextCursor,
     })

@@ -216,6 +216,15 @@ export class EventsService {
     return this.participantsRepo.findActiveByUserAndEvents(viewerId, eventIds)
   }
 
+  /**
+   * Carrega em batch as contagens de participantes (subscribed/confirmed/waitlist)
+   * para uma lista de eventos. Usado pelos endpoints de listagem para hidratar
+   * os contadores em cada card.
+   */
+  async loadParticipantCounts(eventIds: string[]) {
+    return this.participantsRepo.countByEvents(eventIds)
+  }
+
   // ─────────────────────────────────────────────────────────────
   // Visibility check (helper)
   // ─────────────────────────────────────────────────────────────

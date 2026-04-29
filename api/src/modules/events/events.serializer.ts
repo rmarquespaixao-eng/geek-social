@@ -145,18 +145,18 @@ export function serializeEventDetail(
   }
 }
 
+export type ParticipantCounts = { subscribed: number; confirmed: number; waitlist: number }
+
 /**
  * Para listagens (`GET /events`, `/me/hosted`, `/me/attending`) o repo entrega
- * apenas EventRow (sem joins de host/counts/address) — montamos um summary
- * "leve" preenchendo os campos opcionais com defaults seguros para o frontend.
- *
- * `viewerParticipation`, quando passado, hidrata `iAmIn` para que a UI saiba
- * que o viewer já está inscrito em cada evento da lista (evita o caso do card
- * mostrar "Inscrever-se" depois do user já ter se inscrito).
+ * apenas EventRow (sem joins de host/counts/address). O controller carrega em
+ * batch a participação do viewer e os contadores agregados, e os passa aqui
+ * para que cada card já chegue ao frontend com `iAmIn` e contagens corretas.
  */
 export function serializeEventRowAsSummary(
   row: EventRow,
   viewerParticipation: ParticipantRow | null = null,
+  counts: ParticipantCounts = { subscribed: 0, confirmed: 0, waitlist: 0 },
 ): ApiEventSummary {
   return {
     id: row.id,
@@ -177,9 +177,9 @@ export function serializeEventRowAsSummary(
     cancelledAt: row.cancelledAt ? row.cancelledAt.toISOString() : null,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
-    participantCount: 0,
-    confirmedCount: 0,
-    waitlistCount: 0,
+    participantCount: counts.subscribed + counts.confirmed,
+    confirmedCount: counts.confirmed,
+    waitlistCount: counts.waitlist,
     cidade: null,
     iAmIn: toViewerParticipation(viewerParticipation),
   }

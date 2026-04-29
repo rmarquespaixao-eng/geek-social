@@ -205,6 +205,44 @@ export class ParticipantsRepository {
   }
 
   /**
+   * Conta participantes (subscribed/confirmed/waitlist) agregados por evento,
+   * em uma única query. Usado pelas listagens para hidratar contadores.
+   */
+  async countByEvents(
+    eventIds: string[],
+  ): Promise<Map<string, { subscribed: number; confirmed: number; waitlist: number }>> {
+    const out = new Map<string, { subscribed: number; confirmed: number; waitlist: number }>()
+    if (eventIds.length === 0) return out
+    const rows = await this.db
+      .select({
+        eventId: eventParticipants.eventId,
+        status: eventParticipants.status,
+        count: sql<number>`count(*)::int`,
+      })
+      .from(eventParticipants)
+      .where(
+        and(
+          inArray(eventParticipants.eventId, eventIds),
+          inArray(
+            eventParticipants.status,
+            ['subscribed', 'confirmed', 'waitlist'] as ParticipantStatus[],
+          ),
+        ),
+      )
+      .groupBy(eventParticipants.eventId, eventParticipants.status)
+
+    for (const r of rows) {
+      const entry =
+        out.get(r.eventId) ?? { subscribed: 0, confirmed: 0, waitlist: 0 }
+      if (r.status === 'subscribed') entry.subscribed = r.count
+      else if (r.status === 'confirmed') entry.confirmed = r.count
+      else if (r.status === 'waitlist') entry.waitlist = r.count
+      out.set(r.eventId, entry)
+    }
+    return out
+  }
+
+  /**
    * Carrega de uma vez a participação do viewer em vários eventos.
    * Retorna apenas registros não-left, mapeados por eventId.
    * Usado pelas listagens para preencher `iAmIn`.

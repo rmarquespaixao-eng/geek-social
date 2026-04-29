@@ -1,4 +1,4 @@
-import { eq, sql } from 'drizzle-orm'
+import { eq, sql, isNull, and } from 'drizzle-orm'
 import type { DatabaseClient } from '../../shared/infra/database/postgres.client.js'
 import { posts, postMedia } from '../../shared/infra/database/schema.js'
 import type { IPostsRepository, Post, PostMedia, CreatePostData, UpdatePostData } from '../../shared/contracts/posts.repository.contract.js'
@@ -20,7 +20,9 @@ export class PostsRepository implements IPostsRepository {
   }
 
   async findById(id: string): Promise<Post | null> {
-    const result = await this.db.select().from(posts).where(eq(posts.id, id)).limit(1)
+    const result = await this.db.select().from(posts)
+      .where(and(eq(posts.id, id), isNull(posts.communityId), isNull(posts.deletedAt)))
+      .limit(1)
     if (!result[0]) return null
     const media = await this.db.select().from(postMedia)
       .where(eq(postMedia.postId, id))

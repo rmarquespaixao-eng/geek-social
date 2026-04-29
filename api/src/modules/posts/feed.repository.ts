@@ -1,4 +1,4 @@
-import { eq, and, or, inArray, notInArray, lt, desc, sql } from 'drizzle-orm'
+import { eq, and, or, inArray, notInArray, lt, desc, sql, isNull } from 'drizzle-orm'
 import type { DatabaseClient } from '../../shared/infra/database/postgres.client.js'
 import { posts, postMedia, users } from '../../shared/infra/database/schema.js'
 import type { IFeedRepository, GetFeedParams, GetProfilePostsParams, FeedCursor, EnrichedPost } from '../../shared/contracts/feed.repository.contract.js'
@@ -82,7 +82,7 @@ export class FeedRepository implements IFeedRepository {
       ? or(friendClause, discoveryClause)
       : discoveryClause
 
-    const conditions = [visibilityCondition!]
+    const conditions = [visibilityCondition!, isNull(posts.communityId), isNull(posts.deletedAt)]
     if (blockedIds.length > 0) conditions.push(notInArray(posts.userId, blockedIds))
     if (cursor) conditions.push(buildCursorCondition(cursor)!)
 
@@ -112,6 +112,8 @@ export class FeedRepository implements IFeedRepository {
     const conditions = [
       eq(posts.userId, ownerId),
       inArray(posts.visibility, [...visibilities]),
+      isNull(posts.communityId),
+      isNull(posts.deletedAt),
       ...(cursor ? [buildCursorCondition(cursor)!] : []),
     ]
 
@@ -135,7 +137,7 @@ export class FeedRepository implements IFeedRepository {
       .select(enrichedSelect(viewerId))
       .from(posts)
       .innerJoin(users, eq(users.id, posts.userId))
-      .where(eq(posts.id, id))
+      .where(and(eq(posts.id, id), isNull(posts.communityId), isNull(posts.deletedAt)))
       .limit(1)
 
     if (!rows[0]) return null

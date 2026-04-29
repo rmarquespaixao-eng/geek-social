@@ -27,7 +27,9 @@ export class CollectionsService {
     const collection = await this.collectionsRepo.create({
       userId,
       name: input.name,
-      description: input.description,
+      // O schema permite `null` (vindo do form), mas o repo só aceita undefined.
+      // Normaliza aqui pra manter o domínio estável.
+      description: input.description ?? undefined,
       type: input.type,
       visibility: input.visibility,
       autoShareToFeed: input.autoShareToFeed,
@@ -106,7 +108,10 @@ export class CollectionsService {
     if (!collection || collection.userId !== userId) {
       throw new CollectionsError('NOT_FOUND')
     }
-    return this.collectionsRepo.update(id, input)
+    return this.collectionsRepo.update(id, {
+      ...input,
+      description: input.description ?? undefined,
+    })
   }
 
   async delete(userId: string, id: string): Promise<void> {

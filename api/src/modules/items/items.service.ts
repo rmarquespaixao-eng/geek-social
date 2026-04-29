@@ -110,8 +110,9 @@ export class ItemsService {
       collectionId,
       name: input.name,
       fields: input.fields ?? {},
-      rating: input.rating,
-      comment: input.comment,
+      // Schema permite `null` (form clearing); repo aceita undefined.
+      rating: input.rating ?? undefined,
+      comment: input.comment ?? undefined,
     })
 
     // Compartilha no feed se o item explicitamente pediu (input.shareToFeed),

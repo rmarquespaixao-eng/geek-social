@@ -129,8 +129,9 @@ export async function buildApp() {
       return reply.status(400).send({ error: 'INVALID_INPUT', issues })
     }
     request.log.error({ err: error, url: request.url }, 'Unhandled error')
-    if (error.statusCode && error.statusCode >= 400 && error.statusCode < 500) {
-      return reply.status(error.statusCode).send({ error: error.message })
+    const err = error as { statusCode?: number; message?: string }
+    if (err.statusCode && err.statusCode >= 400 && err.statusCode < 500) {
+      return reply.status(err.statusCode).send({ error: err.message ?? 'ERROR' })
     }
     return reply.status(500).send({ error: 'INTERNAL_ERROR' })
   })

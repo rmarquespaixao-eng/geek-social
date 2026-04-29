@@ -9,7 +9,11 @@ const actions = useCommunityActions()
 
 async function onSubmit(payload: CreateCommunityPayload, cover: File | null, icon: File | null) {
   if (!cover || !icon) return
-  await actions.create(payload, cover, icon)
+  try {
+    await actions.create(payload, cover, icon)
+  } catch {
+    // error surfaced via actions.error.value bound to CommunityForm :error prop
+  }
 }
 </script>
 

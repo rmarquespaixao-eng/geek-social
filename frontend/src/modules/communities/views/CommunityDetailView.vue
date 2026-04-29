@@ -141,15 +141,23 @@ watch(community, (c) => {
 async function onJoin() {
   const c = community.value
   if (!c) return
-  const result = await actions.join(c.id)
-  if (result) await reload()
+  try {
+    await actions.join(c.id)
+    await reload()
+  } catch {
+    // error surfaced via actions.error.value
+  }
 }
 
 async function onLeave() {
   const c = community.value
   if (!c) return
-  await actions.leave(c.id)
-  await reload()
+  try {
+    await actions.leave(c.id)
+    await reload()
+  } catch {
+    // error surfaced via actions.error.value
+  }
 }
 
 async function submitTopic() {

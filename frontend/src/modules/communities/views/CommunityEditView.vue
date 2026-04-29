@@ -18,17 +18,23 @@ const isOwner = computed(() => viewerMembership.value?.role === 'owner')
 
 async function onSubmit(payload: CreateCommunityPayload, cover: File | null, icon: File | null) {
   if (!community.value) return
-  await actions.update(community.value.id, payload, cover, icon)
-  if (!actions.error.value) {
-    router.replace(`/comunidades/${community.value.slug}`)
+  const slug = community.value.slug
+  try {
+    await actions.update(community.value.id, payload, cover, icon)
+    router.replace(`/comunidades/${slug}`)
+  } catch {
+    // error surfaced via actions.error.value bound to CommunityForm :error prop
   }
 }
 
 async function onDelete() {
   if (!community.value) return
   if (!confirm('Tem certeza? A comunidade será desativada.')) return
-  await actions.softDelete(community.value.id)
-  // softDelete() navigates to /minhas-comunidades on success.
+  try {
+    await actions.softDelete(community.value.id)
+  } catch {
+    // error surfaced via actions.error.value
+  }
 }
 </script>
 

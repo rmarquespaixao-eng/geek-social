@@ -18,7 +18,7 @@ export function useCommunityActions() {
       return await fn()
     } catch (err) {
       error.value = err instanceof Error ? err : new Error(String(err))
-      return null
+      throw error.value
     } finally {
       acting.value = false
     }

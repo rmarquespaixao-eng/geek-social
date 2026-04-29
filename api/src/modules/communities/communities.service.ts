@@ -21,7 +21,7 @@ function deriveSlug(name: string): string {
   return name
     .toLowerCase()
     .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
+    .replace(/[̀-ͯ]/gu, '') // strip combining diacritics after NFD decomposition
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
     .slice(0, 100)

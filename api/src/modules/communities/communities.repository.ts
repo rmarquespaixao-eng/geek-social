@@ -107,8 +107,6 @@ function decodeCursor(token: string | undefined): CommunityCursor | null {
   }
 }
 
-export { encodeCursor as _encodeCommunityListCursor }
-
 /** SQL fragment that filters out soft-deleted rows. */
 function notDeleted() {
   return isNull(communities.deletedAt)

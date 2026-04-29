@@ -315,6 +315,14 @@ export class CommunitiesRepository {
     return { communities: page, nextCursor }
   }
 
+  async incrementTopicCount(id: string, tx?: DatabaseClient): Promise<void> {
+    const exec = tx ?? this.db
+    await exec
+      .update(communities)
+      .set({ topicCount: sql`${communities.topicCount} + 1`, updatedAt: new Date() })
+      .where(eq(communities.id, id))
+  }
+
   async incrementMemberCount(id: string, tx?: DatabaseClient): Promise<void> {
     const exec = tx ?? this.db
     await exec

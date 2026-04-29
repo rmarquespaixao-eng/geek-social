@@ -6,8 +6,9 @@ import type { IPostsRepository, Post, PostMedia, CreatePostData, UpdatePostData 
 export class PostsRepository implements IPostsRepository {
   constructor(private readonly db: DatabaseClient) {}
 
-  async create(data: CreatePostData): Promise<Post> {
-    const result = await this.db.insert(posts).values({
+  async create(data: CreatePostData, tx?: unknown): Promise<Post> {
+    const exec = (tx as DatabaseClient | undefined) ?? this.db
+    const result = await exec.insert(posts).values({
       userId: data.userId,
       type: data.type,
       content: data.content ?? null,

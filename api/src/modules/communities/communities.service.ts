@@ -83,45 +83,49 @@ export class CommunitiesService {
     ])
 
     const baseSlug = deriveSlug(input.name)
-    let slug = baseSlug
     let attempt = 1
-
-    // Retry up to 10× on slug collision (append -2, -3, ...)
     let community: CommunityRow | null = null
-    while (attempt <= 10) {
-      const existing = await this.repo.findBySlug(slug)
-      if (!existing) break
-      attempt++
-      slug = `${baseSlug}-${attempt}`
-    }
 
-    community = await this.db.transaction(async (tx) => {
-      const exec = tx as unknown as DatabaseClient
-      const created = await this.repo.create(
-        {
-          slug,
-          name: input.name,
-          description: input.description,
-          category: input.category,
-          iconUrl,
-          coverUrl,
-          visibility: input.visibility,
-          ownerId,
-        },
-        exec,
-      )
-      await this.membersRepo.insertMember(
-        {
-          communityId: created.id,
-          userId: ownerId,
-          role: 'owner',
-          status: 'active',
-        },
-        exec,
-      )
-      await this.repo.incrementMemberCount(created.id, exec)
-      return created
-    })
+    while (attempt <= 10) {
+      const slug = attempt === 1 ? baseSlug : `${baseSlug}-${attempt}`
+      try {
+        community = await this.db.transaction(async (tx) => {
+          const exec = tx as unknown as DatabaseClient
+          const created = await this.repo.create(
+            {
+              slug,
+              name: input.name,
+              description: input.description,
+              category: input.category,
+              iconUrl,
+              coverUrl,
+              visibility: input.visibility,
+              ownerId,
+            },
+            exec,
+          )
+          await this.membersRepo.insertMember(
+            {
+              communityId: created.id,
+              userId: ownerId,
+              role: 'owner',
+              status: 'active',
+            },
+            exec,
+          )
+          await this.repo.incrementMemberCount(created.id, exec)
+          return created
+        })
+        break
+      } catch (e: unknown) {
+        const pg = e as { code?: string; constraint?: string }
+        if (pg.code === '23505' && (pg.constraint ?? '').includes('slug')) {
+          attempt++
+          continue
+        }
+        throw e
+      }
+    }
 
     await this.auditLog.record('community_create', community.id, ownerId)
     return community
@@ -247,5 +251,9 @@ export class CommunitiesService {
 
   async findModerators(communityId: string) {
     return this.repo.findModerators(communityId)
+  }
+
+  async incrementTopicCount(communityId: string, tx?: DatabaseClient): Promise<void> {
+    return this.repo.incrementTopicCount(communityId, tx)
   }
 }

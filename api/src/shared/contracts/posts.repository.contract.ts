@@ -41,7 +41,7 @@ export type UpdatePostData = {
 }
 
 export interface IPostsRepository {
-  create(data: CreatePostData): Promise<Post>
+  create(data: CreatePostData, tx?: unknown): Promise<Post>
   findById(id: string): Promise<Post | null>
   update(id: string, data: UpdatePostData): Promise<Post>
   delete(id: string): Promise<void>

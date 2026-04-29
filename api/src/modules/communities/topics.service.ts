@@ -33,8 +33,9 @@ export class TopicsService {
         content: input.content ?? null,
         visibility: input.visibility ?? 'public',
         communityId,
-      })
+      }, exec)
       const meta = await this.topicsRepo.insertMeta(post.id, communityId, exec)
+      await this.communitiesService.incrementTopicCount(communityId, exec)
       return { post, meta }
     })
   }

@@ -3,6 +3,7 @@ import {
   pgTable, pgEnum, uuid, varchar, text,
   boolean, timestamp, date, integer, smallint, jsonb, uniqueIndex, index, numeric,
 } from 'drizzle-orm/pg-core'
+import { communityCategories } from '../../../modules/communities/categories.js'
 
 export const privacyEnum = pgEnum('privacy', ['public', 'friends_only', 'private'])
 export const collectionTypeEnum = pgEnum('collection_type', ['games', 'books', 'cardgames', 'boardgames', 'custom'])
@@ -196,12 +197,15 @@ export const posts = pgTable('posts', {
   visibility: postVisibilityEnum('visibility').notNull(),
   itemId: uuid('item_id').references(() => items.id, { onDelete: 'cascade' }),
   collectionId: uuid('collection_id').references(() => collections.id, { onDelete: 'set null' }),
+  communityId: uuid('community_id').references(() => communities.id, { onDelete: 'cascade' }),
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 }, (table) => ({
   userCreatedAtIdx: index('posts_user_created_at_idx').on(table.userId, table.createdAt),
   visibilityCreatedAtIdx: index('posts_visibility_created_at_idx').on(table.visibility, table.createdAt),
   itemIdx: index('posts_item_id_idx').on(table.itemId),
+  communityCreatedAtIdx: index('posts_community_created_at_idx').on(table.communityId, table.createdAt).where(sql`${table.communityId} IS NOT NULL`),
 }))
 
 export const postMedia = pgTable('post_media', {
@@ -367,6 +371,18 @@ export const notificationTypeEnum = pgEnum('notification_type', [
   'event_conflict_after_edit',
   'event_promoted_from_waitlist',
   'event_invited',
+  'community_join_requested',
+  'community_join_approved',
+  'community_join_rejected',
+  'community_invited',
+  'community_promoted_to_mod',
+  'community_demoted',
+  'community_banned',
+  'community_unbanned',
+  'community_new_topic',
+  'community_transfer_requested',
+  'community_transfer_accepted',
+  'community_transfer_rejected',
 ])
 
 export const notifications = pgTable('notifications', {
@@ -394,7 +410,7 @@ export const importBatchFinalized = pgTable('import_batch_finalized', {
   userIdx: index('import_batch_finalized_user_idx').on(table.userId, table.finalizedAt),
 }))
 
-export const reportTargetTypeEnum = pgEnum('report_target_type', ['user', 'message', 'post', 'collection', 'conversation'])
+export const reportTargetTypeEnum = pgEnum('report_target_type', ['user', 'message', 'post', 'collection', 'conversation', 'community_topic', 'community_comment'])
 export const reportReasonEnum = pgEnum('report_reason', ['spam', 'harassment', 'nsfw', 'hate', 'other'])
 export const reportStatusEnum = pgEnum('report_status', ['pending', 'reviewed', 'dismissed'])
 
@@ -506,4 +522,196 @@ export const eventInvites = pgTable('event_invites', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 }, (table) => ({
   uniqueInvite: uniqueIndex('event_invites_event_user_uniq').on(table.eventId, table.invitedUserId),
+}))
+
+// ── Comunidades ───────────────────────────────────────────────────
+export const communityVisibilityEnum = pgEnum('community_visibility', ['public', 'private', 'restricted'])
+export const communityMemberRoleEnum = pgEnum('community_member_role', ['owner', 'moderator', 'member'])
+export const communityMemberStatusEnum = pgEnum('community_member_status', ['pending', 'active', 'banned'])
+export const communityCategoryEnum = pgEnum('community_category', communityCategories)
+export const communityJoinRequestStatusEnum = pgEnum('community_join_request_status', ['pending', 'approved', 'rejected'])
+export const communityInviteStatusEnum = pgEnum('community_invite_status', ['pending', 'accepted', 'rejected', 'expired'])
+export const communityTransferStatusEnum = pgEnum('community_transfer_status', ['pending', 'accepted', 'rejected', 'cancelled'])
+export const communityPollModeEnum = pgEnum('community_poll_mode', ['single', 'multiple'])
+export const communityAuditActionEnum = pgEnum('community_audit_action', [
+  'community_create',
+  'community_update',
+  'community_delete',
+  'member_promote',
+  'member_demote',
+  'member_ban',
+  'member_unban',
+  'member_join_approved',
+  'member_join_rejected',
+  'topic_pin',
+  'topic_unpin',
+  'topic_lock',
+  'topic_unlock',
+  'topic_move',
+  'topic_delete',
+  'comment_delete',
+  'transfer_initiated',
+  'transfer_accepted',
+  'transfer_rejected',
+  'transfer_cancelled',
+])
+
+export const communities = pgTable('communities', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  ownerId: uuid('owner_id').references(() => users.id, { onDelete: 'set null' }),
+  slug: varchar('slug', { length: 120 }).unique().notNull(),
+  name: varchar('name', { length: 80 }).notNull(),
+  description: text('description').notNull(),
+  category: communityCategoryEnum('category').notNull(),
+  iconUrl: varchar('icon_url').notNull(),
+  coverUrl: varchar('cover_url').notNull(),
+  visibility: communityVisibilityEnum('visibility').notNull().default('public'),
+  rules: text('rules'),
+  welcomeMessage: text('welcome_message'),
+  memberCount: integer('member_count').notNull().default(0),
+  topicCount: integer('topic_count').notNull().default(0),
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  categoryVisibilityIdx: index('communities_category_visibility_idx').on(table.category, table.visibility),
+  ownerIdx: index('communities_owner_idx').on(table.ownerId),
+  deletedAtIdx: index('communities_deleted_at_idx').on(table.deletedAt),
+}))
+
+export const communityMembers = pgTable('community_members', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  communityId: uuid('community_id').notNull().references(() => communities.id, { onDelete: 'cascade' }),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  role: communityMemberRoleEnum('role').notNull().default('member'),
+  status: communityMemberStatusEnum('status').notNull().default('active'),
+  banReason: text('ban_reason'),
+  joinedAt: timestamp('joined_at', { withTimezone: true }).defaultNow().notNull(),
+  approvedAt: timestamp('approved_at', { withTimezone: true }),
+}, (table) => ({
+  communityUserUniq: uniqueIndex('community_members_community_user_uniq').on(table.communityId, table.userId),
+  communityStatusIdx: index('community_members_community_status_idx').on(table.communityId, table.status),
+  userStatusIdx: index('community_members_user_status_idx').on(table.userId, table.status),
+}))
+
+export const communityJoinRequests = pgTable('community_join_requests', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  communityId: uuid('community_id').notNull().references(() => communities.id, { onDelete: 'cascade' }),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  status: communityJoinRequestStatusEnum('status').notNull().default('pending'),
+  decidedBy: uuid('decided_by').references(() => users.id, { onDelete: 'set null' }),
+  decidedAt: timestamp('decided_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  pendingUniq: uniqueIndex('community_join_requests_pending_uniq')
+    .on(table.communityId, table.userId)
+    .where(sql`${table.status} = 'pending'`),
+}))
+
+export const communityTopicMeta = pgTable('community_topic_meta', {
+  postId: uuid('post_id').primaryKey().references(() => posts.id, { onDelete: 'cascade' }),
+  communityId: uuid('community_id').notNull().references(() => communities.id, { onDelete: 'cascade' }),
+  pinned: boolean('pinned').notNull().default(false),
+  locked: boolean('locked').notNull().default(false),
+  pinnedAt: timestamp('pinned_at', { withTimezone: true }),
+  lockedAt: timestamp('locked_at', { withTimezone: true }),
+  movedFromCommunityId: uuid('moved_from_community_id').references(() => communities.id, { onDelete: 'set null' }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  communityPinnedCreatedAtIdx: index('community_topic_meta_community_pinned_created_at_idx').on(table.communityId, table.pinned, table.createdAt),
+}))
+
+export const communityTransfers = pgTable('community_transfers', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  communityId: uuid('community_id').notNull().references(() => communities.id, { onDelete: 'cascade' }),
+  fromUserId: uuid('from_user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  toUserId: uuid('to_user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  status: communityTransferStatusEnum('status').notNull().default('pending'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  decidedAt: timestamp('decided_at', { withTimezone: true }),
+}, (table) => ({
+  pendingUniq: uniqueIndex('community_transfers_pending_uniq')
+    .on(table.communityId)
+    .where(sql`${table.status} = 'pending'`),
+}))
+
+export const communityAuditLog = pgTable('community_audit_log', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  communityId: uuid('community_id').notNull().references(() => communities.id, { onDelete: 'cascade' }),
+  actorId: uuid('actor_id').references(() => users.id, { onDelete: 'set null' }),
+  action: communityAuditActionEnum('action').notNull(),
+  targetUserId: uuid('target_user_id'),
+  targetTopicId: uuid('target_topic_id'),
+  metadata: jsonb('metadata').$type<Record<string, unknown>>().notNull().default({}),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  communityCreatedAtIdx: index('community_audit_log_community_created_at_idx').on(table.communityId, table.createdAt),
+}))
+
+export const communityInvites = pgTable('community_invites', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  communityId: uuid('community_id').notNull().references(() => communities.id, { onDelete: 'cascade' }),
+  invitedUserId: uuid('invited_user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  invitedBy: uuid('invited_by').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  status: communityInviteStatusEnum('status').notNull().default('pending'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }),
+}, (table) => ({
+  pendingUniq: uniqueIndex('community_invites_pending_uniq')
+    .on(table.communityId, table.invitedUserId)
+    .where(sql`${table.status} = 'pending'`),
+}))
+
+export const communityPolls = pgTable('community_polls', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  postId: uuid('post_id').notNull().unique().references(() => posts.id, { onDelete: 'cascade' }),
+  question: varchar('question', { length: 200 }).notNull(),
+  mode: communityPollModeEnum('mode').notNull(),
+  closesAt: timestamp('closes_at', { withTimezone: true }),
+  closedAt: timestamp('closed_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+})
+
+export const communityPollOptions = pgTable('community_poll_options', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  pollId: uuid('poll_id').notNull().references(() => communityPolls.id, { onDelete: 'cascade' }),
+  text: varchar('text', { length: 100 }).notNull(),
+  displayOrder: integer('display_order').notNull(),
+})
+
+export const communityPollVotes = pgTable('community_poll_votes', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  pollId: uuid('poll_id').notNull().references(() => communityPolls.id, { onDelete: 'cascade' }),
+  optionId: uuid('option_id').notNull().references(() => communityPollOptions.id, { onDelete: 'cascade' }),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  pollUserOptionUniq: uniqueIndex('community_poll_votes_poll_user_option_uniq').on(table.pollId, table.userId, table.optionId),
+}))
+
+export const communityNotificationPrefs = pgTable('community_notification_prefs', {
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  communityId: uuid('community_id').notNull().references(() => communities.id, { onDelete: 'cascade' }),
+  muted: boolean('muted').notNull().default(false),
+}, (table) => ({
+  pk: uniqueIndex('community_notification_prefs_pk').on(table.userId, table.communityId),
+}))
+
+export const communityBadges = pgTable('community_badges', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  communityId: uuid('community_id').references(() => communities.id, { onDelete: 'cascade' }),
+  key: varchar('key', { length: 100 }).notNull(),
+  name: varchar('name', { length: 100 }).notNull(),
+  description: text('description').notNull(),
+  iconUrl: varchar('icon_url').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+})
+
+export const communityBadgeGrants = pgTable('community_badge_grants', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  badgeId: uuid('badge_id').notNull().references(() => communityBadges.id, { onDelete: 'cascade' }),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  grantedAt: timestamp('granted_at', { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  badgeUserUniq: uniqueIndex('community_badge_grants_badge_user_uniq').on(table.badgeId, table.userId),
 }))

@@ -44,11 +44,6 @@ export type EventDetail = EventRow & {
   address: EventAddressRow | null
   online: EventOnlineRow | null
   host: { id: string; displayName: string; avatarUrl: string | null }
-  participantCounts: {
-    subscribed: number
-    confirmed: number
-    waitlist: number
-  }
 }
 
 export type CreateEventData = {
@@ -210,34 +205,12 @@ export class EventsRepository {
       .where(eq(users.id, ev.hostUserId))
       .limit(1)
 
-    const counts = await this.countParticipantsByStatus(id)
-
     return {
       ...ev,
       address,
       online,
       host: hostRow ?? { id: ev.hostUserId, displayName: 'Usuário', avatarUrl: null },
-      participantCounts: counts,
     }
-  }
-
-  async countParticipantsByStatus(eventId: string): Promise<EventDetail['participantCounts']> {
-    const rows = await this.db
-      .select({
-        status: eventParticipants.status,
-        count: sql<number>`count(*)::int`,
-      })
-      .from(eventParticipants)
-      .where(eq(eventParticipants.eventId, eventId))
-      .groupBy(eventParticipants.status)
-
-    const out = { subscribed: 0, confirmed: 0, waitlist: 0 }
-    for (const r of rows) {
-      if (r.status === 'subscribed') out.subscribed = r.count
-      else if (r.status === 'confirmed') out.confirmed = r.count
-      else if (r.status === 'waitlist') out.waitlist = r.count
-    }
-    return out
   }
 
   async update(id: string, data: UpdateEventData, tx?: DatabaseClient): Promise<EventRow> {

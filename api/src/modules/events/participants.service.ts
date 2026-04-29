@@ -1,6 +1,12 @@
 import type { DatabaseClient } from '../../shared/infra/database/postgres.client.js'
 import type { EventsRepository, EventRow } from './events.repository.js'
-import type { ParticipantsRepository, ParticipantRow, ParticipantWithUser } from './participants.repository.js'
+import {
+  activeFromCounts,
+  zeroCounts,
+  type ParticipantsRepository,
+  type ParticipantRow,
+  type ParticipantWithUser,
+} from './participants.repository.js'
 import type { InvitesRepository } from './invites.repository.js'
 import type { IFriendsRepository } from '../../shared/contracts/friends.repository.contract.js'
 import type { NotificationsService } from '../notifications/notifications.service.js'
@@ -75,8 +81,9 @@ export class ParticipantsService {
         throw new EventsError('ALREADY_SUBSCRIBED')
       }
 
-      const activeCount = await this.repo.countActive(eventId, exec)
-      const hasCapacity = ev.capacity == null || activeCount < ev.capacity
+      const counts =
+        (await this.repo.countByEvents([eventId], exec)).get(eventId) ?? zeroCounts()
+      const hasCapacity = ev.capacity == null || activeFromCounts(counts) < ev.capacity
 
       let participation: ParticipantRow
       if (existing && existing.status === 'left') {

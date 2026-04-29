@@ -20,6 +20,25 @@ export type ParticipantWithUser = ParticipantRow & {
   user: { id: string; displayName: string; avatarUrl: string | null }
 }
 
+/**
+ * Contagem padronizada de participantes em um evento.
+ * Fonte única: ParticipantsRepository.countByEvents.
+ */
+export type ParticipantCounts = {
+  subscribed: number
+  confirmed: number
+  waitlist: number
+}
+
+export function zeroCounts(): ParticipantCounts {
+  return { subscribed: 0, confirmed: 0, waitlist: 0 }
+}
+
+/** Vagas ocupadas (subscribed + confirmed) — usado em checagem de capacidade. */
+export function activeFromCounts(c: ParticipantCounts): number {
+  return c.subscribed + c.confirmed
+}
+
 export class ParticipantsRepository {
   constructor(private readonly db: DatabaseClient) {}
 
@@ -87,21 +106,6 @@ export class ParticipantsRepository {
       .update(eventParticipants)
       .set({ waitlistPosition: position, updatedAt: new Date() })
       .where(eq(eventParticipants.id, id))
-  }
-
-  /** Conta participantes ativos (subscribed + confirmed). Útil para checagem de capacidade. */
-  async countActive(eventId: string, tx?: DatabaseClient): Promise<number> {
-    const exec = tx ?? this.db
-    const rows = await exec
-      .select({ c: sql<number>`count(*)::int` })
-      .from(eventParticipants)
-      .where(
-        and(
-          eq(eventParticipants.eventId, eventId),
-          inArray(eventParticipants.status, ['subscribed', 'confirmed'] as ParticipantStatus[]),
-        ),
-      )
-    return rows[0]?.c ?? 0
   }
 
   /** Próximo número de posição na waitlist. */
@@ -205,15 +209,20 @@ export class ParticipantsRepository {
   }
 
   /**
-   * Conta participantes (subscribed/confirmed/waitlist) agregados por evento,
-   * em uma única query. Usado pelas listagens para hidratar contadores.
+   * Fonte única de contagem de participantes por evento. Retorna um Map por
+   * eventId com { subscribed, confirmed, waitlist }. Eventos sem registro
+   * não aparecem no map — o caller deve fazer fallback para zeros.
+   *
+   * Aceita tx opcional para uso dentro de transações (ex.: subscribe).
    */
   async countByEvents(
     eventIds: string[],
-  ): Promise<Map<string, { subscribed: number; confirmed: number; waitlist: number }>> {
-    const out = new Map<string, { subscribed: number; confirmed: number; waitlist: number }>()
+    tx?: DatabaseClient,
+  ): Promise<Map<string, ParticipantCounts>> {
+    const exec = tx ?? this.db
+    const out = new Map<string, ParticipantCounts>()
     if (eventIds.length === 0) return out
-    const rows = await this.db
+    const rows = await exec
       .select({
         eventId: eventParticipants.eventId,
         status: eventParticipants.status,
@@ -232,8 +241,7 @@ export class ParticipantsRepository {
       .groupBy(eventParticipants.eventId, eventParticipants.status)
 
     for (const r of rows) {
-      const entry =
-        out.get(r.eventId) ?? { subscribed: 0, confirmed: 0, waitlist: 0 }
+      const entry = out.get(r.eventId) ?? zeroCounts()
       if (r.status === 'subscribed') entry.subscribed = r.count
       else if (r.status === 'confirmed') entry.confirmed = r.count
       else if (r.status === 'waitlist') entry.waitlist = r.count

@@ -107,8 +107,10 @@ export class EventsController {
       if (!cover) {
         return reply.status(422).send({ error: 'INVALID_COVER' })
       }
-      const event = await this.service.createEvent(userId, parsed.data, cover)
-      return reply.status(201).send({ event: serializeEventSummary(event, null) })
+      const { detail, counts } = await this.service.createEvent(userId, parsed.data, cover)
+      return reply
+        .status(201)
+        .send({ event: serializeEventSummary(detail, counts, null) })
     } catch (e) {
       return mapEventsError(e, reply)
     }
@@ -126,7 +128,7 @@ export class EventsController {
     ])
     return reply.send({
       events: result.events.map(e =>
-        serializeEventRowAsSummary(e, viewerParts.get(e.id) ?? null, counts.get(e.id)),
+        serializeEventRowAsSummary(e, counts.get(e.id), viewerParts.get(e.id) ?? null),
       ),
       nextCursor: result.nextCursor,
     })
@@ -135,9 +137,11 @@ export class EventsController {
   async get(request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) {
     const { userId } = request.user as AccessTokenClaims
     try {
-      const { detail, participants, viewerParticipation } =
+      const { detail, counts, participants, viewerParticipation } =
         await this.service.getEventForViewer(userId, request.params.id)
-      return reply.send(serializeEventDetail(detail, participants, viewerParticipation))
+      return reply.send(
+        serializeEventDetail(detail, counts, participants, viewerParticipation),
+      )
     } catch (e) {
       return mapEventsError(e, reply)
     }
@@ -161,7 +165,7 @@ export class EventsController {
       }
       const result = await this.service.updateEvent(userId, request.params.id, parsed.data, cover)
       return reply.send({
-        event: serializeEventSummary(result.event, null),
+        event: serializeEventSummary(result.detail, result.counts, null),
         sensitiveChanged: result.sensitiveChanged,
       })
     } catch (e) {
@@ -195,7 +199,7 @@ export class EventsController {
     ])
     return reply.send({
       events: result.events.map(e =>
-        serializeEventRowAsSummary(e, viewerParts.get(e.id) ?? null, counts.get(e.id)),
+        serializeEventRowAsSummary(e, counts.get(e.id), viewerParts.get(e.id) ?? null),
       ),
       nextCursor: result.nextCursor,
     })
@@ -213,7 +217,7 @@ export class EventsController {
     ])
     return reply.send({
       events: result.events.map(e =>
-        serializeEventRowAsSummary(e, viewerParts.get(e.id) ?? null, counts.get(e.id)),
+        serializeEventRowAsSummary(e, counts.get(e.id), viewerParts.get(e.id) ?? null),
       ),
       nextCursor: result.nextCursor,
     })

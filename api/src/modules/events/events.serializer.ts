@@ -1,5 +1,10 @@
 import type { EventDetail as RepoEventDetail, EventRow } from './events.repository.js'
-import type { ParticipantRow, ParticipantWithUser } from './participants.repository.js'
+import {
+  zeroCounts,
+  type ParticipantCounts,
+  type ParticipantRow,
+  type ParticipantWithUser,
+} from './participants.repository.js'
 
 export type ApiEventSummary = {
   id: string
@@ -68,9 +73,9 @@ function toViewerParticipation(p: ParticipantRow | null): ApiViewerParticipation
 
 export function serializeEventSummary(
   detail: RepoEventDetail,
+  counts: ParticipantCounts,
   viewerParticipation: ParticipantRow | null = null,
 ): ApiEventSummary {
-  const counts = detail.participantCounts
   return {
     id: detail.id,
     hostUserId: detail.hostUserId,
@@ -113,11 +118,12 @@ export function serializeEventParticipant(p: ParticipantWithUser): ApiEventParti
 
 export function serializeEventDetail(
   detail: RepoEventDetail,
+  counts: ParticipantCounts,
   participants: ParticipantWithUser[],
   viewerParticipation: ParticipantRow | null,
 ): ApiEventDetailEnvelope {
   return {
-    event: serializeEventSummary(detail, viewerParticipation),
+    event: serializeEventSummary(detail, counts, viewerParticipation),
     participants: participants.map(serializeEventParticipant),
     iAmIn: toViewerParticipation(viewerParticipation),
     hostInfo: {
@@ -145,18 +151,17 @@ export function serializeEventDetail(
   }
 }
 
-export type ParticipantCounts = { subscribed: number; confirmed: number; waitlist: number }
-
 /**
  * Para listagens (`GET /events`, `/me/hosted`, `/me/attending`) o repo entrega
- * apenas EventRow (sem joins de host/counts/address). O controller carrega em
- * batch a participação do viewer e os contadores agregados, e os passa aqui
- * para que cada card já chegue ao frontend com `iAmIn` e contagens corretas.
+ * apenas EventRow (sem joins de host/address). O controller carrega em batch a
+ * participação do viewer e os contadores agregados (via
+ * ParticipantsRepository.countByEvents) e os passa aqui para que cada card já
+ * chegue ao frontend com `iAmIn` e contagens corretas.
  */
 export function serializeEventRowAsSummary(
   row: EventRow,
+  counts: ParticipantCounts = zeroCounts(),
   viewerParticipation: ParticipantRow | null = null,
-  counts: ParticipantCounts = { subscribed: 0, confirmed: 0, waitlist: 0 },
 ): ApiEventSummary {
   return {
     id: row.id,

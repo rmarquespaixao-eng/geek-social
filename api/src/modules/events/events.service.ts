@@ -10,10 +10,12 @@ import type {
   EventRow,
   UpdateEventData,
 } from './events.repository.js'
-import type {
-  ParticipantsRepository,
-  ParticipantRow,
-  ParticipantWithUser,
+import {
+  zeroCounts,
+  type ParticipantsRepository,
+  type ParticipantRow,
+  type ParticipantWithUser,
+  type ParticipantCounts,
 } from './participants.repository.js'
 import type { InvitesRepository } from './invites.repository.js'
 import type { EventJobsScheduler } from './jobs/event-jobs.scheduler.js'
@@ -37,10 +39,14 @@ export type CoverUpload = {
   mimeType: string
 }
 
-export type CreateEventResult = EventDetail
+export type CreateEventResult = {
+  detail: EventDetail
+  counts: ParticipantCounts
+}
 
 export type UpdateEventResult = {
-  event: EventDetail
+  detail: EventDetail
+  counts: ParticipantCounts
   sensitiveChanged: SensitiveField[]
   affectedParticipants: { userId: string; conflictEventId: string | null }[]
 }
@@ -158,7 +164,8 @@ export class EventsService {
 
     const detail = await this.repo.findDetail(created.id)
     if (!detail) throw new EventsError('EVENT_NOT_FOUND')
-    return detail
+    // Evento recém-criado: contagens são zero (host não é participante).
+    return { detail, counts: zeroCounts() }
   }
 
   // ─────────────────────────────────────────────────────────────
@@ -172,23 +179,26 @@ export class EventsService {
   }
 
   /**
-   * Versão "para a view": carrega detail + participantes ativos + participação
-   * do viewer numa única chamada. Usada pelo controller GET /events/:id.
+   * Versão "para a view": carrega detail + counts + participantes + participação
+   * do viewer em paralelo. Usada pelo controller GET /events/:id.
    */
   async getEventForViewer(
     viewerId: string,
     eventId: string,
   ): Promise<{
     detail: EventDetail
+    counts: ParticipantCounts
     participants: ParticipantWithUser[]
     viewerParticipation: ParticipantRow | null
   }> {
     const detail = await this.getEvent(viewerId, eventId)
-    const [participants, viewerParticipation] = await Promise.all([
+    const [participants, viewerParticipation, countsMap] = await Promise.all([
       this.participantsRepo.listByEvent(eventId),
       this.participantsRepo.findByEventAndUser(eventId, viewerId),
+      this.participantsRepo.countByEvents([eventId]),
     ])
-    return { detail, participants, viewerParticipation }
+    const counts = countsMap.get(eventId) ?? zeroCounts()
+    return { detail, counts, participants, viewerParticipation }
   }
 
   async listEvents(viewerId: string, query: ListEventsQuery) {
@@ -384,9 +394,13 @@ export class EventsService {
       }
     }
 
-    const detail = await this.repo.findDetail(eventId)
+    const [detail, countsMap] = await Promise.all([
+      this.repo.findDetail(eventId),
+      this.participantsRepo.countByEvents([eventId]),
+    ])
     if (!detail) throw new EventsError('EVENT_NOT_FOUND')
-    return { event: detail, sensitiveChanged, affectedParticipants }
+    const counts = countsMap.get(eventId) ?? zeroCounts()
+    return { detail, counts, sensitiveChanged, affectedParticipants }
   }
 
   // ─────────────────────────────────────────────────────────────

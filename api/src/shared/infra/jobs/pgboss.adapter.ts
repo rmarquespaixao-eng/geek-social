@@ -16,6 +16,8 @@ export class PgBossAdapter implements IJobsQueue {
     await this.boss.start()
     await this.boss.createQueue('steam.import-game')
     await this.boss.createQueue('steam.enrich-game')
+    await this.boss.createQueue('event.reminder_48h')
+    await this.boss.createQueue('event.reminder_2h')
     this.started = true
   }
 
@@ -93,5 +95,21 @@ export class PgBossAdapter implements IJobsQueue {
       [userId],
     )
     return rows.length > 0
+  }
+
+  /**
+   * Cancela jobs pendentes (estado 'created' ou 'retry') de lembretes
+   * de um evento específico. Não toca em jobs já 'active' nem 'completed'.
+   */
+  async cancelEventJobs(eventId: string): Promise<void> {
+    const db = this.boss.getDb()
+    await db.executeSql(
+      `UPDATE pgboss.job
+       SET state = 'cancelled', completedon = now()
+       WHERE name IN ('event.reminder_48h', 'event.reminder_2h')
+         AND state IN ('created', 'retry')
+         AND data->>'eventId' = $1`,
+      [eventId],
+    )
   }
 }

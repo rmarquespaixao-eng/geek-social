@@ -34,6 +34,12 @@ export async function truncateAll(): Promise<void> {
       message_attachments,
       conversation_members,
       conversations,
+      event_invites,
+      event_participants,
+      event_addresses,
+      event_online_details,
+      events,
+      notifications,
       users
     RESTART IDENTITY CASCADE
   `)

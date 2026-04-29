@@ -96,9 +96,11 @@ export const updateEventSchema = z
     online: onlineDetailsSchema.optional().nullable(),
   })
 
-export const cancelEventSchema = z.object({
-  reason: z.string().trim().max(500).optional().nullable(),
-})
+export const cancelEventSchema = z
+  .object({
+    reason: z.string().trim().max(500).optional().nullable(),
+  })
+  .nullish()
 
 // ── Listagem / filtros ───────────────────────────────────────────────
 export const listEventsQuerySchema = z.object({

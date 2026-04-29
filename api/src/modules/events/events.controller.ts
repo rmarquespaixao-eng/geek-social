@@ -164,12 +164,12 @@ export class EventsController {
 
   async cancel(request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) {
     const { userId } = request.user as AccessTokenClaims
-    const parsed = cancelEventSchema.safeParse(request.body ?? {})
+    const parsed = cancelEventSchema.safeParse(request.body)
     if (!parsed.success) {
       return reply.status(400).send({ error: 'INVALID_INPUT', issues: parsed.error.issues })
     }
     try {
-      await this.service.cancelEvent(userId, request.params.id, parsed.data.reason ?? null)
+      await this.service.cancelEvent(userId, request.params.id, parsed.data?.reason ?? null)
       return reply.status(204).send()
     } catch (e) {
       return mapEventsError(e, reply)

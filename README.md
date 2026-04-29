@@ -309,4 +309,12 @@ Frontend e docs ainda não têm suíte de testes nesta alpha.
 
 ## Licença
 
-GPL-3.0 — veja [LICENSE](./LICENSE).
+**AGPL-3.0-only** — veja [LICENSE](./LICENSE).
+
+A AGPL v3 é uma licença copyleft forte: qualquer fork pode ser usado livremente,
+inclusive comercialmente, mas se você **rodar uma versão modificada como serviço
+acessível por rede** (ex: SaaS, hospedagem própria com modificações), a licença
+te obriga a disponibilizar o código-fonte das modificações para os usuários
+daquele serviço.
+
+Isso fecha o "SaaS loophole" da GPL v3 — adequado pra uma rede social.

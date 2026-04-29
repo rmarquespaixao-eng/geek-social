@@ -147,21 +147,21 @@ const variantClass: Record<'primary' | 'danger' | 'ghost', string> = {
     :data-event-id="event.id"
   >
     <!-- Cover -->
-    <div class="relative h-32 bg-slate-700">
+    <div class="relative h-20 bg-slate-700">
       <img
         v-if="event.coverUrl"
         :src="event.coverUrl"
         :alt="event.name"
         class="w-full h-full object-cover"
       />
-      <div class="absolute top-2 right-2 flex gap-1.5">
+      <div class="absolute top-1.5 right-1.5 flex gap-1">
         <EventStatusBadge :status="event.status" />
         <EventTypeBadge :type="event.type" />
       </div>
       <WaitlistPositionBadge
         v-if="event.iAmIn?.status === 'waitlist' && event.iAmIn.waitlistPosition"
         :position="event.iAmIn.waitlistPosition"
-        class="absolute top-2 left-2"
+        class="absolute top-1.5 left-1.5"
       />
     </div>
 
@@ -169,20 +169,20 @@ const variantClass: Record<'primary' | 'danger' | 'ghost', string> = {
     <div class="flex">
       <!-- Stub (~30% width) -->
       <div
-        class="event-ticket-stub w-[30%] flex flex-row items-center justify-center gap-2 py-4 px-2 border-r border-dashed border-slate-600/60 bg-[#181a30]"
+        class="event-ticket-stub w-[30%] flex flex-row items-center justify-center gap-1.5 py-2.5 px-1.5 border-r border-dashed border-slate-600/60 bg-[#181a30]"
       >
         <div class="flex flex-col items-center leading-none">
-          <p class="text-[10px] font-mono uppercase text-slate-500">{{ dayStub.weekday }}</p>
-          <p class="text-3xl font-mono font-bold text-amber-400 leading-none">{{ dayStub.day }}</p>
-          <p class="text-[10px] font-mono uppercase text-slate-400">{{ dayStub.month }}</p>
+          <p class="text-[9px] font-mono uppercase text-slate-500">{{ dayStub.weekday }}</p>
+          <p class="text-xl font-mono font-bold text-amber-400 leading-none">{{ dayStub.day }}</p>
+          <p class="text-[9px] font-mono uppercase text-slate-400">{{ dayStub.month }}</p>
         </div>
-        <p class="text-sm font-mono font-semibold text-slate-300 whitespace-nowrap">{{ dayStub.start }}</p>
+        <p class="text-xs font-mono font-semibold text-slate-300 whitespace-nowrap">{{ dayStub.start }}</p>
       </div>
 
       <!-- Content body -->
-      <div class="flex-1 p-4 space-y-2 min-w-0">
-        <h3 class="text-base font-bold text-slate-100 truncate">{{ event.name }}</h3>
-        <div class="space-y-1 text-xs text-slate-400">
+      <div class="flex-1 p-3 space-y-1.5 min-w-0">
+        <h3 class="text-sm font-bold text-slate-100 truncate">{{ event.name }}</h3>
+        <div class="space-y-0.5 text-[11px] text-slate-400">
           <p class="font-mono">📅 {{ dayLabel }} · {{ timeLabel }}</p>
           <p v-if="event.type === 'online'">🌐 Online</p>
           <p v-else-if="cidade">📍 {{ cidade }}</p>
@@ -195,11 +195,11 @@ const variantClass: Record<'primary' | 'danger' | 'ghost', string> = {
         </div>
 
         <!-- Actions -->
-        <div class="flex flex-wrap gap-2 pt-2">
+        <div class="flex flex-wrap gap-1.5 pt-1">
           <button
             type="button"
             data-testid="primary-action"
-            :class="['px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors', variantClass[primaryAction.variant]]"
+            :class="['px-2.5 py-1 rounded-md text-[11px] font-semibold transition-colors', variantClass[primaryAction.variant]]"
             :disabled="primaryAction.disabled"
             @click="handlePrimary"
           >
@@ -211,7 +211,7 @@ const variantClass: Record<'primary' | 'danger' | 'ghost', string> = {
             type="button"
             data-testid="view-detail"
             @click="goDetail"
-            class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-700/40 hover:bg-slate-700/60 text-slate-300 transition-colors"
+            class="px-2.5 py-1 rounded-md text-[11px] font-semibold bg-slate-700/40 hover:bg-slate-700/60 text-slate-300 transition-colors"
           >
             Ver detalhes
           </button>
@@ -220,7 +220,7 @@ const variantClass: Record<'primary' | 'danger' | 'ghost', string> = {
             type="button"
             data-testid="view-participants"
             @click="emit('view-participants', event.id)"
-            class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-700/40 hover:bg-slate-700/60 text-slate-300 transition-colors"
+            class="px-2.5 py-1 rounded-md text-[11px] font-semibold bg-slate-700/40 hover:bg-slate-700/60 text-slate-300 transition-colors"
           >
             Ver participantes
           </button>
@@ -230,7 +230,7 @@ const variantClass: Record<'primary' | 'danger' | 'ghost', string> = {
             type="button"
             data-testid="cancel-event"
             @click="emit('cancel', event.id)"
-            class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-red-500/15 hover:bg-red-500/25 text-red-400 border border-red-500/30 transition-colors"
+            class="px-2.5 py-1 rounded-md text-[11px] font-semibold bg-red-500/15 hover:bg-red-500/25 text-red-400 border border-red-500/30 transition-colors"
           >
             Cancelar Rolê
           </button>
@@ -243,9 +243,9 @@ const variantClass: Record<'primary' | 'danger' | 'ghost', string> = {
 <style scoped>
 /* Perforated ticket effect — circles at the seam between stub and body. */
 .event-ticket {
-  --hole: 8px;
+  --hole: 7px;
   -webkit-mask-image:
-    radial-gradient(circle at 30% 8.5rem, transparent var(--hole), black calc(var(--hole) + 1px)),
+    radial-gradient(circle at 30% 5rem, transparent var(--hole), black calc(var(--hole) + 1px)),
     radial-gradient(circle at 30% 100%, transparent var(--hole), black calc(var(--hole) + 1px));
   -webkit-mask-composite: source-in;
           mask-composite: intersect;

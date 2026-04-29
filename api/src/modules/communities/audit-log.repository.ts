@@ -1,4 +1,4 @@
-import { and, desc, eq, sql } from 'drizzle-orm'
+import { and, desc, eq } from 'drizzle-orm'
 import type { DatabaseClient } from '../../shared/infra/database/postgres.client.js'
 import { communityAuditLog } from '../../shared/infra/database/schema.js'
 
@@ -57,7 +57,7 @@ export class AuditLogRepository {
     const conditions = [eq(communityAuditLog.communityId, communityId)]
     if (query.actorId) conditions.push(eq(communityAuditLog.actorId, query.actorId))
     if (query.action) {
-      conditions.push(sql`${communityAuditLog.action} = ${query.action}`)
+      conditions.push(eq(communityAuditLog.action, query.action as CommunityAuditAction))
     }
 
     const rows = await this.db

@@ -1,4 +1,4 @@
-import { and, desc, eq, isNull, sql } from 'drizzle-orm'
+import { and, desc, eq, isNull, sql, or, lt } from 'drizzle-orm'
 import type { DatabaseClient } from '../../shared/infra/database/postgres.client.js'
 import {
   posts,
@@ -25,20 +25,26 @@ export class TopicsRepository {
 
   async findByCommunity(
     communityId: string,
-    opts: { cursor?: { createdAt: Date; postId: string } | null; limit: number },
-  ): Promise<{ topics: TopicRow[]; nextCursor: { createdAt: Date; postId: string } | null }> {
+    opts: { cursor?: { pinned: boolean; createdAt: Date; postId: string } | null; limit: number },
+  ): Promise<{ topics: TopicRow[]; nextCursor: { pinned: boolean; createdAt: Date; postId: string } | null }> {
     const conditions = [
       eq(communityTopicMeta.communityId, communityId),
       isNull(posts.deletedAt),
     ]
 
     if (opts.cursor) {
-      const { createdAt, postId } = opts.cursor
+      const { pinned, createdAt, postId } = opts.cursor
       conditions.push(
-        sql`(
-          (${communityTopicMeta.pinned} = false AND ${posts.createdAt} < ${createdAt})
-          OR (${communityTopicMeta.pinned} = false AND ${posts.createdAt} = ${createdAt} AND ${posts.id} < ${postId})
-        )`,
+        or(
+          sql`(${communityTopicMeta.pinned} = false AND ${pinned} = true)`,
+          and(
+            sql`${communityTopicMeta.pinned} = ${pinned}`,
+            or(
+              lt(posts.createdAt, createdAt),
+              and(eq(posts.createdAt, createdAt), sql`${posts.id} < ${postId}`),
+            ),
+          ),
+        )!,
       )
     }
 
@@ -84,7 +90,7 @@ export class TopicsRepository {
     const hasMore = mapped.length > opts.limit
     const page = hasMore ? mapped.slice(0, opts.limit) : mapped
     const last = page[page.length - 1]
-    const nextCursor = hasMore && last ? { createdAt: last.createdAt, postId: last.postId } : null
+    const nextCursor = hasMore && last ? { pinned: last.pinned, createdAt: last.createdAt, postId: last.postId } : null
     return { topics: page, nextCursor }
   }
 

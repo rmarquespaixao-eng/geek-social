@@ -75,15 +75,15 @@ export class TopicsService {
   }
 }
 
-function encodeCursor(c: { createdAt: Date; postId: string }): string {
-  return Buffer.from(JSON.stringify({ t: c.createdAt.toISOString(), p: c.postId })).toString('base64url')
+function encodeCursor(c: { pinned: boolean; createdAt: Date; postId: string }): string {
+  return Buffer.from(JSON.stringify({ pn: c.pinned, t: c.createdAt.toISOString(), p: c.postId })).toString('base64url')
 }
 
-function decodeCursor(token: string): { createdAt: Date; postId: string } | null {
+function decodeCursor(token: string): { pinned: boolean; createdAt: Date; postId: string } | null {
   try {
     const raw = Buffer.from(token, 'base64url').toString('utf-8')
-    const parsed = JSON.parse(raw) as { t: string; p: string }
-    return { createdAt: new Date(parsed.t), postId: parsed.p }
+    const parsed = JSON.parse(raw) as { pn: boolean; t: string; p: string }
+    return { pinned: parsed.pn, createdAt: new Date(parsed.t), postId: parsed.p }
   } catch {
     return null
   }

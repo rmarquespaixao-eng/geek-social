@@ -223,7 +223,14 @@ export class CommunitiesRepository {
     }
 
     if (query.category) conditions.push(eq(communities.category, query.category))
-    if (query.search) conditions.push(ilike(communities.name, `%${query.search}%`))
+    if (query.search) {
+      conditions.push(
+        or(
+          ilike(communities.name, `%${query.search}%`),
+          ilike(communities.description, `%${query.search}%`),
+        )!,
+      )
+    }
 
     const cursor = decodeCursor(query.cursor)
     if (cursor) {
@@ -239,7 +246,7 @@ export class CommunitiesRepository {
       .select()
       .from(communities)
       .where(and(...conditions))
-      .orderBy(desc(communities.memberCount), desc(communities.createdAt))
+      .orderBy(desc(communities.createdAt))
       .limit(query.limit + 1)) as CommunityRow[]
 
     const hasMore = rows.length > query.limit

@@ -1,0 +1,41 @@
+---
+title: GET /integrations/steam/games
+description: Listar jogos owned pelo usuário no Steam
+---
+
+import Meta from '@/generated/api/steam/list-games/meta'
+import Request from '@/generated/api/steam/list-games/request'
+import Responses from '@/generated/api/steam/list-games/responses'
+import Errors from '@/generated/api/steam/list-games/errors'
+import Examples from '@/generated/api/steam/list-games/examples'
+
+<Meta />
+
+Chama GetOwnedGames da Steam Web API com a key salva. Resposta inclui appId, name, playtimeForever, iconUrl. Falha com STEAM_PROFILE_PRIVATE se perfil não público.
+
+## Request
+
+<Request />
+
+## Response
+
+<Responses />
+
+## Erros
+
+<Errors />
+
+{/* TODO: para cada código de erro acima, explique a causa e como resolver. */}
+
+## Exemplos
+
+<Examples />
+
+
+## Side effects
+
+{/* TODO: eventos de socket emitidos, notificações disparadas, jobs enfileirados, cascades. */}
+
+## Relacionados
+
+{/* TODO: links pra módulo, conceitos, endpoints relacionados. */}

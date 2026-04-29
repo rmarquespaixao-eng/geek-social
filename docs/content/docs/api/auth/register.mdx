@@ -1,0 +1,91 @@
+---
+title: POST /auth/register
+description: Registrar nova conta
+---
+
+import Meta from '@/generated/api/auth/register/meta'
+import Request from '@/generated/api/auth/register/request'
+import Responses from '@/generated/api/auth/register/responses'
+import Errors from '@/generated/api/auth/register/errors'
+import Examples from '@/generated/api/auth/register/examples'
+
+<Meta />
+
+Cria uma conta nova com **e-mail/senha** e retorna um par de tokens já autenticando o usuário (sem precisar de login adicional). Dispara também um e-mail de verificação de endereço.
+
+A conta criada inicia com `email_verified = false` mas **não há restrição de uso enquanto não verificar** — o e-mail é informativo apenas hoje. Se quiser bloquear features pra contas não verificadas, fazer no frontend ou criar um middleware específico.
+
+## Quando chamar
+
+- No formulário de signup
+- Não chamar pra "vincular Google a conta nova" — esse fluxo é via `GET /auth/google` (com state `mode: 'login'`)
+
+## Request
+
+<Request />
+
+**Validação**:
+- `email`: formato e-mail válido (Zod `.email()`)
+- `password`: 8–100 caracteres
+- `displayName`: 2–100 caracteres
+
+**Notas**:
+- O e-mail é validado contra unicidade no DB (constraint UNIQUE em `users.email`)
+- A senha é processada com `bcrypt.hash(password, 12)` antes de persistir. Custo 12 → ~250ms de CPU; aceito como deliberadamente lento.
+- `displayName` é texto livre, não precisa ser único, não há restrição de caracteres especiais
+
+## Response
+
+<Responses />
+
+A resposta espelha o `login`: access token + user + cookie de refresh. O usuário **já está logado** após register.
+
+## Erros
+
+<Errors />
+
+**Como resolver cada caso**:
+
+| Código | Causa | Como resolver |
+|---|---|---|
+| `EMAIL_ALREADY_EXISTS` (mensagem em PT atualmente: `"E-mail já cadastrado"`) | Já existe `users.email` igual | Direcione o usuário pra `/login` ou `/forgot-password` |
+| Erro de validação Zod (status `400` automático do Fastify) | Body não bate com `registerSchema` | Mostre os campos com erro retornados em `validation`/`issues` |
+
+## Exemplos
+
+<Examples />
+
+
+### Resposta de sucesso (201)
+
+```json
+{
+  "accessToken": "eyJhbGc...",
+  "user": {
+    "id": "uuid-novo",
+    "email": "newuser@example.com",
+    "displayName": "Novo Usuário"
+  }
+}
+```
+
+E no `Set-Cookie`: igual ao `/auth/login`.
+
+## Side effects
+
+- **DB**: `INSERT INTO users (...)` com `password_hash` bcrypt e `email_verified = false`
+- **DB**: `INSERT INTO refresh_tokens (...)` — sessão criada
+- **E-mail**: envia e-mail de verificação via `IEmailService.sendEmailVerification(email, verificationUrl)`. Em dev usa o `ConsoleEmailAdapter` (loga no terminal). Em prod, via SES.
+- **Cookie**: refresh token setado
+- **Sem notificações in-app** disparadas (não há "alguém pra notificar")
+- **Sem eventos de socket**
+
+⚠️ **Endpoint de verificação ainda não implementado** — o link no e-mail aponta pra `${APP_URL}/auth/verify-email?token=...` mas hoje não há rota. Pendência: criar `POST /auth/verify-email` que consome o token e seta `email_verified = true`. Sem isso, o e-mail é só ornamental.
+
+## Relacionados
+
+- Conceito: [Autenticação](/docs/concepts/autenticacao)
+- Módulo: [Auth](/docs/modules/auth) — fluxo completo
+- Endpoint: [`POST /auth/login`](/docs/api/auth/login) — usuário já tem conta
+- Endpoint: [`GET /auth/google`](/docs/api/auth/google-start) — alternativa social
+- Tabela: [`users`](/docs/data-model/tables/users) — schema completo da conta

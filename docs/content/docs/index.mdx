@@ -1,0 +1,28 @@
+---
+title: Geek Social — Documentação
+description: Documentação técnica completa da API, banco de dados e fluxos do Geek Social.
+---
+
+import { Cards, Card } from 'fumadocs-ui/components/card';
+
+Documentação técnica do **Geek Social** — rede social para gamers e colecionadores. Aqui você encontra a referência da API REST, o dicionário de dados, fluxos por módulo, e convenções do sistema.
+
+## Por onde começar?
+
+<Cards>
+  <Card title="Roadmap" href="/docs/roadmap" description="Estado atual + features planejadas (comunidades, recomendação, E2E, admin, AI moderation)." />
+  <Card title="Filosofia do projeto" href="/docs/intro/filosofia" description="Os 15 princípios que guiam o código. Leia antes de PR." />
+  <Card title="Visão geral do produto" href="/docs/intro/visao-geral" description="O que é o Geek Social, propósito, principais funcionalidades." />
+  <Card title="Setup local" href="/docs/intro/setup-local" description="Como subir o stack completo localmente em poucos minutos." />
+  <Card title="Módulo Auth" href="/docs/modules/auth" description="Visão funcional: fluxos completos, eventos, edge cases." />
+  <Card title="Códigos de erro" href="/docs/reference/codigos-erro" description="Catálogo dos códigos tipados que a API retorna." />
+</Cards>
+
+## Estrutura
+
+- **Introdução** — produto, stack, setup
+- **Conceitos** — autenticação, erros, realtime, storage, notificações
+- **API Reference** — uma página por endpoint, com schema, exemplos e erros
+- **Banco de dados** — ER, dicionário de tabelas, convenções, migrations
+- **Módulos** — funcionamento detalhado por área de negócio com sequence diagrams
+- **Referência** — glossário, códigos de erro, eventos de socket, tipos de notificação

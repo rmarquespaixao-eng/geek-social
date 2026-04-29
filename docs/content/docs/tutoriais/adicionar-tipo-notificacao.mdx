@@ -1,0 +1,212 @@
+---
+title: Como adicionar um novo tipo de notificação
+description: Adicionar valor ao enum, integrar no service, definir copy no frontend.
+---
+
+Adicionar um type novo a `notifications.type` envolve **migration de enum + service hook + UI no frontend**.
+
+## Exemplo
+
+Vamos adicionar `birthday_reminder` — notificação enviada quando um amigo faz aniversário.
+
+## 1. Adicione no enum (schema.ts)
+
+`src/shared/infra/database/schema.ts`:
+
+```ts
+export const notificationTypeEnum = pgEnum('notification_type', [
+  // ... existentes
+  'birthday_reminder',  // NOVO
+])
+```
+
+## 2. Gere migration
+
+```bash
+cd ~/workspace_ssh/geek-social-api
+npm run db:generate
+```
+
+Drizzle gera:
+
+```sql
+ALTER TYPE "notification_type" ADD VALUE 'birthday_reminder';
+```
+
+⚠️ Em PG \< 12, isso precisa rodar **fora de transação**. Se Drizzle envolver em BEGIN/COMMIT, vai falhar — edite manualmente removendo o BEGIN ou rode na mão.
+
+## 3. Aplique
+
+```bash
+npm run db:migrate
+```
+
+## 4. Defina o `entity_id` semântica
+
+Para `birthday_reminder`, qual entidade aponta? Opções:
+- `users.id` do aniversariante (mais comum pra navegar pro perfil dele)
+- `friendships.id` da relação
+
+Vamos com `users.id` do aniversariante.
+
+Documente em [Tipos de notificação](/docs/reference/tipos-notificacao):
+
+| Type | `entity_id` aponta pra | Sugestão de copy | Link sugerido |
+|---|---|---|---|
+| `birthday_reminder` | `users.id` (aniversariante) | `Hoje é aniversário de {actor}` | `/perfil/{actor}` |
+
+## 5. Implemente o disparo
+
+Onde será chamado? Pra aniversário, faz sentido ser um **cron diário**:
+
+`src/shared/infra/jobs/birthday-reminder.cron.ts`:
+
+```ts
+export async function runBirthdayReminders(deps: {
+  usersRepo: IUsersRepository
+  friendsRepo: IFriendsRepository
+  notificationsService: NotificationsService
+}) {
+  const today = new Date().toISOString().slice(5, 10)  // MM-DD
+
+  const aniversariantes = await deps.usersRepo.findByBirthdayMatch(today)
+
+  for (const u of aniversariantes) {
+    const friends = await deps.friendsRepo.listAccepted(u.id)
+    for (const friend of friends) {
+      deps.notificationsService.notify({
+        recipientId: friend.id,
+        actorId: u.id,            // o aniversariante é o "actor"
+        type: 'birthday_reminder',
+        entityId: u.id,
+      }).catch(() => {})
+    }
+  }
+}
+```
+
+## 6. Schedule o cron
+
+`src/app.ts`, dentro de `buildApp()`:
+
+```ts
+const birthdayInterval = setInterval(() => {
+  runBirthdayReminders({ ... }).catch(err => app.log.error({ err }, 'birthday reminder failed'))
+}, 24 * 60 * 60 * 1000)  // 1x por dia
+
+app.addHook('onClose', async () => {
+  clearInterval(birthdayInterval)
+})
+```
+
+> Em prod, considere mover crons pra processo separado (single instance) pra evitar duplicação se houver múltiplos containers.
+
+## 7. Frontend — copy + ícone + link
+
+`src/app/components/NotificationItem.vue` (ou equivalente):
+
+```ts
+const COPY: Record<NotificationType, (n: Notification) => string> = {
+  // existentes...
+  birthday_reminder: (n) => `Hoje é aniversário de ${n.actor.displayName}`,
+}
+
+const ICON: Record<NotificationType, string> = {
+  // existentes...
+  birthday_reminder: '🎂',
+}
+
+const LINK: Record<NotificationType, (n: Notification) => string> = {
+  // existentes...
+  birthday_reminder: (n) => `/perfil/${n.actor.id}`,
+}
+```
+
+Renderização default cobre o resto.
+
+## 8. Web Push payload
+
+`PushService.sendToUser()` aceita payload customizado. Adicione no construtor de payload:
+
+```ts
+function buildPushPayload(notif: Notification) {
+  switch (notif.type) {
+    // ...
+    case 'birthday_reminder':
+      return {
+        title: '🎂 Aniversário hoje!',
+        body: `Hoje é aniversário de ${notif.actor.displayName}`,
+        data: { type: notif.type, url: `/perfil/${notif.actor.id}` },
+      }
+  }
+}
+```
+
+## 9. Atualize a documentação
+
+- [`/docs/reference/tipos-notificacao`](/docs/reference/tipos-notificacao) — adiciona row na tabela
+- Página do módulo correspondente (ex: [`/docs/modules/users`](/docs/modules/users)) menciona o novo trigger
+
+## 10. Test
+
+```ts
+// notifications.service.test.ts
+describe('birthday_reminder type', () => {
+  it('cria notification com type birthday_reminder', async () => {
+    const notif = await service.notify({
+      recipientId: 'uuid-recipient',
+      actorId: 'uuid-actor',
+      type: 'birthday_reminder',
+      entityId: 'uuid-actor',
+    })
+    expect(notif.type).toBe('birthday_reminder')
+  })
+})
+```
+
+E E2E: trigger artificial (set birthday em uma fixture pra hoje, rodar cron, verificar que amigos receberam notificação).
+
+## Casos comuns
+
+### Notification de uma só vez
+
+Bom pra eventos únicos: `account_milestone_1_year`, `system_announcement`. Disparar via service quando relevante.
+
+### Notification respondendo a ação de outro user
+
+Hooks no service que dispara a ação:
+
+```ts
+async accept(...) {
+  await this.repo.accept(...)
+  this.notify(...)  // <-- aqui
+}
+```
+
+### Notification agendada
+
+Cron pattern (como o exemplo). Considerar pg-boss em vez de `setInterval` se precisar de retry/scheduling robusto.
+
+### Notification em batch
+
+Se precisar enviar N notifs (ex: post viral com 100 reactions), evite N inserts:
+- Já é O(N) mas você pode dedupe por (recipient, type, entity) numa janela pra evitar 100 notifs separadas
+- Adicione coluna `aggregated_count` futura — fora do escopo atual
+
+## Checklist
+
+- [ ] Enum atualizado em `schema.ts`
+- [ ] Migration gerada + revisada (FORA de transação se PG \< 12)
+- [ ] `entity_id` semântica definida + documentada
+- [ ] Disparo implementado (service hook OU cron)
+- [ ] Cron registered em `app.ts` (se for cron)
+- [ ] Frontend: copy, ícone, link
+- [ ] Push payload customizado
+- [ ] Doc atualizada (tipos-notificacao + módulo correspondente)
+- [ ] Test cobrindo o disparo
+
+## Referências
+
+- [Tipos de notificação](/docs/reference/tipos-notificacao)
+- [Conceito: Notificações](/docs/concepts/notificacoes)
+- [Módulo Notifications](/docs/modules/notifications)

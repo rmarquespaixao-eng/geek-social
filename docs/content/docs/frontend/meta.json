@@ -1,0 +1,4 @@
+{
+  "title": "Frontend",
+  "pages": ["overview", "estrutura", "http-client", "auth-store", "socket", "pwa"]
+}

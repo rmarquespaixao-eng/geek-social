@@ -1,0 +1,41 @@
+---
+title: POST /reports/
+description: Denunciar conteúdo
+---
+
+import Meta from '@/generated/api/reports/create/meta'
+import Request from '@/generated/api/reports/create/request'
+import Responses from '@/generated/api/reports/create/responses'
+import Errors from '@/generated/api/reports/create/errors'
+import Examples from '@/generated/api/reports/create/examples'
+
+<Meta />
+
+Cria denúncia com targetType polimórfico (user/message/post/collection/conversation). Unique por (reporter, target_type, target_id) — denúncia duplicada retorna conflict.
+
+## Request
+
+<Request />
+
+## Response
+
+<Responses />
+
+## Erros
+
+<Errors />
+
+{/* TODO: para cada código de erro acima, explique a causa e como resolver. */}
+
+## Exemplos
+
+<Examples />
+
+
+## Side effects
+
+{/* TODO: eventos de socket emitidos, notificações disparadas, jobs enfileirados, cascades. */}
+
+## Relacionados
+
+{/* TODO: links pra módulo, conceitos, endpoints relacionados. */}

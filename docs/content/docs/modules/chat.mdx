@@ -1,0 +1,230 @@
+---
+title: Chat
+description: Conversas DM 1-1 + grupos com roles, mensagens com mídia/áudio/calls, modo Snapchat, DM requests.
+---
+
+## Visão geral
+
+O módulo **Chat** é o mais extenso do sistema (32 endpoints REST + ~15 eventos socket). Cobre:
+
+- **Conversas DM 1-1** — entre amigos. Auto-criadas no aceite de friendship.
+- **Grupos** — N membros com roles (owner/admin/member) + permissions granulares
+- **DM Requests** — pedido inicial entre não-amigos antes de virar conversa real
+- **Mensagens** — texto, attachments (audio/video/imagem/arquivo), reply, calls, reactions livres
+- **Modo Snapchat per-user** — mensagens efêmeras em conversas marcadas como temporary
+- **Forward / share** — replicar mensagens em N conversas
+- **Read receipts + typing** — eventos de socket ephemeral
+- **Calls 1-1** — sinalização WebRTC via socket; backend não relays media
+
+## Entidades principais
+
+| Tabela | Papel |
+|---|---|
+| [`conversations`](/docs/data-model/tables/conversations) | Container (DM ou group) |
+| [`conversation_members`](/docs/data-model/tables/conversation_members) | Membership + estado per-user |
+| [`dm_requests`](/docs/data-model/tables/dm_requests) | Pré-conversa entre não-amigos |
+| [`messages`](/docs/data-model/tables/messages) | Conteúdo (texto, attachments refs, callMetadata) |
+| [`message_reactions`](/docs/data-model/tables/message_reactions) | Reações |
+| [`message_attachments`](/docs/data-model/tables/message_attachments) | Mídia anexada |
+| [`push_subscriptions`](/docs/data-model/tables/push_subscriptions) | Web Push subscriptions |
+| [`user_presence`](/docs/data-model/tables/user_presence) | Last seen |
+
+## Endpoints
+
+32 endpoints divididos:
+- **DM/Requests** (5): open dm, send/list/accept/reject dm request
+- **Grupos** (5): create, get, update, delete, upload cover
+- **Membros** (5): invite, remove, update role/permissions, leave
+- **Mensagens** (6): get history, send, delete, forward, react, upload attachment
+- **Conversas** (9): list, get, mark read, archive/unarchive, mute/unmute, hide, set temporary
+- **Push** (2): register, remove
+
+Ver [API Reference — Chat](/docs/api/chat/chat-list-conversations).
+
+## Fluxos
+
+### DM com amigo
+
+<Mermaid chart={`sequenceDiagram
+  autonumber
+  participant U as Usuário
+  participant API as Backend
+  participant DB as PostgreSQL
+  participant CG as ChatGateway
+
+  U->>API: POST /chat/dm { friendId }
+  API->>API: Verifica amizade aceita
+  alt Não amigo
+    API-->>U: 403 NOT_FRIEND
+  else Amigo
+    API->>DB: SELECT conversation existente DM A↔B
+    alt Já existe
+      API-->>U: { conversation existente }
+    else Não existe
+      API->>DB: INSERT conversations (type=dm)
+      API->>DB: INSERT conversation_members (A, B)
+      API->>CG: linkUsersToConversation
+      API-->>U: { conversation nova }
+    end
+  end`} />
+
+### DM Request (não-amigo)
+
+<Mermaid chart={`sequenceDiagram
+  autonumber
+  participant A as Sender (não-amigo)
+  participant API as Backend
+  participant DB as PostgreSQL
+  participant N as NotificationsService
+  participant B as Receiver
+
+  A->>API: POST /chat/dm-requests { receiverId: B }
+  API->>API: Verifica NÃO há amizade
+  API->>DB: INSERT dm_requests (status=pending)
+  API->>N: notify({ recipient: B, type:'dm_request_received' })
+  N-->>B: notificação real-time
+
+  Note over B: Vê em /chat/requests
+  B->>API: POST /chat/dm-requests/:id/accept
+  API->>DB: BEGIN
+  API->>DB: INSERT conversation (type=dm)
+  API->>DB: INSERT conversation_members
+  API->>DB: UPDATE dm_requests status=accepted, conversation_id
+  API->>DB: COMMIT
+  API-->>B: { conversation aberta }`} />
+
+### Enviar mensagem com attachment
+
+<Mermaid chart={`sequenceDiagram
+  autonumber
+  participant U as Usuário
+  participant FE as Frontend
+  participant API as Backend
+  participant S3 as MinIO/S3
+  participant DB as PostgreSQL
+  participant CG as ChatGateway
+
+  Note over FE: Modo "preview attach antes de enviar"
+  FE->>API: POST /chat/conversations/:id/attachments (multipart)
+  API->>S3: PUT chat/<convId>/<msgId>/<file>
+  API->>DB: INSERT message_attachments (message_id=NULL ainda)
+  API-->>FE: { attachmentId, url, thumb? }
+  FE->>FE: Mostra preview clicável
+
+  U->>FE: Clica enviar
+  FE->>API: POST /chat/conversations/:id/messages {<br/>content, attachmentIds: [...]<br/>}
+  API->>DB: BEGIN
+  API->>DB: INSERT messages
+  API->>DB: UPDATE message_attachments SET message_id=...
+  API->>DB: COMMIT
+  API->>CG: emit 'message:new' → conv:<id>
+  CG-->>FE: peers recebem em tempo real
+  alt Conversa is_temporary
+    Note over DB: message.is_temporary=true
+  end`} />
+
+### Modo Snapchat per-user
+
+<Mermaid chart={`sequenceDiagram
+  autonumber
+  participant A as User A
+  participant B as User B
+  participant API as Backend
+  participant DB as PostgreSQL
+  participant Cron as Cleanup Cron
+
+  A->>API: PATCH /chat/conversations/:id/temporary { enabled:true }
+  API->>DB: UPDATE conversations is_temporary=true
+  Note over DB: Mensagens novas marcadas is_temporary
+
+  A->>B: envia mensagem (is_temporary)
+  B->>B: lê mensagem
+  B->>API: POST /chat/conversations/:id/read
+  API->>DB: UPDATE conversation_members[B].last_read_at
+  Note over B: B fecha conversa
+
+  Note over Cron: A cada 1 minuto
+  Cron->>DB: SELECT messages.id<br/>WHERE is_temporary AND deleted_at IS NULL<br/>AND TODOS os membros leram (last_read_at > created_at)
+  Cron->>DB: UPDATE deleted_at = now()
+  Note over Cron: Mensagem some pra todos`} />
+
+### Calls 1-1 (WebRTC signaling)
+
+<Mermaid chart={`sequenceDiagram
+  autonumber
+  participant A as Caller
+  participant CG as ChatGateway
+  participant B as Receiver
+
+  A->>CG: emit 'call:offer' { conversationId, sdp, callId, type:'video' }
+  CG->>B: emit 'call:incoming' { callId, callerId, type, conversationId }
+  B->>CG: emit 'call:answer' { callId, sdp }
+  CG->>A: relay 'call:answer'
+
+  par ICE candidates trocando peer-to-peer
+    loop até estabelecer peer connection
+      A->>CG: 'call:ice-candidate'
+      CG->>B: relay
+      B->>CG: 'call:ice-candidate'
+      CG->>A: relay
+    end
+  end
+
+  Note over A,B: Conexão WebRTC P2P estabelecida<br/>Mídia (audio/video) NÃO passa pelo backend
+
+  alt Encerrou chamada
+    A->>CG: 'call:hangup' { reason:'completed' }
+    CG->>B: relay
+    Note over CG: Backend cria messages.row com call_metadata<br/>{ status, duration, etc. }
+  end`} />
+
+### Mute / Archive / Hide
+
+| Ação | Tabela updated | Efeito |
+|---|---|---|
+| Mute | `conversation_members.is_muted=true` | Mensagens chegam, sem push |
+| Archive | `conversation_members.is_archived=true` | Some da lista ativa, não some o conteúdo |
+| Hide (Snapchat per-user) | `conversation_members.hidden_at=now()` | Mensagens novas viram efêmeras pro user |
+
+## Eventos de socket
+
+Catálogo completo em [Eventos de socket](/docs/reference/eventos-socket). Os principais do chat:
+
+| Evento | Sentido |
+|---|---|
+| `message:new` | Server → cliente (room conv:id) |
+| `message:edited` | idem |
+| `message:deleted` | idem |
+| `message:reaction` | idem |
+| `conversation:read` | bidirecional (peer recebe) |
+| `conversation:typing` | bidirecional ephemeral |
+| `conversation:refresh` | server → user (forçar re-fetch lista) |
+| `conversation:created` | server → user (membro adicionado) |
+| `conversation:updated` | server → room |
+| `presence:online/offline/update` | server → friend-of:userId |
+| `import:progress/done` | server → user (Steam) |
+| `call:incoming/offer/answer/ice/hangup` | bidirecional WebRTC signaling |
+
+## Edge cases e regras especiais
+
+- **DM entre não-amigos vai como dm_request** — rotear automaticamente sem confundir UX
+- **`hidden_for_user_ids`** em messages é JSONB — guarda ids dos users que "apagaram pra mim"
+- **Read receipts respeitam `users.show_read_receipts`** — se desabilitado, eventos não são emitidos
+- **Mute não impede notif persistida** — só suprime push/sound
+- **Group `owner` único** — sair sem transferir owner derruba o grupo
+- **Reply preserved se msg original deletada** — `reply_to_id` sem cascade; UI mostra "mensagem deletada"
+- **Forward limite 20 destinos** — anti-spam
+- **Attachment sem message_id** — possível durante upload preview; se nunca virar mensagem, fica órfão (cleanup pendência)
+- **Calls têm callMetadata mesmo se rejeitada** — `status` registra outcome
+- **Push é dual** — socket + web push paralelos
+- **`is_temporary` é per-conversation** + `hidden_at` per-user combinam pra modo "Snapchat só pra mim"
+- **Group permissions** restringem can_send_messages e can_send_files separadamente
+- **DM request rejected é final** — sender não pode reenviar (unique constraint)
+
+## Dependências entre módulos
+
+- **Friends** — DM 1-1 só entre amigos; block desconecta
+- **Notifications** — push notif depende de subscriptions ativas
+- **Users** — `show_presence` e `show_read_receipts` afetam o que é emitido
+- **Storage (S3)** — uploads de attachments + thumbnails
+- **Reports** — message/conversation podem ser target de reports

@@ -1,0 +1,114 @@
+---
+title: item_offers
+description: Ofertas feitas sobre listings (compra ou troca), com confirmação dupla.
+---
+
+import Columns from '@/generated/data-model/tables/item_offers/columns'
+import Fks from '@/generated/data-model/tables/item_offers/fks'
+import Indexes from '@/generated/data-model/tables/item_offers/indexes'
+import Constraints from '@/generated/data-model/tables/item_offers/constraints'
+
+Cada offer representa o **interesse de um usuário** em um item anunciado. Tem tipo (`buy` ou `trade`), itens/preços oferecidos, e passa por **dupla confirmação** antes da transferência efetivar.
+
+A negociação real acontece via `offer_proposals` (rodadas pending → accepted | rejected | superseded). Os campos `offered_price`/`offered_item_id` em `item_offers` armazenam a **proposta inicial**; counter-propostas vivem em `offer_proposals`.
+
+## Colunas
+
+<Columns />
+
+## Funcionalidade dos campos
+
+- **`id`** — UUID, PK
+- **`type`** — `buy` (oferta com dinheiro) ou `trade` (oferta com outro item)
+- **`item_id`** — item alvo (o anunciado). Cascade delete.
+- **`owner_id`** — dono do item alvo. Denormalizado.
+- **`offerer_id`** — quem está fazendo a oferta. Cascade delete.
+- **`offered_item_id`** — item oferecido em troca. Apenas para `type=trade`. `set null` em delete pra preservar histórico.
+- **`offered_price`** — valor proposto. Apenas para `type=buy` ou `both`. `numeric(12, 2)`.
+- **`message`** — texto livre opcional do ofertante.
+- **`status`** — enum: `pending`, `accepted`, `rejected`, `cancelled`, `completed`. Estado da offer como um todo (não da rodada).
+- **`offerer_confirmed_at`** — timestamp em que o ofertante confirmou (após accept). Dual confirm.
+- **`owner_confirmed_at`** — timestamp em que o dono confirmou. Quando ambos setados, transferência executa.
+- **`listing_id`** — FK pro listing alvo. `set null` em delete (preserva offer history quando listing é hard-deleted).
+- **`created_at` / `updated_at`** — managed.
+
+## Foreign keys
+
+<Fks />
+
+## Índices
+
+<Indexes />
+
+**Detalhes**:
+- **`item_offers_pending_unique`** — partial unique em `(item_id, offerer_id) WHERE status='pending'`. Impede que o mesmo user faça 2 ofertas ativas pro mesmo item simultaneamente. O service faz pre-check pra retornar `DUPLICATE_PENDING_OFFER` (HTTP 409) em vez de erro 500.
+- **`item_offers_owner_status_idx`** — query "minhas ofertas recebidas" do dono
+- **`item_offers_offerer_status_idx`** — query "minhas ofertas feitas" do ofertante
+- **`item_offers_listing_idx`** — usado pra `autoRejectByListing` quando listing é encerrado
+
+## Constraints
+
+<Constraints />
+
+## Ciclo de vida (status global)
+
+```
+   pending  ──(accept)──→  accepted ──(both confirm)──→  completed
+      │                       │
+      │                       └──(cancel/expire)──→ cancelled / rejected
+      ↓
+   rejected (final)
+```
+
+A nuance: `accepted` significa que a **última proposta foi aceita**, mas a transferência depende de dois confirms. A 7 dias após accepted sem confirms, a offer expira (cron `runOffersExpire` roda a cada 1h).
+
+## Counter-propostas
+
+A "negociação" acontece via `offer_proposals`. Quando o receptor da proposta atual a rejeita mas quer counter-propor:
+1. Cria novo proposal com `proposer_id = receptor` e `status='pending'`
+2. A anterior vai pra `superseded`
+3. Turno passa pro lado oposto
+
+A offer (`item_offers`) fica com `status='pending'` durante toda a negociação. Apenas quando uma proposta vira `accepted` é que a offer evolui pra `accepted`.
+
+## Dupla confirmação e transferência
+
+```
+proposal accepted
+     ↓
+[ambas as partes precisam confirmar]
+     │
+     │  ofererConfirm()  →  set offerer_confirmed_at
+     │
+     │  ownerConfirm()   →  set owner_confirmed_at
+     │
+[ambos setados]
+     ↓
+executeTransfer()
+   - move item_id pra coleção destino do offerer
+   - se trade: move offered_item_id pra coleção destino do owner
+   - cria coleção destino se não houver (auto-create)
+   - status = 'completed'
+   - listing.status = 'closed'
+```
+
+`confirm()` é **idempotente**: se ambos já confirmaram mas a transferência falhou (ex: faltava coleção, sem disco), re-tentar `confirm()` re-executa em vez de retornar `ALREADY_CONFIRMED`.
+
+## Padrões de uso
+
+- **Criar oferta** — `POST /offers` com pre-check de duplicate
+- **Aceitar última proposta** — `POST /offers/:id/accept` (cria proposal accepted, evolui offer)
+- **Rejeitar última proposta** — `POST /offers/:id/reject` (apenas rejeita rodada, offer continua `pending`)
+- **Counter-propor** — `POST /offers/:id/propose` (supersede + nova pending)
+- **Confirmar transação** — `POST /offers/:id/confirm`
+- **Cancelar** — `POST /offers/:id/cancel` antes de completed
+- **Auto-rejeição** — em listing close/delete, todas as `pending` viram `rejected`
+
+## Tabelas relacionadas
+
+- [`items`](/docs/data-model/tables/items) — alvo + oferecido
+- [`users`](/docs/data-model/tables/users) — owner + offerer
+- [`listings`](/docs/data-model/tables/listings) — anúncio referenciado
+- [`offer_proposals`](/docs/data-model/tables/offer_proposals) — rodadas de negociação (cascade)
+- [`listing_ratings`](/docs/data-model/tables/listing_ratings) — avaliação pós-transação (FK pra offer)
+- [`notifications`](/docs/data-model/tables/notifications) — `offer_received`, `offer_accepted`, `offer_rejected`, `counter_proposal_received`, `proposal_rejected`, `offer_completed`, `offer_cancelled`, `offer_expired`

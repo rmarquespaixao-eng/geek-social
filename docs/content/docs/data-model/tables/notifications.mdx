@@ -1,0 +1,87 @@
+---
+title: notifications
+description: Notificações in-app por usuário (socket + persistência) — não inclui push.
+---
+
+import Columns from '@/generated/data-model/tables/notifications/columns'
+import Fks from '@/generated/data-model/tables/notifications/fks'
+import Indexes from '@/generated/data-model/tables/notifications/indexes'
+import Constraints from '@/generated/data-model/tables/notifications/constraints'
+
+Tabela de notificações persistidas pra cada usuário. Quando um evento dispara (amigo aceitou, oferta recebida, post comentado), é INSERT aqui + emit socket pro recipient. Push (Web Push) é separado — alimentado pelos mesmos eventos via `PushService`.
+
+A tabela é **flat** (sem subtipos) — `type` (enum) + `entity_id` (UUID polimórfico) carregam o contexto. Frontend interpreta `type` pra decidir copy e link de destino.
+
+## Colunas
+
+<Columns />
+
+## Funcionalidade dos campos
+
+- **`id`** — UUID, PK
+- **`recipient_id`** — quem recebe (cascade)
+- **`actor_id`** — quem causou (cascade). Permite renderizar "X comentou seu post"
+- **`type`** — enum extensa, ver lista abaixo
+- **`entity_id`** — UUID **polimórfico**: aponta pra um post, oferta, friendship, message, etc., dependendo do `type`. Frontend resolve por type.
+- **`read`** — boolean. Default `false`; UPDATE quando user clica/marca como lida.
+- **`created_at`** — momento da notificação
+
+## Foreign keys
+
+<Fks />
+
+## Índices
+
+<Indexes />
+
+`notifications_recipient_created_at_idx` — query principal: "minhas notificações ordem cronológica decrescente".
+
+## Constraints
+
+<Constraints />
+
+## Tipos de notificação
+
+Enum `notification_type`:
+
+| Type | Disparado por | `entity_id` aponta pra | UI sugere |
+|---|---|---|---|
+| `friend_request` | `POST /friends/request` | friendship pending | Aceitar/rejeitar |
+| `friend_accepted` | aceite de friendship | friendship | Abrir perfil |
+| `post_comment` | comment em post do user | post | Abrir post |
+| `post_reaction` | reaction em post do user | post | Abrir post |
+| `dm_request_received` | non-friend manda DM | dm_request | Abrir solicitações |
+| `offer_received` | nova oferta no listing | item_offer | Abrir Vitrine → ofertas |
+| `offer_accepted` | dono aceitou oferta | item_offer | Abrir Vitrine |
+| `offer_rejected` | dono rejeitou (ou auto-reject por close) | item_offer | Mostrar histórico |
+| `offer_completed` | transação executou | item_offer | Pedir avaliação |
+| `offer_cancelled` | ofertante cancelou | item_offer | — |
+| `offer_expired` | TTL 7 dias após accepted sem confirm | item_offer | — |
+| `counter_proposal_received` | counter-proposta nova | offer_proposal | Abrir negociação |
+| `proposal_rejected` | rodada rejeitada (offer continua) | offer_proposal | Counter-propor? |
+| `rating_received` | alguém te avaliou | listing_rating | Abrir reputação |
+| `steam_import_done` | batch Steam terminou ok | collection | Abrir coleção |
+| `steam_import_partial` | batch terminou com falhas | collection | Abrir coleção |
+
+## NotifySafe
+
+Service `NotificationsService.notify()` é chamado de muitos pontos. Pra evitar que falhas de notificação derrubem fluxos principais, hooks usam `notifySafe(...).catch(() => {})`.
+
+## Push integration
+
+Quando uma notificação é criada, `NotificationsService` emite via socket pro user (se conectado) E via Web Push (se houver `push_subscriptions` ativas). Implementação atual em `chat.gateway.ts`.
+
+Se o user está com `is_muted` no chat ou tem push desabilitado, alguns disparos são suprimidos seletivamente.
+
+## Padrões de uso
+
+- **Disparar** — `notifySafe({ recipientId, actorId, type, entityId })` em todo lugar que cria ação relevante
+- **Listar** — `GET /notifications?cursor=...&limit=20`
+- **Marcar como lida** — `POST /notifications/:id/read` ou `POST /notifications/read-all`
+- **Contar não-lidas** — `GET /notifications/unread-count`
+
+## Tabelas relacionadas
+
+- [`users`](/docs/data-model/tables/users) — recipient + actor (cascade)
+- [`push_subscriptions`](/docs/data-model/tables/push_subscriptions) — entrega via push
+- Polymorphic via `entity_id`: posts, item_offers, offer_proposals, friendships, dm_requests, listing_ratings, collections (Steam imports)

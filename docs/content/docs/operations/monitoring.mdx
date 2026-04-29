@@ -1,0 +1,269 @@
+---
+title: Monitoring
+description: Health checks, alerting básico, e roadmap para Prometheus/Grafana.
+---
+
+Estado atual do monitoring é minimalista (logs + healthchecks). Esta página descreve o que existe + plano pra chegar em production-grade.
+
+Para implementação detalhada de logs/métricas/tracing, ver [Observability](/docs/concepts/observability).
+
+## Estado atual
+
+| Sinal | Como sabemos |
+|---|---|
+| API up | `curl /health` retorna 200 |
+| Postgres up | Healthcheck do container `pg_isready` |
+| MinIO up | Healthcheck do container `mc ready` |
+| App caiu | Notificação manual (user reclama) ou cron de healthcheck externo |
+
+Sem dashboard, sem alertas automáticos hoje.
+
+## Healthcheck endpoint
+
+`/health` no API retorna 200 + uptime + versão:
+
+```ts
+app.get('/health', async () => ({
+  status: 'ok',
+  uptime: process.uptime(),
+  version: process.env.GEEK_SOCIAL_API_VERSION ?? 'unknown',
+}))
+
+app.get('/ready', async () => {
+  // Checa dependências críticas
+  await db.execute(sql`SELECT 1`)
+  // Pode adicionar: pingar S3, etc.
+  return { status: 'ready' }
+})
+```
+
+`/health` = liveness (processo vivo).
+`/ready` = readiness (dependências OK; usado por orchestrators pra "é seguro mandar tráfego?").
+
+## Cron externo de monitoring
+
+Setup mínimo: VPS separado (ou serviço gratuito) faz request periódico:
+
+```bash
+# /etc/cron.d/geek-social-watchdog
+* * * * * deploy /apps/scripts/healthcheck.sh
+```
+
+`/apps/scripts/healthcheck.sh`:
+
+```bash
+#!/bin/bash
+URL="https://api.geek-social.com.br/health"
+RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "$URL")
+
+if [ "$RESPONSE" != "200" ]; then
+  curl -X POST -H 'Content-Type: application/json' \
+    -d "{\"text\": \"🚨 Geek Social API down: HTTP $RESPONSE\"}" \
+    "$DISCORD_WEBHOOK_URL"
+fi
+```
+
+Notifica Discord/Slack quando detecta falha.
+
+## Better-uptime / Healthchecks.io (gratuito)
+
+Pra "monitor o monitor": serviços externos free pingam VPS:
+
+- [healthchecks.io](https://healthchecks.io) — 20 checks free
+- [betterstack.com](https://betterstack.com) — free tier
+- [uptimerobot.com](https://uptimerobot.com) — 50 monitors free
+
+Configurar pra pingar `/health` a cada minuto + alerta por e-mail/Discord se falhar 2x consecutivas.
+
+## Roadmap completo
+
+### Fase 1 — Logging centralizado (Loki)
+
+```yaml
+# docker-compose adicional pra observability
+services:
+  loki:
+    image: grafana/loki:latest
+    ports: ["3100:3100"]
+    volumes: [loki_data:/loki]
+
+  promtail:
+    image: grafana/promtail:latest
+    volumes:
+      - /var/log:/var/log
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - ./promtail-config.yml:/etc/promtail/config.yml
+    command: -config.file=/etc/promtail/config.yml
+
+  grafana:
+    image: grafana/grafana:latest
+    ports: ["3001:3000"]
+    volumes: [grafana_data:/var/lib/grafana]
+```
+
+Promtail "ship" logs do Docker pra Loki. Grafana visualiza.
+
+Buscas tipo:
+
+```
+{container="geek-social-api"} |= "ERROR"
+{container="geek-social-api"} | json | userId=`abc123` | line_format "{{.msg}}"
+```
+
+### Fase 2 — Métricas (Prometheus)
+
+```yaml
+prometheus:
+  image: prom/prometheus
+  volumes: [./prometheus.yml:/etc/prometheus/prometheus.yml]
+  ports: ["9090:9090"]
+```
+
+`prometheus.yml`:
+
+```yaml
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: api
+    static_configs:
+      - targets: ['geek-social-api:3003']
+    metrics_path: /metrics
+
+  - job_name: postgres
+    static_configs:
+      - targets: ['postgres-exporter:9187']
+
+  - job_name: nginx
+    static_configs:
+      - targets: ['nginx-exporter:9113']
+```
+
+API expõe `/metrics` via `fastify-metrics` plugin. Postgres exporter via container separado.
+
+Métricas-chave:
+- `http_request_duration_seconds` (histogram, por route)
+- `http_requests_total` (counter, por status code)
+- `pg_stat_database_*` (Postgres)
+- `pg_locks_count` (conflitos)
+- `nginx_http_requests_total`
+
+### Fase 3 — Dashboards Grafana
+
+Painéis:
+1. **Overview** — RPS, error rate, p95 latency, uptime
+2. **API Latency** — p50/p95/p99 por route
+3. **Database** — connections, queries/s, locks, cache hit ratio
+4. **Errors** — top 10 routes com erro 5xx
+5. **Business** — users novos/dia, posts/dia, offers/dia (custom queries)
+
+### Fase 4 — Alerting
+
+Grafana Alerting (built-in) ou Alertmanager.
+
+Regras exemplo:
+
+```yaml
+groups:
+  - name: geek-social-api
+    rules:
+      - alert: HighErrorRate
+        expr: rate(http_requests_total{status=~"5.."}[5m]) > 0.05
+        for: 5m
+        annotations:
+          summary: "5xx error rate > 5%"
+
+      - alert: APIDown
+        expr: up{job="api"} == 0
+        for: 1m
+        annotations:
+          summary: "API not responding"
+
+      - alert: DatabaseConnectionsHigh
+        expr: pg_stat_database_numbackends > 80
+        for: 5m
+        annotations:
+          summary: "DB connections nearing limit"
+```
+
+Notificação via Discord/Slack/email/PagerDuty.
+
+### Fase 5 — Tracing (Jaeger ou Tempo)
+
+```yaml
+jaeger:
+  image: jaegertracing/all-in-one:latest
+  ports:
+    - "16686:16686"  # UI
+    - "4318:4318"    # OTLP HTTP
+```
+
+Backend instrumentado com OpenTelemetry envia spans. Jaeger UI mostra request → service → DB → response, com timing por step.
+
+Útil pra investigar lentidão específica (ex: por que esse request demorou 3s? → span mostra 2.8s em uma query SQL).
+
+### Fase 6 — Error tracking (GlitchTip)
+
+Sentry clone open-source:
+
+```yaml
+glitchtip:
+  image: glitchtip/glitchtip:latest
+  # ... config
+```
+
+Backend `Sentry.captureException(...)` em pontos críticos. Frontend `@sentry/vue` igual.
+
+UI mostra exception com:
+- Stack trace
+- Breadcrumbs (request → events que levaram ao erro)
+- User affected count
+- First/last seen
+- Environment, release version
+
+### Fase 7 — APM completo
+
+Stack consolidada: **Grafana LGTM** (Loki + Grafana + Tempo + Mimir). Tudo open-source, self-host, integrado.
+
+## Custos
+
+Tudo open-source self-host. Custo = recursos (RAM/CPU/disk):
+
+| Componente | RAM mínima | Disk |
+|---|---|---|
+| Loki | 512 MB | 1 GB/dia logs (rotation 30 dias) |
+| Prometheus | 1 GB | 500 MB/dia métricas (rotation 90 dias) |
+| Grafana | 256 MB | mínimo |
+| Jaeger | 1 GB | 1 GB/dia spans (rotation 7 dias) |
+| GlitchTip | 1 GB | 100 MB/dia errors |
+
+Total adicional na VPS: **~4 GB RAM + ~5 GB/semana de disk**.
+
+VPS de 8 GB já comporta tudo + os apps.
+
+## Checklist mínimo (sub-projeto E)
+
+- [ ] `/health` endpoint na API
+- [ ] `/ready` endpoint na API
+- [ ] Cron externo monitorando /health
+- [ ] Alerta Discord/Slack em falha
+- [ ] Logs persistidos (volume Docker)
+
+## Checklist completo (futuro)
+
+- [ ] Loki + Promtail + Grafana
+- [ ] Prometheus + fastify-metrics + exporters
+- [ ] Dashboards Grafana (4-5 painéis chave)
+- [ ] Alertmanager com regras
+- [ ] Jaeger + OpenTelemetry no backend
+- [ ] GlitchTip pra exceptions
+- [ ] Documentar dashboards (onde olhar pra cada problema)
+- [ ] Runbook de incident response
+
+## Referências
+
+- [Observability — conceitos](/docs/concepts/observability)
+- [Database operations](/docs/data-model/operations)
+- [Grafana Loki docs](https://grafana.com/docs/loki/)
+- [Prometheus best practices](https://prometheus.io/docs/practices/)

@@ -1,0 +1,189 @@
+---
+title: Steam Integration
+description: OpenID link Steam + import de games via pg-boss workers com throttle.
+---
+
+## Visão geral
+
+Integração com Steam permite:
+- **Vincular conta Steam** via OpenID 2.0 (sem precisar API key pra link)
+- **Setar Steam Web API key** pessoal pra autorizar consultas
+- **Listar jogos owned** via `IPlayerService/GetOwnedGames`
+- **Importar jogos selecionados** em batch — workers `steam.import-game` (lista) e `steam.enrich-game` (detalhes via appdetails, com throttle)
+
+Importação roda assíncrona via **pg-boss** (queue persistida em PG). Frontend pode acompanhar via socket events `import:progress` / `import:done` ou polling `GET /import/:batchId/status`.
+
+## Entidades principais
+
+| Tabela | Papel |
+|---|---|
+| [`users`](/docs/data-model/tables/users) | `steam_id`, `steam_linked_at`, `steam_api_key` |
+| [`items`](/docs/data-model/tables/items) | Items criados/atualizados pela importação |
+| [`collections`](/docs/data-model/tables/collections) | Destino dos jogos importados |
+| [`import_batch_finalized`](/docs/data-model/tables/import_batch_finalized) | Marca atomica de fim de batch |
+
+## Endpoints
+
+8 endpoints em `/integrations/steam`:
+
+| Endpoint | Resumo |
+|---|---|
+| `POST /login` | Iniciar OpenID (retorna URL pra redirect) |
+| `GET /callback` | Callback OpenID Steam |
+| `DELETE /link` | Desvincular |
+| `PUT /api-key` | Definir Steam Web API key |
+| `DELETE /api-key` | Limpar API key |
+| `GET /games` | Listar jogos owned (via API) |
+| `POST /import` | Iniciar importação selecionada |
+| `GET /import/:batchId/status` | Status do batch |
+
+## Fluxos
+
+### Vincular Steam (OpenID)
+
+<Mermaid chart={`sequenceDiagram
+  autonumber
+  participant U as Usuário
+  participant FE as Frontend
+  participant API as Backend
+  participant Steam as Steam OpenID
+
+  U->>FE: Settings → "Conectar Steam"
+  FE->>API: POST /integrations/steam/login
+  API->>API: Sign state JWT { userId, type:'steam-link' } TTL 5min
+  API->>API: openId.buildAuthUrl(returnTo, realm)
+  API-->>FE: { url: 'https://steamcommunity.com/openid/login?...' }
+  FE->>FE: window.location.href = url
+  U->>Steam: Autoriza no Steam
+  Steam-->>API: Redirect /integrations/steam/callback?<br/>openid.* params
+  API->>API: Verify state JWT
+  API->>Steam: Verify openid.* params (mode=check_authentication)
+  Steam-->>API: ok + steam_id
+  API->>API: linkAccount(userId, steamId)
+  alt Steam ID já vinculado a outra conta
+    API-->>U: Redirect FE?steam=error&code=STEAM_ALREADY_LINKED_TO_OTHER_USER
+  else
+    API->>API: UPDATE users.steam_id, steam_linked_at
+    API-->>U: Redirect FE?steam=connected
+  end`} />
+
+### Setar API key (necessária pra import)
+
+<Mermaid chart={`sequenceDiagram
+  autonumber
+  participant U as Usuário
+  participant FE as Frontend
+  participant API as Backend
+
+  U->>FE: Settings → tab Steam
+  FE->>FE: Mostra link "Pegue sua key em steamcommunity.com/dev/apikey"
+  U->>FE: Cola key (32 chars hex)
+  FE->>API: PUT /integrations/steam/api-key { apiKey }
+  API->>API: Valida formato (32 chars)
+  API->>API: Setar users.steam_api_key
+  Note over API: Não há check da validade da key online —<br/>se inválida, falha em /games com STEAM_AUTH_FAILED`} />
+
+### Listar e importar jogos
+
+<Mermaid chart={`sequenceDiagram
+  autonumber
+  participant U as Usuário
+  participant FE as Frontend
+  participant API as Backend
+  participant Steam as Steam Web API
+  participant DB as PostgreSQL
+  participant Q as pg-boss queue
+
+  U->>FE: "Importar jogos do Steam"
+  FE->>API: GET /integrations/steam/games
+  API->>Steam: GetOwnedGames(steamId, apiKey, includeAppinfo=true)
+  Steam-->>API: { games: [{ appId, name, playtimeForever, iconUrl }, ...] }
+  API-->>FE: lista
+  U->>FE: Seleciona N jogos + escolhe coleção destino (existente OU nova)
+  FE->>API: POST /integrations/steam/import {<br/>collectionId | newCollectionName,<br/>appIds: [...],<br/>gamesSnapshot: [...]<br/>}
+  API->>API: Gera batch_id
+  API->>DB: Cria coleção (se newCollectionName)
+  loop Para cada appId
+    API->>Q: enqueue 'steam.import-game' { appId, batchId, collectionId, userId }
+  end
+  API-->>FE: { batchId }
+  FE->>FE: Mostra progress bar (polling + socket)`} />
+
+### Workers e finalização atomica
+
+<Mermaid chart={`sequenceDiagram
+  autonumber
+  participant Q as pg-boss queue
+  participant W1 as steam.import-game worker
+  participant W2 as steam.enrich-game worker
+  participant Steam as Steam API
+  participant DB as PostgreSQL
+  participant FR as ImportBatchFinalizationRepo
+  participant CG as ChatGateway
+  participant N as NotificationsService
+
+  loop Cada job import-game
+    Q->>W1: dispatch
+    W1->>DB: Find or create item by appId
+    W1->>DB: UPDATE/INSERT item com playtime
+    W1->>Q: enqueue steam.enrich-game { itemId, appId }
+    W1->>CG: emit import:progress (counter incremental)
+  end
+
+  loop Cada enrich (throttle: 1 worker, 1 concurrency)
+    Q->>W2: dispatch
+    W2->>Steam: appdetails (sem auth)
+    Steam-->>W2: detalhes (descrição, screenshots, etc.)
+    W2->>DB: UPDATE item.fields com metadata
+    W2->>FR: tryFinalize(batchId)
+    alt Era o último job do batch
+      FR->>DB: INSERT import_batch_finalized (atomic, PK em batch_id)
+      alt sucesso (este worker é o "finalizador")
+        FR->>N: notify steam_import_done OU steam_import_partial
+        FR->>CG: emit import:done
+      else duplicate (outro já finalizou)
+        Note over FR: Silenciosa
+      end
+    end
+    W2->>CG: emit import:progress
+  end`} />
+
+### Desvincular
+
+<Mermaid chart={`sequenceDiagram
+  autonumber
+  participant U as Usuário
+  participant API as Backend
+  participant DB as PostgreSQL
+
+  U->>API: DELETE /integrations/steam/link
+  API->>DB: UPDATE users SET steam_id = NULL, steam_linked_at = NULL, steam_api_key = NULL
+  Note over API: Itens já importados ficam preservados nas coleções —<br/>desvínculo não é "rollback de import"`} />
+
+## Eventos de socket
+
+| Evento | Quando |
+|---|---|
+| `import:progress` | Cada job processado (incremental counter) |
+| `import:done` | Batch finalizado |
+| `notification:new (steam_import_done)` | Sucesso completo |
+| `notification:new (steam_import_partial)` | Batch com falhas |
+
+## Edge cases e regras especiais
+
+- **Steam profile precisa ser público** — caso contrário GetOwnedGames retorna `EResult_AccessDenied`. Backend mapeia pra `STEAM_PROFILE_PRIVATE`.
+- **API key fica em DB** — opção do user. Backend só usa em consultas dele. Considerar criptografar at-rest (pendência).
+- **Throttle agressivo no enrich** — `appdetails` da Steam Store API tem rate limit. 1 worker concurrency=1 → ~1 req/sec.
+- **`import_batch_finalized` PK = batch_id** — primeiro INSERT vence, outros falham com unique constraint silenciosamente. É a "race condition resolution".
+- **Importação re-rodada** — se user importar o mesmo jogo de novo, é UPDATE em vez de INSERT (lookup por appId nos items existentes da coleção).
+- **`gamesSnapshot`** opcional — frontend envia o que listou (incluindo playtime no momento). Workers usam pra fallback se Steam API ficar offline durante o batch.
+- **Itens importados mantêm fields preenchidos** mesmo após desvincular conta Steam — não é "sync contínuo", é snapshot.
+- **`STEAM_REPLACE_REQUIRES_UNLINK`** — se user já tem steam_id vinculado e tenta vincular outro, precisa desvincular primeiro.
+
+## Dependências entre módulos
+
+- **Items** — workers populam ITEMs em batch
+- **Collections** — destino dos jobs (auto-create se newCollectionName)
+- **Field Definitions** — campos de sistema (Plataforma, Horas jogadas, App ID) usados nos fields
+- **Notifications** — steam_import_done / steam_import_partial
+- **Chat (gateway)** — emit import:progress / import:done

@@ -1,0 +1,67 @@
+---
+title: user_presence
+description: Estado "online / last seen" de cada usuário.
+---
+
+import Columns from '@/generated/data-model/tables/user_presence/columns'
+import Fks from '@/generated/data-model/tables/user_presence/fks'
+import Indexes from '@/generated/data-model/tables/user_presence/indexes'
+import Constraints from '@/generated/data-model/tables/user_presence/constraints'
+
+Tracking de presença online dos usuários. **Um row por user** (PK = `user_id`, não há `id` separado). Atualizado em socket connect/disconnect e periodicamente em activity.
+
+`PresenceService` mantém um cache em memória (set de userIds online) sincronizado com a tabela. A tabela é a fonte da "última vez visto" pra perfis offline.
+
+## Colunas
+
+<Columns />
+
+## Funcionalidade dos campos
+
+- **`user_id`** — PK + FK pra `users`. Cascade delete.
+- **`last_seen_at`** — última vez que o user foi visto online. Setado pelo backend a cada conexão socket ou ação.
+- **`updated_at`** — managed; útil pra auditoria.
+
+## Foreign keys
+
+<Fks />
+
+## Índices
+
+<Indexes />
+
+PK em `user_id` é o único índice — lookup é sempre por user.
+
+## Constraints
+
+<Constraints />
+
+## Como o online é determinado
+
+- Em memória, `PresenceService.onlineUserIds` (Set) é atualizado em `socket.on('connect')` e `socket.on('disconnect')`
+- Pra um user X aparecer online, ele precisa estar nesse Set
+- DB é fonte da verdade pra "last seen" (offline)
+
+`isOnline(userId)` consulta apenas memória. `getLastSeen(userId)` lê DB.
+
+## Privacy gating
+
+Ao expor presence pra outros users, o backend respeita `users.show_presence`:
+- Se `false`: o user aparece sempre offline + sem last_seen pra outros (mas a memória continua tracking pra notificações dele mesmo)
+- Se `true`: regra normal
+
+Quando user muda `show_presence`, `chatGateway.emitPresenceUpdate(userId, isOnline, null)` é chamado pra propagar o novo estado a quem o monitora.
+
+## Multi-device
+
+Um mesmo user com várias abas/dispositivos abertos é "online" enquanto **pelo menos um** socket estiver conectado. `disconnect` decrementa um counter; só atinge 0 quando o último fecha.
+
+## Padrões de uso
+
+- **Set online** — `INSERT ... ON CONFLICT (user_id) DO UPDATE SET last_seen_at = now()`
+- **Set offline** — UPDATE `last_seen_at = now()` (registra "última vez visto")
+- **Query** — `SELECT last_seen_at FROM user_presence WHERE user_id = ?`
+
+## Tabelas relacionadas
+
+- [`users`](/docs/data-model/tables/users) — dono (cascade), flag `show_presence`

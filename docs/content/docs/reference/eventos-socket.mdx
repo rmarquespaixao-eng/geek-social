@@ -1,0 +1,96 @@
+---
+title: Eventos de socket
+description: Catálogo dos eventos Socket.IO emitidos e consumidos.
+---
+
+Catálogo completo dos eventos do Socket.IO. Para entender como o socket se conecta e autentica, ver [Realtime](/docs/concepts/realtime).
+
+Todos os eventos são no namespace default (`/`). Não há rooms namespaced — apenas rooms-by-id (`user:<id>`, `conv:<id>`, `friend-of:<id>`).
+
+## Convenções
+
+- **Direção** — `→` significa "emit do servidor pro cliente"; `←` significa "emit do cliente pro servidor"
+- **Sala** — quem recebe o evento (em `→`)
+- **Payload** — JSON que vai junto
+
+## Notifications
+
+| Evento | Direção | Sala | Payload |
+|---|---|---|---|
+| `notification:new` | → | `user:<recipientId>` | `{ id, type, actorId, entityId, read, createdAt, actor: {...} }` |
+
+## Chat — mensagens
+
+| Evento | Direção | Sala | Payload |
+|---|---|---|---|
+| `message:new` | → | `conv:<conversationId>` | `Message` (objeto completo com attachments) |
+| `message:edited` | → | `conv:<conversationId>` | `{ id, content, updatedAt }` |
+| `message:deleted` | → | `conv:<conversationId>` | `{ id, conversationId, deletedAt }` |
+| `message:reaction` | → | `conv:<conversationId>` | `{ messageId, userId, emoji, action: 'add' \| 'remove' }` |
+| `conversation:read` | ←/→ | `conv:<conversationId>` | `{ conversationId, userId, lastReadAt }` |
+| `conversation:typing` | ←/→ | `conv:<conversationId>` | `{ conversationId, userId, isTyping: bool }` |
+| `conversation:refresh` | → | `user:<userId>` | `{ conversationIds: string[] }` — sinal pra frontend re-fetch da lista |
+| `conversation:created` | → | `user:<userId>` (membros) | `Conversation` |
+| `conversation:updated` | → | `conv:<conversationId>` | `{ id, fields }` |
+
+## Presence
+
+| Evento | Direção | Sala | Payload |
+|---|---|---|---|
+| `presence:online` | → | `friend-of:<userId>` | `{ userId, isOnline: true }` |
+| `presence:offline` | → | `friend-of:<userId>` | `{ userId, isOnline: false, lastSeenAt }` |
+| `presence:update` | → | `friend-of:<userId>` | `{ userId, isOnline, lastSeenAt }` (genérico, usado em mudanças de `show_presence`) |
+
+## Steam imports
+
+Emitidos pelos workers `steam.import-game` e `steam.enrich-game`:
+
+| Evento | Direção | Sala | Payload |
+|---|---|---|---|
+| `import:progress` | → | `user:<userId>` | `{ batchId, total, processed, failed, currentItem? }` |
+| `import:done` | → | `user:<userId>` | `{ batchId, total, imported, updated, failed, collectionId }` |
+
+## Calls (vídeo/áudio 1-1)
+
+Sinalização WebRTC. Roteamento end-to-end peer-to-peer; servidor só relays SDP.
+
+| Evento | Direção | Sala | Payload |
+|---|---|---|---|
+| `call:incoming` | → | `user:<recipientId>` | `{ callId, callerId, type: 'audio' \| 'video', conversationId }` |
+| `call:offer` | ←/→ | peer | `{ callId, sdp }` |
+| `call:answer` | ←/→ | peer | `{ callId, sdp }` |
+| `call:ice-candidate` | ←/→ | peer | `{ callId, candidate }` |
+| `call:hangup` | ←/→ | peer | `{ callId, reason: 'completed' \| 'rejected' \| 'cancelled' \| 'failed' }` |
+
+Após hangup, backend cria `messages` row com `call_metadata` registrando o resultado.
+
+## Friend / Block side effects
+
+Não são eventos próprios — são `conversation:refresh` ou `presence:update` com efeito secundário:
+
+- **Block** — `conversation:refresh` pros 2 envolvidos + unlink room `conv:<...>`
+- **Unblock** — `conversation:refresh` pros 2
+- **Friend accepted** — pode disparar `conversation:created` se cria DM 1-1
+
+## Eventos consumidos pelo servidor (← do cliente)
+
+| Evento | Payload | Efeito |
+|---|---|---|
+| `conversation:read` | `{ conversationId }` | UPDATE `last_read_at`; emit `conversation:read` outros membros |
+| `conversation:typing` | `{ conversationId, isTyping }` | Emit pros outros (não persiste) |
+| `call:offer/answer/ice-candidate/hangup` | (above) | Relay pro peer |
+
+## Re-conexão
+
+Cliente faz auto-reconnect (Socket.IO default). Ao reconectar, re-entra nas rooms (backend re-vincula via JWT). Mensagens enviadas durante desconexão **não são re-entregues automaticamente** — frontend faz `GET /chat/conversations/:id/messages?since=...` pra buscar lacunas.
+
+## Auditoria
+
+Logs de socket appendam ao `app.log` do Fastify. Cada evento tem `{ event, userId, conversationId, ... }`. Útil pra debug.
+
+## Relacionados
+
+- Conceito [Realtime](/docs/concepts/realtime) — fluxo geral
+- Conceito [Notificações](/docs/concepts/notificacoes) — fluxo de notification
+- Tabela [`messages`](/docs/data-model/tables/messages)
+- Tabela [`user_presence`](/docs/data-model/tables/user_presence)

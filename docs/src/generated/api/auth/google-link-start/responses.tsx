@@ -1,0 +1,19 @@
+// AUTO-GENERATED — do not edit. Run npm run gen to regenerate.
+export default function Responses() {
+  return (
+    <div className="not-prose">
+      <section className="mb-6">
+        <h4 className="font-semibold text-sm flex items-center gap-2 mb-2">
+          <code className="px-1.5 py-0.5 rounded bg-fd-muted text-xs font-mono">200</code>
+          
+        </h4>
+        <table className="w-full text-sm my-4">
+      <thead><tr><th className="text-left">Campo</th><th className="text-left">Tipo</th><th className="text-left">Requerido</th><th className="text-left">Descrição</th></tr></thead>
+      <tbody>
+        <tr><td className="font-mono">url</td><td className="font-mono text-xs">string (uri)</td><td>sim</td><td>URL de autorização do Google. Frontend deve redirecionar o navegador para ela.</td></tr>
+      </tbody>
+    </table>
+      </section>
+    </div>
+  )
+}

@@ -1,0 +1,138 @@
+---
+title: Friends
+description: Sistema de amizades simétricas + bloqueios direcionais.
+---
+
+## Visão geral
+
+Sistema social com duas relações:
+- **Friendship** — simétrica em significado, com fluxo pedido/aceite (modelado em uma única tabela com `requester_id`/`receiver_id`)
+- **Block** — assimétrica e direcional (A bloqueia B é diferente de B bloqueia A; podem coexistir)
+
+Bloquear um amigo derruba a amizade automaticamente, desconecta chat 1-1 entre os dois, e esconde conteúdo de ambos os lados.
+
+## Entidades principais
+
+| Tabela | O que guarda |
+|---|---|
+| [`friendships`](/docs/data-model/tables/friendships) | Pedidos pending + amizades aceitas |
+| [`user_blocks`](/docs/data-model/tables/user_blocks) | Bloqueios direcionais |
+
+## Endpoints
+
+11 endpoints divididos em duas seções:
+
+**Pedidos / amigos** (montado em `/friends`):
+
+| Endpoint | Resumo |
+|---|---|
+| `POST /friends/requests` | Enviar pedido |
+| `GET /friends/requests/received` | Pedidos pra mim |
+| `GET /friends/requests/sent` | Pedidos que enviei |
+| `POST /friends/requests/:id/accept` | Aceitar |
+| `POST /friends/requests/:id/reject` | Rejeitar |
+| `DELETE /friends/requests/:id` | Cancelar enviado |
+| `GET /friends` | Minha lista de amigos |
+| `DELETE /friends/:friendId` | Desfazer amizade |
+
+**Blocks** (montado em `/blocks`):
+
+| Endpoint | Resumo |
+|---|---|
+| `POST /blocks/:userId` | Bloquear |
+| `DELETE /blocks/:userId` | Desbloquear |
+| `GET /blocks` | Lista de bloqueados |
+
+## Fluxos
+
+### Pedido + aceite
+
+<Mermaid chart={`sequenceDiagram
+  autonumber
+  participant A as User A
+  participant API as Backend
+  participant DB as PostgreSQL
+  participant N as NotificationsService
+  participant CG as ChatGateway
+  participant B as User B
+
+  A->>API: POST /friends/requests { receiverId: B }
+  API->>DB: SELECT existing friendship A↔B
+  alt Já existe pending B→A
+    API->>DB: UPDATE status='accepted'
+    Note over API: Auto-aceita reverso (mutual interest)
+  else Nada existe
+    API->>DB: INSERT friendship (status=pending)
+  end
+  API->>N: notify({ recipient: B, type: friend_request })
+  N->>CG: emit 'notification:new' room=user:B
+  CG-->>B: notificação real-time
+
+  Note over B: Mais tarde...
+  B->>API: POST /friends/requests/:id/accept
+  API->>DB: UPDATE status='accepted'
+  API->>CG: linkFriendship(A, B) — vincula chat 1-1
+  API->>N: notify({ recipient: A, type: friend_accepted })
+  CG-->>A: notificação`} />
+
+### Bloquear (cascade)
+
+<Mermaid chart={`sequenceDiagram
+  autonumber
+  participant A as User A (blocker)
+  participant API as Backend
+  participant DB as PostgreSQL
+  participant CG as ChatGateway
+  participant B as User B (blocked)
+
+  A->>API: POST /blocks/:B
+  API->>DB: BEGIN
+  API->>DB: INSERT user_blocks (A → B)
+  API->>DB: DELETE friendships entre A e B (em qualquer direção)
+  API->>DB: COMMIT
+  API->>CG: emitConversationsRefresh([A, B])
+  CG-->>A: conversation:refresh
+  CG-->>B: conversation:refresh
+  API->>CG: unlinkFriendship(A, B)
+  Note over CG: Sockets de A e B na conversa DM são removidos<br/>do mesmo room — não recebem mais mensagens entre si`} />
+
+### Listar amigos (denormalização)
+
+<Mermaid chart={`sequenceDiagram
+  participant FE as Frontend
+  participant API as Backend
+  participant DB as PostgreSQL
+
+  FE->>API: GET /friends
+  API->>DB: SELECT requester_id, receiver_id, ...<br/>FROM friendships<br/>WHERE status='accepted'<br/>AND (requester_id = $me OR receiver_id = $me)
+  API->>API: Para cada row: extrai friendId<br/>(o lado que NÃO é eu)
+  API->>DB: SELECT users.* WHERE id IN (friendIds)
+  API-->>FE: [{ user, friendshipId, since }, ...]`} />
+
+## Eventos de socket
+
+| Evento | Quando |
+|---|---|
+| `notification:new (friend_request)` | Pedido recebido |
+| `notification:new (friend_accepted)` | Aceito |
+| `conversation:refresh` | Block/unblock — força frontend re-fetch da lista |
+| `friend:link` (interno chat) | linkFriendship após aceite — vincula sockets ao mesmo room DM |
+| `friend:unlink` (interno chat) | unlinkFriendship após remove ou block |
+
+## Edge cases e regras especiais
+
+- **Mutual interest**: se A pede a B e já existe pending B→A, o backend aceita automaticamente (não cria duplicado)
+- **Block desfaz amizade silenciosamente** — sem notificação ao bloqueado de que foi bloqueado
+- **Unblock NÃO restaura amizade** — o user precisa refazer pedido. Block é "ruptura limpa".
+- **Tentar adicionar quem te bloqueou**: backend retorna BLOCKED — frontend pode mostrar genérico "não foi possível enviar"
+- **Amizade não existe sem aceite** — `friend_accepted` é o gatilho real (`pending` é "interesse expresso")
+- **Cancel ≠ Reject** — cancel é o requester desfazendo, reject é o receiver recusando. Ambos viram DELETE; sem notificação em qualquer caso
+- **Privacy interage com amizade** — perfil `friends_only` revela tudo só pra accepted friends
+
+## Dependências entre módulos
+
+- **Notifications** — friend_request, friend_accepted
+- **Chat** — linkFriendship/unlinkFriendship pra conectar/desconectar DM 1-1
+- **Users** — privacy gating em getProfile depende de areFriends
+- **Posts/Feed** — `friends_only` posts só aparecem pra friends accepted
+- **Collections / Items** — `friends_only` collections seguem mesma regra

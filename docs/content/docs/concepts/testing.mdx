@@ -1,0 +1,214 @@
+---
+title: Testing
+description: Estratégia de testes — unit, integration (Testcontainers) e E2E.
+---
+
+O Geek Social usa **Vitest** como runner único com 3 tipos de teste:
+
+- **Unit** — services isolados, repos com fakes em memória, validações Zod
+- **Integration** — backend completo subido contra Postgres real (via Testcontainers)
+- **E2E** — flows ponta-a-ponta (signup → criar coleção → ofertar → confirmar) cruzando módulos
+
+## Setup
+
+```json
+// package.json (geek-social-api)
+"scripts": {
+  "test": "vitest run",
+  "test:watch": "vitest",
+  "test:e2e": "vitest run --project e2e",
+  "test:all": "vitest run"
+}
+```
+
+`vitest.config.ts` configura projects:
+- `unit` — `src/**/*.test.ts`, sem container
+- `e2e` — `tests/e2e/**/*.spec.ts`, sobe stack via setup hook
+
+## Estrutura
+
+```
+geek-social-api/
+├── src/
+│   └── modules/<area>/
+│       ├── <name>.service.ts
+│       ├── <name>.service.test.ts          ← unit (vizinho ao service)
+│       ├── <name>.repository.ts
+│       └── <name>.repository.test.ts        ← integration (Testcontainers)
+└── tests/
+    └── e2e/
+        ├── auth.spec.ts
+        ├── offers.spec.ts
+        └── helpers/
+            ├── setup.ts                      ← Testcontainers
+            └── factories.ts                  ← fixture builders
+```
+
+## Unit tests
+
+**Mock o repository contract**, não o adapter concreto:
+
+```ts
+// auth.service.test.ts
+import { describe, it, expect } from 'vitest'
+import { AuthService } from './auth.service.js'
+import type { IUserRepository } from '../../shared/contracts/user.repository.contract.js'
+
+const fakeRepo: IUserRepository = {
+  async findByEmail(email) { return null },
+  async create(input) { return { id: 'uuid-1', email: input.email, ... } },
+  // ... outros métodos do contract
+}
+
+const fakeEmail = { sendEmailVerification: async () => {} }
+
+describe('AuthService', () => {
+  it('cria usuário e dispara e-mail de verificação', async () => {
+    const service = new AuthService(fakeRepo, fakeEmail, { ... })
+    const result = await service.register({ email: 'a@b.com', password: '12345678', displayName: 'A' })
+    expect(result.user.email).toBe('a@b.com')
+  })
+
+  it('falha com EMAIL_ALREADY_EXISTS se e-mail já existe', async () => {
+    const repo = { ...fakeRepo, findByEmail: async () => ({ id: 'x', email: 'a@b.com' }) as any }
+    const service = new AuthService(repo, fakeEmail, { ... })
+    await expect(service.register({ ... })).rejects.toThrow('EMAIL_ALREADY_EXISTS')
+  })
+})
+```
+
+**Princípios**:
+- Use o **contract** como interface (não a implementação)
+- Construa fakes inline (sem libs de mock pesadas)
+- Cada teste cobre 1 cenário focado — nome do `it` descreve o comportamento, não a implementação
+
+## Integration tests com Testcontainers
+
+Para testar **repositories** ou serviços que tocam DB de verdade:
+
+```ts
+// auth.repository.test.ts
+import { afterAll, beforeAll, describe, it } from 'vitest'
+import { PostgreSqlContainer } from '@testcontainers/postgresql'
+import { drizzle } from 'drizzle-orm/node-postgres'
+import { migrate } from 'drizzle-orm/node-postgres/migrator'
+import { Pool } from 'pg'
+import { UserRepository } from './auth.repository.js'
+
+let container: any
+let db: any
+let repo: UserRepository
+
+beforeAll(async () => {
+  container = await new PostgreSqlContainer('postgres:17').start()
+  const pool = new Pool({ connectionString: container.getConnectionUri() })
+  db = drizzle(pool)
+  await migrate(db, { migrationsFolder: 'src/shared/infra/database/migrations' })
+  repo = new UserRepository(db)
+}, 60_000)
+
+afterAll(async () => {
+  await container?.stop()
+})
+
+describe('UserRepository', () => {
+  it('insere user e busca por email', async () => {
+    const user = await repo.create({ email: 'a@b.com', passwordHash: 'h', displayName: 'A' })
+    const found = await repo.findByEmail('a@b.com')
+    expect(found?.id).toBe(user.id)
+  })
+})
+```
+
+**Princípios**:
+- Container é **iniciado uma vez por arquivo** (compartilhado entre `it`s)
+- Migrations rodam no setup
+- Cleanup entre testes via `BEGIN/ROLLBACK` em transactions OU `TRUNCATE` em tabelas
+
+## E2E tests
+
+Testa o backend completo subido:
+
+```ts
+// tests/e2e/offers.spec.ts
+import { test, expect } from 'vitest'
+import { setupTestApp } from './helpers/setup.js'
+
+test('fluxo completo: criar listing → ofertar → confirmar → transferir', async () => {
+  const { request, db } = await setupTestApp()
+
+  // Cria 2 users via REST
+  const userA = await register(request, { email: 'a@x.com', ... })
+  const userB = await register(request, { email: 'b@x.com', ... })
+
+  // User A cria coleção + item + listing
+  const collection = await request.post('/collections', { ..., headers: tokenA })
+  const item = await request.post(`/collections/${collection.id}/items`, { ..., headers: tokenA })
+  const listing = await request.post('/listings', { itemId: item.id, ..., headers: tokenA })
+
+  // User B oferta
+  const offer = await request.post('/offers', { type: 'buy', listingId: listing.id, offeredPrice: 50, ..., headers: tokenB })
+
+  // A aceita
+  await request.post(`/offers/${offer.id}/accept`, {}, { headers: tokenA })
+
+  // Ambos confirmam
+  await request.post(`/offers/${offer.id}/confirm`, {}, { headers: tokenA })
+  await request.post(`/offers/${offer.id}/confirm`, {}, { headers: tokenB })
+
+  // Verifica transferência
+  const itemAfter = await request.get(`/collections/.../items/${item.id}`, { headers: tokenB })
+  expect(itemAfter.collectionId).toBe(/* coleção destino do B */)
+})
+```
+
+## Quando usar cada um
+
+| Tipo | Velocidade | Cobertura | Quando |
+|---|---|---|---|
+| Unit | `<100ms` / teste | Lógica isolada | Service com regra de negócio |
+| Integration | 1-5s / teste | DB real | Repos, queries Drizzle, índices parciais |
+| E2E | 5-30s / teste | Stack completo | Flows críticos (auth, offer dual-confirm, chat) |
+
+## CI integration
+
+Em `.github/workflows/ci.yml` (ou Gitea Actions equivalente):
+
+```yaml
+- name: Setup Node
+  uses: actions/setup-node@v4
+- run: npm ci
+- run: npm run test:all
+```
+
+CI usa Docker já disponível pra Testcontainers — sem setup extra.
+
+## Coverage
+
+```bash
+npx vitest run --coverage
+```
+
+Gera report em `coverage/`. Não temos threshold mínimo configurado hoje (decisão pragmática — testar onde dá valor, não cobrir por cobrir).
+
+## Padrões para escrever bons testes
+
+- **Arrange-Act-Assert** explícito — separar bem as fases
+- **1 expectativa por teste** quando possível — facilita debugar
+- **Nome descritivo** — `it('rejeita login com senha errada', ...)`, não `it('test login fail')`
+- **Sem setup gigante compartilhado** — preferir factory functions (`createTestUser()`)
+- **Sem mocks profundos** — se você precisa stubar 5 níveis, talvez o design esteja ruim
+- **Testes determinísticos** — sem `setTimeout` aleatório, sem dependência de ordem entre testes
+
+## O que NÃO testamos
+
+- Integrações externas reais (Steam API, SES) em CI — usamos adapters fake
+- UI do frontend em CI hoje (sem Playwright/Cypress) — visual e e2e do FE são manuais
+- Bugs já fixos sem regressão tests — débito conhecido em alguns casos antigos
+
+## Pendências
+
+- Coverage threshold no CI
+- Playwright pra e2e do frontend
+- Performance tests (load testing com k6 ou similar)
+- Mutation testing pra qualidade dos testes existentes (Stryker)

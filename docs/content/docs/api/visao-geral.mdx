@@ -1,0 +1,61 @@
+---
+title: API Reference — Visão geral
+description: Base URL, autenticação, formatos de request/response.
+---
+
+A API REST do Geek Social roda em **Fastify** com schemas validados via **Zod**. Cada endpoint declara seu schema (request body, query, response por status code), e essa fonte gera o OpenAPI consumido por esta documentação.
+
+> 🧪 **Quer testar a API ao vivo?** Vá pro [Sandbox interativo](/docs/api/playground) — navegue todos os endpoints e dispare requests reais com sua chave de auth.
+
+## Base URL
+
+| Ambiente | URL |
+|---|---|
+| Dev local | `http://localhost:3003` |
+| VPS/produção | (configurada por instalação) |
+
+## Autenticação
+
+A maioria dos endpoints requer `Authorization: Bearer <accessToken>` no header. Endpoints específicos esperam o cookie HttpOnly `refreshToken` em vez disso (ex: `/auth/refresh`).
+
+Detalhes do esquema em [Conceito de Autenticação](/docs/concepts/autenticacao).
+
+## Formatos
+
+- **Request body** — `Content-Type: application/json`. Multipart só em uploads (avatar, post media, etc.)
+- **Response body** — JSON, exceto:
+  - `204 No Content` — corpo vazio (logout, change-password, etc.)
+  - Redirects 3xx — usado por OAuth callback
+- **Datas** — ISO 8601 com timezone (ex: `2026-04-28T15:30:00.000Z`)
+- **IDs** — UUID v4
+
+## Convenções de erro
+
+JSON `{ "error": "CODIGO_TIPADO" }` em todos os 4xx. Ver [Convenções de erro](/docs/concepts/convencoes-erro) e [Catálogo de códigos](/docs/reference/codigos-erro).
+
+## Paginação
+
+Endpoints que listam coleções usam **cursor pagination**:
+
+```
+GET /collections?cursor=<base64>&limit=20
+→
+{
+  "items": [...],
+  "nextCursor": "..."  // null se acabou
+}
+```
+
+O cursor codifica `(orderBy, lastSeenValue)` — não é stateful no servidor.
+
+## Realtime
+
+Eventos em tempo real (notificações, mensagens, presence) chegam via Socket.IO no namespace default. JWT é passado no handshake. Endpoints REST disparam eventos como side effects.
+
+## Rate limiting
+
+Aplicado a nível de aplicação em endpoints sensíveis (login, register, forgot-password). Detalhes futuros — não bloqueante pra integração no curto prazo.
+
+## Browse por módulo
+
+Use a sidebar à esquerda. Hoje só **Auth** está populado; outros módulos virão.

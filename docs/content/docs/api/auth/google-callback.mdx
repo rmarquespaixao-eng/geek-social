@@ -1,0 +1,131 @@
+---
+title: GET /auth/google/callback
+description: Callback OAuth do Google (não chamar diretamente)
+---
+
+import Meta from '@/generated/api/auth/google-callback/meta'
+import Request from '@/generated/api/auth/google-callback/request'
+import Responses from '@/generated/api/auth/google-callback/responses'
+import Errors from '@/generated/api/auth/google-callback/errors'
+import Examples from '@/generated/api/auth/google-callback/examples'
+
+<Meta />
+
+Endpoint chamado **pelo Google** após o usuário autorizar a aplicação. **Não chame este endpoint manualmente** — só o Google deve atingi-lo.
+
+Recebe `?code=<authorization_code>&state=<jwt>` na query string. O `state` JWT carrega o modo do fluxo (`login` vs `link`). O endpoint:
+
+1. Verifica `state` JWT (se inválido/expirado → redireciona com `status=error&code=INVALID_STATE`)
+2. Troca `code` por `tokens` via Google (`authorizationCodeGrant`)
+3. Busca `userInfo` (`fetchUserInfo`)
+4. Decide entre login/criar conta (modo `login`) ou vincular Google (modo `link`)
+5. Em qualquer caso, **redireciona pro frontend** com query string indicando o resultado
+
+**Sempre redireciona** — nunca retorna JSON, nunca retorna erro HTTP. Erros viram `?status=error&code=...` na URL.
+
+## Quando chamar
+
+**Não chame.** Esse endpoint é registrado como redirect URI no Google OAuth client. O Google bate aqui automaticamente após autorização.
+
+## Request
+
+<Request />
+
+**Query string**:
+- `code` — authorization code do Google (single-use, expira em ~1 min)
+- `state` — JWT que o `/auth/google` ou `/auth/google/link` assinou
+
+**Sem auth necessária** — o `state` valida o fluxo.
+
+## Response
+
+<Responses />
+
+**Sempre 302 Redirect** pra `${FRONTEND_URL}/auth/callback?<query>`.
+
+A query string carrega o resultado:
+
+| `status` | Quando | Outros params |
+|---|---|---|
+| `registered` | Conta nova criada via Google (modo `login`) | `token=<accessToken>` |
+| `logged-in` | Login direto, conta já existia com `google_id` (modo `login`) | `token=<accessToken>` |
+| `linked-login` | Conta já existia com mesmo e-mail; Google vinculado + login (modo `login`) | `token=<accessToken>` |
+| `linked` | Vínculo bem-sucedido (modo `link`) | (sem token — user já estava logado) |
+| `error` | Algum erro | `code=INVALID_STATE \| OAUTH_FAILED \| EMAIL_MISSING \| LOGIN_FAILED \| LINK_FAILED \| GOOGLE_ALREADY_LINKED_TO_OTHER_USER` |
+
+E em sucessos de login (`registered`/`logged-in`/`linked-login`), o `Set-Cookie: refreshToken=...` também é retornado no header.
+
+## Erros
+
+<Errors />
+
+Como o endpoint sempre redireciona, "erros" são repassados via `?status=error&code=...` no query do frontend. O frontend então mostra mensagem apropriada.
+
+| `code` na URL | Causa | Como resolver |
+|---|---|---|
+| `INVALID_STATE` | State JWT expirou (>5min entre clicar "Entrar" e voltar do Google) ou foi adulterado | Refazer fluxo |
+| `OAUTH_FAILED` | Token exchange ou userInfo falhou (rede, credenciais inválidas) | Tentar de novo; se persistir, checar config Google |
+| `EMAIL_MISSING` | Conta Google sem e-mail (raro, possível com workspace setups específicos) | Re-autorizar incluindo escopo `email` |
+| `LOGIN_FAILED` | Erro inesperado em `loginWithGoogle` | Logs do backend |
+| `LINK_FAILED` | Erro inesperado em `linkGoogleAccount` | Logs do backend |
+| `GOOGLE_ALREADY_LINKED_TO_OTHER_USER` | A conta Google já é vínculo de outro user no sistema (modo `link`) | Logout do user atual, login no outro, desvincular Google de lá; depois retornar |
+
+## Exemplos
+
+<Examples />
+
+
+### Frontend — handler do callback
+
+```ts
+// página /auth/callback
+const params = new URLSearchParams(window.location.search)
+const status = params.get('status')
+const token = params.get('token')
+
+if (status === 'error') {
+  const code = params.get('code')
+  showError(code)  // ex: "Login com Google falhou. Tente novamente."
+  return
+}
+
+if (token) {
+  authStore.setAccessToken(token)  // refresh cookie já está setado pelo backend
+  // limpa URL pra não vazar token em logs/referer:
+  window.history.replaceState({}, '', '/dashboard')
+  goToDashboard()
+}
+```
+
+## Side effects
+
+Depende do modo e do estado:
+
+| Cenário | DB |
+|---|---|
+| `login` + sem user com `google_id` + sem user com mesmo e-mail | INSERT `users` (cria conta nova com `email_verified=true`) + INSERT `refresh_tokens` |
+| `login` + sem user com `google_id` + user existe com mesmo e-mail | UPDATE `users.google_id` (vincula) + INSERT `refresh_tokens` |
+| `login` + user já vinculado | INSERT `refresh_tokens` apenas |
+| `link` + sucesso | UPDATE `users.google_id` (do user autenticado) |
+| `link` + Google já é de outro user | nada — falha com `GOOGLE_ALREADY_LINKED_TO_OTHER_USER` |
+
+**Avatar do Google**: copiado pra `users.avatar_url` apenas se o user ainda não tiver foto setada (no insert ou no link).
+
+**Sem notificação ou socket** disparados.
+
+## Configuração no Google Cloud Console
+
+- OAuth client tipo **Web application**
+- **Authorized redirect URI**: `${APP_URL}/auth/google/callback` (ex: `http://localhost:3003/auth/google/callback` em dev)
+- **Authorized JavaScript origins**: opcional (Backend não usa direto, mas frontend pode precisar pra Google Sign-In tap)
+- Scopes mínimos: `openid email profile`
+
+## Relacionados
+
+- Endpoint: [`GET /auth/google`](/docs/api/auth/google-start) — onde o fluxo começa (modo login)
+- Endpoint: [`GET /auth/google/link`](/docs/api/auth/google-link-start) — onde o fluxo começa (modo link)
+- Endpoint: [`DELETE /auth/google/link`](/docs/api/auth/google-unlink) — desvincular
+- Conceito: [Autenticação](/docs/concepts/autenticacao)
+- Módulo: [Auth](/docs/modules/auth#3-login-com-google-oauth) — sequence diagram completo
+- Tabela: [`users`](/docs/data-model/tables/users) — campos `google_id`, `google_linked_at`, `avatar_url`
+- Tabela: [`refresh_tokens`](/docs/data-model/tables/refresh_tokens) — sessão criada

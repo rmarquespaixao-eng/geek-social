@@ -1,0 +1,142 @@
+---
+title: Collections & Items
+description: Coleções com schema dinâmico + items reutilizáveis com fields customizados.
+---
+
+## Visão geral
+
+Os módulos **Collections** e **Items** formam o coração do conteúdo gamer/colecionador do Geek Social. Modelagem chave:
+
+- Cada **collection** tem um **type** (`games`, `books`, `cardgames`, `boardgames`, `custom`) e um **schema dinâmico** definido pelo dono
+- Cada **item** pertence a uma collection e guarda valores em JSONB indexado pelas keys das field_definitions referenciadas
+
+A separação entre `field_definitions` (catálogo global) e `collection_field_schema` (mapeamento por coleção) permite reusar campos entre coleções e respeitar ordenação custom.
+
+Items podem **transferir entre usuários** via Vitrine — uma offer confirmada move o `collection_id` do item pro destinatário.
+
+## Entidades principais
+
+| Tabela | Papel |
+|---|---|
+| [`collections`](/docs/data-model/tables/collections) | Container com type, visibility, schema |
+| [`items`](/docs/data-model/tables/items) | Unidades atômicas com fields JSONB |
+| [`collection_field_schema`](/docs/data-model/tables/collection_field_schema) | Mapeamento collection ↔ field_definition + ordem |
+| [`field_definitions`](/docs/data-model/tables/field_definitions) | Catálogo de campos (sistema + custom) |
+
+## Endpoints
+
+**Collections** (11): create, list mine, list public, get, update, delete, upload icon, upload cover, attach/detach/update field do schema.
+
+**Items** (7): list (com filtros dinâmicos), create, get, update, delete, upload cover, list public.
+
+Ver [API Reference — Collections](/docs/api/collections/collections-list-mine) e [API Reference — Items](/docs/api/items/items-list).
+
+## Fluxos
+
+### Criar coleção com schema dinâmico
+
+<Mermaid chart={`sequenceDiagram
+  autonumber
+  participant U as Usuário
+  participant FE as Frontend
+  participant API as Backend
+  participant DB as PostgreSQL
+
+  U->>FE: Nova coleção: tipo "games"
+  FE->>API: GET /field-definitions?collection_type=games
+  API-->>FE: Lista de field defs (sistema + custom do user)
+  U->>FE: Seleciona campos: Plataforma, Status, Horas
+  FE->>API: POST /collections { name, type:'games', fieldDefinitionIds:[...] }
+  API->>DB: BEGIN
+  API->>DB: INSERT collections
+  API->>DB: INSERT collection_field_schema (1 row por field)
+  API->>DB: COMMIT
+  API-->>FE: { collection completa com schema embed }`} />
+
+### Criar item com fields validados
+
+<Mermaid chart={`sequenceDiagram
+  autonumber
+  participant U as Usuário
+  participant FE as Frontend
+  participant API as Backend
+  participant DB as PostgreSQL
+  participant PS as PostsService
+
+  U->>FE: Adicionar "Hollow Knight" na coleção games
+  FE->>API: GET /collections/:id (pega schema atual)
+  FE->>FE: Renderiza form com campos do schema
+  U->>FE: Preenche Plataforma=Steam, Status=jogando, Horas=42
+  FE->>API: POST /collections/:id/items {<br/> name: 'Hollow Knight',<br/> fields: {<br/>  platform:'Steam',<br/>  status:'jogando',<br/>  hours:42<br/>}}
+  API->>DB: SELECT field_definitions JOIN collection_field_schema
+  API->>API: Valida cada field contra type:<br/>- platform → select com Steam ∈ options? ✓<br/>- status → select ✓<br/>- hours → number ✓
+  alt isRequired field ausente
+    API-->>FE: 422 REQUIRED_FIELD_MISSING
+  else OK
+    API->>DB: INSERT items (..., fields=jsonb)
+    alt collection.auto_share_to_feed=true
+      API->>PS: createItemSharePost(item)
+    end
+    API-->>FE: 201 { item }
+  end`} />
+
+### Listar items com filtros dinâmicos
+
+<Mermaid chart={`sequenceDiagram
+  participant FE as Frontend
+  participant API as Backend
+  participant DB as PostgreSQL
+
+  Note over FE: Quero "games da plataforma Steam<br/>com horas entre 10 e 100, ordenado por rating desc"
+  FE->>API: GET /collections/:id/items?<br/>field_platform=Steam&<br/>field_hours_gte=10&<br/>field_hours_lte=100&<br/>sort=rating&<br/>limit=30
+  API->>API: Parse query params: detecta field_*<br/>e build WHERE dinâmico
+  API->>DB: SELECT * FROM items<br/>WHERE collection_id=?<br/>AND fields->>'platform' = 'Steam'<br/>AND (fields->>'hours')::int BETWEEN 10 AND 100<br/>ORDER BY rating DESC<br/>LIMIT 30
+  API-->>FE: { items, nextCursor }`} />
+
+### Schema editing após coleção criada
+
+<Mermaid chart={`sequenceDiagram
+  autonumber
+  participant U as Usuário
+  participant FE as Frontend
+  participant API as Backend
+
+  U->>FE: Editar schema: adicionar "Local de compra"
+  FE->>API: POST /collections/:id/schema { fieldDefinitionId, isRequired:false }
+  API-->>FE: 201
+  Note over FE: Items existentes não têm esse campo no JSONB ainda<br/>UI mostra como vazio; ao editar item, aparece pra preencher
+
+  U->>FE: Marcar campo como obrigatório
+  FE->>API: PATCH /collections/:id/schema/:entryId { isRequired:true }
+
+  U->>FE: Remover campo
+  FE->>API: DELETE /collections/:id/schema/:entryId
+  API-->>FE: 204
+  Note over FE: Items preservam valor no JSONB (não some);<br/>só some da UI`} />
+
+## Eventos de socket
+
+Não emite eventos diretamente. Mas:
+- Item adicionado com `auto_share_to_feed` dispara post no feed → cliente recebe via socket nas próximas atualizações de feed
+- Item transferido (via offer) atualiza coleções de ambos os lados — frontend re-fetcha após `notification:new (offer_completed)`
+
+## Edge cases e regras especiais
+
+- **Tipo de coleção é imutável** — mudaria semântica dos field defs
+- **Visibility é por coleção, não por item** — mas tipo da coleção afeta quais field defs aparecem
+- **`fields` é JSONB merge** no UPDATE — não precisa enviar todas as keys
+- **Items sem field_definition correspondente** — possível se field foi detached do schema; valor preservado no JSONB
+- **Auto-criação de coleção destino** em transferências — `OffersService.ensureDestinationCollection` cria coleção do tipo certo se receptor não tem
+- **`asking_price` e `availability`** foram movidos pra [`listings`](/docs/data-model/tables/listings) na sessão 2026-04-28; código antigo pode mencionar
+- **Privacy `friends_only`** filtra cross-user; o backend valida via `friendsRepository.areFriends`
+- **Field definition de sistema** (is_system=true) não é editável pelo user; apenas hidden
+- **Collection_field_schema sem unique constraint** em (collection_id, field_definition_id) — app evita duplicação mas DB não enforce (pendência)
+
+## Dependências entre módulos
+
+- **Friends** — privacy gating cross-user
+- **Field Definitions** — catálogo de campos disponíveis
+- **Posts** — auto-share dispara post item_share
+- **Listings/Offers** — item.collection_id muda em transferências
+- **Steam** — workers `steam.import-game` populam items em batch
+- **Storage** — upload de cover/icon

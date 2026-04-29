@@ -1,0 +1,378 @@
+---
+title: Deploy passo a passo
+description: Como subir Geek Social do zero num VPS Linux.
+---
+
+Receita pra deployar o stack completo numa VPS limpa. Premissas: Ubuntu 22.04+, root SSH, domínio apontando pra VPS.
+
+## 1. Preparar VPS
+
+```bash
+# SSH no VPS
+ssh root@SEU_IP
+
+# Update + ferramentas básicas
+apt update && apt upgrade -y
+apt install -y curl git ca-certificates gnupg ufw
+
+# Firewall: só 22 (SSH), 80 (HTTP), 443 (HTTPS)
+ufw default deny incoming
+ufw default allow outgoing
+ufw allow 22/tcp
+ufw allow 80/tcp
+ufw allow 443/tcp
+ufw enable
+```
+
+## 2. Instalar Docker + Compose
+
+```bash
+curl -fsSL https://get.docker.com | sh
+systemctl enable --now docker
+
+# Compose plugin (já vem com Docker recente)
+docker compose version
+```
+
+## 3. Configurar registry pull
+
+Se imagens estão num registry privado (`register.homelab-cloud.com`):
+
+```bash
+docker login register.homelab-cloud.com
+# user/pass quando solicitado
+```
+
+## 4. Criar usuário deploy + estrutura
+
+```bash
+useradd -m -s /bin/bash deploy
+usermod -aG docker deploy
+mkdir -p /apps/geek-social
+chown -R deploy:deploy /apps
+```
+
+Logue como deploy:
+
+```bash
+su - deploy
+cd /apps/geek-social
+```
+
+## 5. Estrutura de arquivos
+
+```
+/apps/geek-social/
+├── docker-compose.yml          ← orquestração
+├── .env                        ← secrets (NÃO COMMITAR)
+├── nginx/
+│   ├── geek-social.conf        ← config do Nginx
+│   └── ssl-options.conf        ← SSL hardening
+└── volumes/                    ← (vazio inicialmente; Docker cria)
+    ├── postgres/
+    └── minio/
+```
+
+## 6. `.env` em prod
+
+```bash
+# /apps/geek-social/.env
+NODE_ENV=production
+
+# Postgres
+DATABASE_URL=postgresql://dev:SENHA_FORTE@postgres:5432/geek_social
+JOBS_DATABASE_URL=postgresql://dev:SENHA_FORTE@postgres:5432/geek_social
+
+# JWT (gere com: openssl rand -hex 64)
+JWT_SECRET=GERE_64_HEX_AQUI
+JWT_EXPIRES_IN=15m
+REFRESH_TOKEN_EXPIRES_DAYS=7
+
+# Storage (MinIO no mesmo VPS)
+AWS_REGION=us-east-1
+AWS_ACCESS_KEY_ID=minioprod
+AWS_SECRET_ACCESS_KEY=GERE_FORTE
+S3_BUCKET_NAME=geek-social-media
+STORAGE_ENDPOINT=http://minio:9000
+STORAGE_PUBLIC_URL=https://cdn.geek-social.com.br/geek-social-media
+
+# E-mail (SES ou alternativa)
+SES_FROM_EMAIL=noreply@geek-social.com.br
+# AWS_REGION usado pra SES também
+
+# OAuth Google
+GOOGLE_OAUTH_ENABLED=true
+GOOGLE_CLIENT_ID=...apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=...
+
+# App URLs
+APP_URL=https://api.geek-social.com.br
+FRONTEND_URL=https://app.geek-social.com.br
+
+# VAPID (gere com: npx web-push generate-vapid-keys)
+VAPID_PUBLIC_KEY=BLD2...
+VAPID_PRIVATE_KEY=...
+VAPID_CONTACT=mailto:admin@geek-social.com.br
+
+# Versions (atualize ao fazer release)
+GEEK_SOCIAL_API_VERSION=1.8.13
+GEEK_SOCIAL_FRONTEND_VERSION=1.8.13
+GEEK_SOCIAL_DOCS_VERSION=1.0.0
+```
+
+```bash
+chmod 600 .env   # apenas owner lê
+```
+
+## 7. `docker-compose.yml`
+
+```yaml
+# /apps/geek-social/docker-compose.yml
+services:
+  api:
+    image: register.homelab-cloud.com/geek-social-api:${GEEK_SOCIAL_API_VERSION}
+    container_name: geek-social-api
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      postgres: { condition: service_healthy }
+      minio: { condition: service_started }
+    networks: [geek-social]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3003/health"]
+      interval: 30s
+      retries: 3
+
+  frontend:
+    image: register.homelab-cloud.com/geek-social-frontend:${GEEK_SOCIAL_FRONTEND_VERSION}
+    container_name: geek-social-frontend
+    restart: unless-stopped
+    environment:
+      API_URL: https://api.geek-social.com.br
+    networks: [geek-social]
+
+  docs:
+    image: register.homelab-cloud.com/geek-social-docs:${GEEK_SOCIAL_DOCS_VERSION}
+    container_name: geek-social-docs
+    restart: unless-stopped
+    networks: [geek-social]
+
+  postgres:
+    image: postgres:17
+    container_name: geek-social-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: dev
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: geek_social
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dev"]
+      interval: 10s
+    networks: [geek-social]
+
+  minio:
+    image: minio/minio:RELEASE.2025-04-08T15-41-24Z
+    container_name: geek-social-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    volumes:
+      - minio_data:/data
+    networks: [geek-social]
+
+  nginx:
+    image: nginx:alpine
+    container_name: geek-social-nginx
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./nginx:/etc/nginx/conf.d:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+      - certbot_webroot:/var/www/certbot
+    depends_on: [api, frontend, docs, minio]
+    networks: [geek-social]
+
+volumes:
+  postgres_data: {}
+  minio_data: {}
+  certbot_webroot: {}
+
+networks:
+  geek-social:
+    driver: bridge
+```
+
+## 8. Configurar Nginx
+
+`/apps/geek-social/nginx/geek-social.conf` — ver página detalhada [Configuração Nginx](/docs/operations/nginx).
+
+## 9. SSL via Certbot
+
+```bash
+# Instalar certbot
+sudo apt install -y certbot
+
+# Subir nginx temporariamente sem SSL pra Certbot validar
+docker compose up -d nginx
+
+# Gerar certs (uma vez por domínio, ou wildcard)
+sudo certbot certonly --webroot -w /apps/geek-social/volumes/certbot \
+  -d geek-social.com.br \
+  -d app.geek-social.com.br \
+  -d api.geek-social.com.br \
+  -d docs.geek-social.com.br \
+  -d cdn.geek-social.com.br
+
+# Auto-renew via cron (já vem com certbot)
+sudo systemctl enable --now certbot.timer
+```
+
+Após gerar certs, restart nginx pra ler SSL config:
+
+```bash
+docker compose restart nginx
+```
+
+## 10. Primeira subida
+
+```bash
+cd /apps/geek-social
+docker compose pull       # baixa imagens do registry
+docker compose up -d      # sobe tudo
+docker compose ps         # verifica health
+docker compose logs -f api  # ver migrations rodando
+```
+
+## 11. Setup pós-deploy
+
+### Criar database
+
+```bash
+docker exec -it geek-social-postgres psql -U dev -c "CREATE DATABASE geek_social;"
+```
+
+(Nem precisa se `POSTGRES_DB=geek_social` no env — Postgres cria automático no primeiro boot.)
+
+### Criar bucket MinIO
+
+```bash
+docker exec geek-social-minio mc alias set local http://localhost:9000 ${MINIO_ROOT_USER} ${MINIO_ROOT_PASSWORD}
+docker exec geek-social-minio mc mb local/geek-social-media
+docker exec geek-social-minio mc anonymous set download local/geek-social-media
+```
+
+### Verificar
+
+```bash
+curl https://api.geek-social.com.br/health
+curl https://app.geek-social.com.br/
+curl https://docs.geek-social.com.br/
+```
+
+Todos devem retornar 200.
+
+## 12. Atualizar versão
+
+```bash
+# Edite .env: bump as versions
+GEEK_SOCIAL_API_VERSION=1.8.14
+GEEK_SOCIAL_FRONTEND_VERSION=1.8.14
+
+# Pull + recreate
+docker compose pull
+docker compose up -d
+```
+
+Ou via CI (ver [CI/CD](/docs/operations/ci-cd)).
+
+## 13. Rollback
+
+```bash
+# Edite .env de volta pra versão anterior
+GEEK_SOCIAL_API_VERSION=1.8.13
+
+docker compose up -d
+```
+
+Versões antigas continuam no registry — manter histórico.
+
+## 14. Backup automático
+
+Cron em `/etc/cron.d/geek-social-backup`:
+
+```bash
+# Diário 3am — Postgres
+0 3 * * * deploy docker exec geek-social-postgres pg_dump -U dev -F c geek_social > /apps/backups/geek-$(date +\%Y\%m\%d).dump
+
+# Semanal — MinIO mirror
+0 4 * * 0 deploy docker exec geek-social-minio mc mirror local/geek-social-media /apps/backups/minio-$(date +\%Y\%m\%d)/
+
+# Cleanup: remove > 30 dias
+0 5 * * * find /apps/backups -mtime +30 -delete
+```
+
+Idealmente: sync esses backups pra storage offsite (Backblaze B2 free, S3 Glacier, outro VPS) — ver [DB Operations](/docs/data-model/operations).
+
+## 15. Monitoring básico
+
+Endpoint health interno:
+
+```bash
+# Cron de 1 minuto
+* * * * * curl -fsS https://api.geek-social.com.br/health > /dev/null || /apps/scripts/alert.sh "API down"
+```
+
+Roadmap robusto: ver [Monitoring](/docs/operations/monitoring).
+
+## Troubleshooting
+
+### "permission denied" em volumes
+
+Postgres/MinIO containers rodam como user específico. Volumes precisam permissão correta:
+
+```bash
+chown -R 999:999 /var/lib/docker/volumes/geek-social_postgres_data/_data
+```
+
+### Migrations falham no boot
+
+Verifique `DATABASE_URL` correto + Postgres healthy antes de api start.
+
+### "certificate not yet valid"
+
+Server time errado. `timedatectl status` + `systemctl restart systemd-timesyncd`.
+
+### "can't connect to upstream" (Nginx → API)
+
+Containers não estão na mesma network OU container name errado no `proxy_pass`.
+
+```nginx
+upstream api {
+  server geek-social-api:3003;   # = container_name no compose
+}
+```
+
+## Checklist
+
+- [ ] VPS pronto (Docker, firewall, DNS apontado)
+- [ ] `.env` com todos secrets
+- [ ] `docker-compose.yml` configurado
+- [ ] Nginx config + SSL
+- [ ] Database criado, bucket MinIO criado
+- [ ] Containers up + healthy
+- [ ] Health endpoints respondem
+- [ ] SSL válido (verificar em ssllabs.com)
+- [ ] Backup cron configurado
+- [ ] Logs centralizados (futuro)
+- [ ] Monitoring básico
+
+## Referências
+
+- [Arquitetura](/docs/operations/arquitetura)
+- [CI/CD](/docs/operations/ci-cd)
+- [Nginx config](/docs/operations/nginx)
+- [Monitoring](/docs/operations/monitoring)

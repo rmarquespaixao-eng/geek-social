@@ -1,0 +1,120 @@
+---
+title: Listings (Vitrine)
+description: Anúncios da Vitrine — fonte de verdade da disponibilidade de itens.
+---
+
+## Visão geral
+
+**Listings** são anúncios da Vitrine. Antes da sessão 2026-04-28, a info de "está disponível pra venda/troca?" ficava em `items` direto. Foi extraída pra cá pra modelar bem o ciclo `active → paused → closed`.
+
+Listing é a **fonte de verdade da disponibilidade** — quando ativo, item está no mercado; quando closed, item voltou pra coleção comum (ou foi transferido).
+
+Cada item pode ter no máximo 1 listing `active` (unique partial index). Múltiplos `paused`/`closed` históricos.
+
+## Entidades principais
+
+| Tabela | Papel |
+|---|---|
+| [`listings`](/docs/data-model/tables/listings) | Anúncio com status, availability, price, payment methods |
+| [`items`](/docs/data-model/tables/items) | Item anunciado |
+
+## Endpoints
+
+7 endpoints (em `/listings` e `/marketplace`):
+
+| Endpoint | Resumo |
+|---|---|
+| `POST /listings` | Criar anúncio |
+| `GET /listings/mine` | Meus anúncios (filtra por status) |
+| `PATCH /listings/:id` | Editar (availability, price, payment) |
+| `PATCH /listings/:id/pause` | Pausar |
+| `PATCH /listings/:id/resume` | Reativar |
+| `DELETE /listings/:id` | Encerrar (ou hard delete com ?hard=true em closed) |
+| `GET /marketplace` | Listing público (todos active de outros users) |
+
+## Fluxos
+
+### Criar anúncio
+
+<Mermaid chart={`sequenceDiagram
+  autonumber
+  participant U as Usuário
+  participant FE as Frontend
+  participant API as Backend
+  participant DB as PostgreSQL
+
+  U->>FE: Item picker → "Anunciar este"
+  FE->>FE: Modal com availability + preço + métodos de pagto + disclaimer
+  U->>FE: Aceita disclaimer + envia
+  FE->>API: POST /listings { itemId, availability, askingPrice, paymentMethods, disclaimerAccepted:true }
+  API->>API: Valida via createListingSchema
+  API->>DB: SELECT existing active listing for itemId
+  alt Já tem
+    API-->>FE: 409 ALREADY_LISTED
+  else
+    API->>DB: INSERT listings (status=active, disclaimer_accepted_at=now())
+    API-->>FE: 201 { listing }
+  end`} />
+
+### Ciclo de vida e auto-rejeição de offers
+
+<Mermaid chart={`sequenceDiagram
+  autonumber
+  participant U as Usuário
+  participant API as Backend
+  participant DB as PostgreSQL
+  participant OffersR as OffersRepository
+  participant N as NotificationsService
+
+  alt Pausar
+    U->>API: PATCH /listings/:id/pause
+    API->>DB: UPDATE status='paused'
+    Note over API: Não toca em offers (paused é temporário)
+  else Reativar
+    U->>API: PATCH /listings/:id/resume
+    API->>DB: UPDATE status='active'
+  else Encerrar
+    U->>API: DELETE /listings/:id
+    API->>DB: UPDATE status='closed'
+    API->>OffersR: autoRejectByListing(listingId)<br/>(via setOffersIntegration)
+    OffersR->>DB: UPDATE item_offers SET status='rejected'<br/>WHERE listing_id=? AND status='pending'
+    OffersR->>OffersR: notifySafe offer_rejected pra cada offerer
+  else Hard delete (apenas em closed)
+    U->>API: DELETE /listings/:id?hard=true
+    API->>DB: DELETE FROM listings WHERE id=? AND status='closed'
+    Note over DB: Cascade: offers viram com listing_id=NULL<br/>(set null) — preserva offer history
+  end`} />
+
+### Browse marketplace
+
+<Mermaid chart={`sequenceDiagram
+  participant FE as Frontend
+  participant API as Backend
+  participant DB as PostgreSQL
+
+  FE->>API: GET /marketplace?type=trade&limit=20
+  API->>DB: SELECT listings.*, items.*, owner.*<br/>FROM listings<br/>JOIN items ON ...<br/>JOIN users owner ON ...<br/>WHERE listings.status='active'<br/>AND owner.id != $me<br/>AND NOT EXISTS (block entre owner e me)<br/>AND availability IN ('trade','both') -- filtro<br/>ORDER BY listings.updated_at DESC<br/>LIMIT 20
+  API-->>FE: { items, hasMore }`} />
+
+## Eventos de socket
+
+Não emite eventos diretamente. Mas o auto-reject por close dispara `offer_rejected` notifications, que viram socket events via NotificationsService.
+
+## Edge cases e regras especiais
+
+- **Disclaimer obrigatório** — `disclaimerAccepted: true` no body, persistido como timestamp. Frontend deve mostrar texto antes do user marcar.
+- **Múltiplos pagamentos** — `paymentMethods` é array de `pix|money|transfer|card|negotiate`. Pelo menos 1 obrigatório se availability inclui sale.
+- **Preço opcional pra trade** — só obrigatório pra availability `sale` ou `both`.
+- **Tipo de listing imutável** — não há mudança de items entre listings; criar novo se quiser anunciar de outro modo.
+- **Auto-rejeição em close**: ofertas pendentes viram rejected automaticamente; ofertantes recebem notif. Acceptes que já estavam pending de confirm continuam (não cascade).
+- **Hard delete só em closed** — ativos/pausados precisam ser encerrados primeiro.
+- **Listing closed mantém histórico** — base pras avaliações e auditoria.
+- **`availability` do item legado** — alguns items antigos têm `availability` no JSONB (débito); migration removeu coluna mas não os dados.
+
+## Dependências entre módulos
+
+- **Items** — listing referencia item
+- **Offers** — auto-rejeição em close (via `OffersRepository.autoRejectByListing`)
+- **Listing Ratings** — avaliações pós-completed offers
+- **Notifications** — offer_rejected disparado em close
+- **Friends** — block esconde listings de gente bloqueada

@@ -1,0 +1,41 @@
+---
+title: POST /listings/
+description: Criar anúncio na Vitrine
+---
+
+import Meta from '@/generated/api/listings/create/meta'
+import Request from '@/generated/api/listings/create/request'
+import Responses from '@/generated/api/listings/create/responses'
+import Errors from '@/generated/api/listings/create/errors'
+import Examples from '@/generated/api/listings/create/examples'
+
+<Meta />
+
+INSERT listing com status=active e disclaimer_accepted_at=now(). Falha com ALREADY_LISTED se item já tem listing ativo.
+
+## Request
+
+<Request />
+
+## Response
+
+<Responses />
+
+## Erros
+
+<Errors />
+
+{/* TODO: para cada código de erro acima, explique a causa e como resolver. */}
+
+## Exemplos
+
+<Examples />
+
+
+## Side effects
+
+{/* TODO: eventos de socket emitidos, notificações disparadas, jobs enfileirados, cascades. */}
+
+## Relacionados
+
+{/* TODO: links pra módulo, conceitos, endpoints relacionados. */}

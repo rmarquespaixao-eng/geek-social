@@ -1,0 +1,70 @@
+---
+title: POST /auth/logout
+description: Encerrar sessão atual
+---
+
+import Meta from '@/generated/api/auth/logout/meta'
+import Request from '@/generated/api/auth/logout/request'
+import Responses from '@/generated/api/auth/logout/responses'
+import Errors from '@/generated/api/auth/logout/errors'
+import Examples from '@/generated/api/auth/logout/examples'
+
+<Meta />
+
+Revoga **a sessão atual** — apaga o registro correspondente em `refresh_tokens` e limpa o cookie HttpOnly do navegador. Outras sessões do mesmo usuário (em outros dispositivos/navegadores) **não são afetadas**.
+
+Endpoint **idempotente**: chamar sem cookie ou com cookie inválido retorna `204` mesmo assim. Não há erro de "já estou deslogado".
+
+## Quando chamar
+
+- Botão "Sair" do app
+- Ao detectar inatividade prolongada se o produto quiser invalidar antes do TTL natural
+- **Não** chamar em error handlers — se o user já tomou 401, a sessão já está corrompida; chamar logout é redundante mas inofensivo
+
+## Request
+
+<Request />
+
+**Sem corpo**. O backend lê o cookie `refreshToken` (se presente) pra deletar o registro específico.
+
+## Response
+
+<Responses />
+
+`204 No Content` — corpo vazio. Cookie é limpado via `Set-Cookie: refreshToken=; Max-Age=0`.
+
+## Erros
+
+<Errors />
+
+Não há códigos de erro específicos. Mesmo sem cookie ou com token inválido, retorna 204.
+
+## Exemplos
+
+<Examples />
+
+
+### cURL prático
+
+```bash
+curl -X POST http://localhost:3003/auth/logout \
+  -H 'Cookie: refreshToken=abc123...' \
+  -i
+# HTTP/1.1 204 No Content
+# Set-Cookie: refreshToken=; Path=/; ...
+```
+
+## Side effects
+
+- **DB**: `DELETE FROM refresh_tokens WHERE token_hash = sha256(rawCookie)` (se o cookie estava presente e bateu)
+- **Cookie**: limpado no navegador via `Set-Cookie` com `Max-Age=0`
+- **Access token NÃO é invalidado** — JWTs são stateless. Se você guardou um access token e usá-lo dentro dos próximos 15 minutos, ele ainda funciona. Não há blacklist no servidor por design (custo/benefício do JWT).
+
+⚠️ **Implicação de segurança**: se você precisa revogar **imediatamente** o access (ex: detectou roubo), o caminho é `POST /auth/reset-password` (revoga TODOS os refresh tokens do user). O frontend deve descartar o access token em memória ao fazer logout pra evitar reutilização local.
+
+## Relacionados
+
+- Endpoint: [`POST /auth/refresh`](/docs/api/auth/refresh) — após logout, refresh falha com 401
+- Endpoint: [`POST /auth/reset-password`](/docs/api/auth/reset-password) — alternativa quando quer revogar **todas** as sessões
+- Tabela: [`refresh_tokens`](/docs/data-model/tables/refresh_tokens) — fonte da sessão
+- Conceito: [Autenticação](/docs/concepts/autenticacao)

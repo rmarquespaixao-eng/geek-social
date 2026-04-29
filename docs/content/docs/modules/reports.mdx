@@ -1,0 +1,99 @@
+---
+title: Reports
+description: Denúncias de conteúdo abusivo em 5 superfícies (user, message, post, collection, conversation).
+---
+
+## Visão geral
+
+Sistema de denúncias do Geek Social. Cobre **5 superfícies**:
+- `user` — perfil/comportamento de outro usuário
+- `message` — mensagem específica de chat
+- `post` — post no feed
+- `collection` — coleção (conteúdo inadequado, NSFW)
+- `conversation` — conversa inteira (chat de grupo abusivo)
+
+Sem moderação automatizada — admin vê dashboard de pendentes e marca como `reviewed` ou `dismissed` manualmente. Pendência: integração com Linear/issue tracker.
+
+## Entidades principais
+
+| Tabela | Papel |
+|---|---|
+| [`reports`](/docs/data-model/tables/reports) | Denúncia com targetType polimórfico |
+
+## Endpoints
+
+1 endpoint público:
+
+| Endpoint | Resumo |
+|---|---|
+| `POST /reports` | Criar denúncia |
+
+Endpoints admin (não documentados aqui ainda — protegidos por flag de role admin no JWT, plano futuro).
+
+## Fluxos
+
+### Denunciar conteúdo
+
+<Mermaid chart={`sequenceDiagram
+  autonumber
+  participant U as Usuário
+  participant FE as Frontend
+  participant API as Backend
+  participant DB as PostgreSQL
+
+  Note over FE: User vê post abusivo
+  U->>FE: Menu "..." → "Denunciar"
+  FE->>FE: Modal: motivo (spam/harassment/nsfw/hate/other) + descrição opcional
+  U->>FE: Submete
+  FE->>API: POST /reports {<br/>targetType:'post', targetId:'...', reason:'harassment', description?:'...'<br/>}
+  API->>API: Valida via createReportSchema
+  API->>DB: INSERT reports<br/>(reporter_id, target_type, target_id, reason, description, status='pending')
+  alt Unique constraint: (reporter, target) já existe
+    API-->>FE: 409 ALREADY_REPORTED
+  else
+    API-->>FE: 201 { report }
+  end`} />
+
+### Validação polimórfica
+
+<Mermaid chart={`graph TB
+  Start[POST /reports]
+  Start --> Validate[Valida via Zod]
+  Validate --> CheckTarget{targetType}
+  CheckTarget -->|user| CheckUser[SELECT users WHERE id = targetId]
+  CheckTarget -->|message| CheckMessage[SELECT messages]
+  CheckTarget -->|post| CheckPost[SELECT posts]
+  CheckTarget -->|collection| CheckCollection[SELECT collections]
+  CheckTarget -->|conversation| CheckConversation[SELECT conversations]
+  CheckUser --> Insert[INSERT reports]
+  CheckMessage --> Insert
+  CheckPost --> Insert
+  CheckCollection --> Insert
+  CheckConversation --> Insert
+  Insert --> Done[201]`} />
+
+### Lifecycle
+
+<Mermaid chart={`graph LR
+  P[pending] --> R[reviewed<br/>admin marcou como válido]
+  P --> D[dismissed<br/>admin marcou como inválido]
+  Note[Sem cron de auto-resolution]`} />
+
+## Eventos de socket
+
+Sem eventos. Reports é fluxo silencioso (não notifica o reporter quando admin processa, hoje).
+
+## Edge cases e regras especiais
+
+- **Unique por reporter+target** — denúncia duplicada do mesmo user pro mesmo conteúdo retorna conflict; previne spam.
+- **`description` opcional** mas recomendado pra `other` (admin precisa entender contexto).
+- **`target_id` polimórfico sem FK** — ao apagar conteúdo, denúncia continua existindo com referência inválida. Admin lida na UI ("conteúdo já removido").
+- **5 superfícies fixas no enum** — adicionar nova requer migration (`ALTER TYPE report_target_type ADD VALUE`).
+- **5 razões fixas**: `spam | harassment | nsfw | hate | other`. Critério editorial — adicionar novas é mudança de produto.
+- **Sem flow de notificação ao denunciado** — preserva privacidade do reporter.
+- **Self-report bloqueado**? Não enforced. User pode denunciar a si mesmo (raro, sem efeito prático).
+
+## Dependências entre módulos
+
+- **Polimorfismo via `target_type`/`target_id`** — touches users, messages, posts, collections, conversations
+- **Sem dependência outbound** — reports não dispara nada além de INSERT

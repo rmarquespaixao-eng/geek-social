@@ -1,0 +1,74 @@
+---
+title: items
+description: Itens individuais dentro de coleções (jogos, livros, etc.).
+---
+
+import Columns from '@/generated/data-model/tables/items/columns'
+import Fks from '@/generated/data-model/tables/items/fks'
+import Indexes from '@/generated/data-model/tables/items/indexes'
+import Constraints from '@/generated/data-model/tables/items/constraints'
+
+Itens são as unidades atômicas de uma coleção — o jogo "Hollow Knight", o livro "1984", a carta "Black Lotus". Cada item pertence a uma coleção (e portanto a um usuário) e tem campos comuns (nome, capa, rating, comentário) e campos customizados via JSONB (`fields`).
+
+Items podem ser **transferidos entre usuários** via Vitrine (via offers confirmadas). Transferência move o item pra coleção destino do receptor (mudando `collection_id`).
+
+## Colunas
+
+<Columns />
+
+## Funcionalidade dos campos
+
+- **`id`** — UUID, PK
+- **`collection_id`** — FK. Pode mudar (transferência). Cascade delete quando coleção é apagada.
+- **`name`** — texto livre 1–200 chars. Imutável após criação? Não, editável.
+- **`cover_url`** — capa do item (S3/MinIO). Opcional; UI mostra placeholder se ausente.
+- **`fields`** — JSONB com pares `field_key: value`. Estrutura controlada pelo `collection_field_schema` da coleção dona.
+- **`rating`** — smallint 0–10 opcional. Avaliação subjetiva do dono. Não confundir com `listing_ratings` (reputação inter-usuários da Vitrine).
+- **`comment`** — texto livre. Comentário pessoal sobre o item (review curto, anotação).
+- **`created_at` / `updated_at`** — managed.
+
+**Campos removidos** (legacy a remover): `availability`, `asking_price` foram movidos pra `listings` na sessão 2026-04-28. Se você ver mention disso em código antigo, é débito a limpar.
+
+## Foreign keys
+
+<Fks />
+
+## Índices
+
+<Indexes />
+
+Sem índices secundários customizados. Lookups por `collection_id` são suficientes pra perf no volume atual.
+
+## Constraints
+
+<Constraints />
+
+## Items via Steam
+
+Items podem ser criados via Steam Integration (jobs `steam.import-game` + `steam.enrich-game`). Nesses casos, `fields` é populado com metadados do Steam (achievements, playtime, app_id) e `cover_url` aponta pro CDN do Steam.
+
+## Items na Vitrine
+
+Pra "anunciar" um item na Vitrine, o user cria um [`listing`](/docs/data-model/tables/listings) referenciando esse item. **Um item só pode ter UM listing ativo por vez** (`uniqueIndex listings_item_active_uniq` no `listings`).
+
+Quando uma offer é confirmada e a transferência executa, o item:
+- Se `buy`: muda `collection_id` pra coleção destino do comprador
+- Se `trade`: o item original muda pro receptor; o item oferecido em troca muda no sentido inverso
+
+Após transferência, o item pode ser re-anunciado pelo novo dono (criar novo listing).
+
+## Padrões de uso
+
+- **Criar manual** — `POST /collections/:id/items`
+- **Importar via Steam** — workers populam batch de items
+- **Editar fields** — JSONB merge no UPDATE
+- **Transferir** — UPDATE `collection_id` (transação atômica com a offer/listing)
+- **Deletar** — DELETE cascateia rating/comment perdidos. Listing ativo derrubado por cascade.
+
+## Tabelas relacionadas
+
+- [`collections`](/docs/data-model/tables/collections) — dona (cascade)
+- [`listings`](/docs/data-model/tables/listings) — anúncio na Vitrine (FK pro item; cascade)
+- [`item_offers`](/docs/data-model/tables/item_offers) — ofertas que alvejam ou oferecem este item
+- [`field_definitions`](/docs/data-model/tables/field_definitions) — schema dos campos em `fields`
+- [`posts`](/docs/data-model/tables/posts) — posts `item_share` referenciam item

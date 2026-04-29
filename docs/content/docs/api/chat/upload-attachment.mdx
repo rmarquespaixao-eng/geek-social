@@ -1,0 +1,41 @@
+---
+title: POST /chat/conversations/{id}/attachments
+description: Upload de attachment (pré-mensagem)
+---
+
+import Meta from '@/generated/api/chat/upload-attachment/meta'
+import Request from '@/generated/api/chat/upload-attachment/request'
+import Responses from '@/generated/api/chat/upload-attachment/responses'
+import Errors from '@/generated/api/chat/upload-attachment/errors'
+import Examples from '@/generated/api/chat/upload-attachment/examples'
+
+<Meta />
+
+Multipart upload. Cria message_attachments sem message_id ainda. ID retornado é usado em send_message.attachmentIds.
+
+## Request
+
+<Request />
+
+## Response
+
+<Responses />
+
+## Erros
+
+<Errors />
+
+{/* TODO: para cada código de erro acima, explique a causa e como resolver. */}
+
+## Exemplos
+
+<Examples />
+
+
+## Side effects
+
+{/* TODO: eventos de socket emitidos, notificações disparadas, jobs enfileirados, cascades. */}
+
+## Relacionados
+
+{/* TODO: links pra módulo, conceitos, endpoints relacionados. */}

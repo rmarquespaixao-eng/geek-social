@@ -1,0 +1,72 @@
+---
+title: user_blocks
+description: Relação assimétrica de bloqueio entre usuários.
+---
+
+import Columns from '@/generated/data-model/tables/user_blocks/columns'
+import Fks from '@/generated/data-model/tables/user_blocks/fks'
+import Indexes from '@/generated/data-model/tables/user_blocks/indexes'
+import Constraints from '@/generated/data-model/tables/user_blocks/constraints'
+
+Bloquear um usuário cria um row aqui (`blocker_id` → `blocked_id`). A relação é **direcional** — A bloquear B é diferente de B bloquear A; ambos podem coexistir.
+
+Bloquear tem efeitos cascateados:
+- **Desfaz amizade existente** entre os dois (DELETE em `friendships`)
+- **Remove conexão de chat** (unlink no socket gateway)
+- **Esconde conteúdo de ambos os lados** — perfil, posts, comentários, listings, ofertas
+- **Re-emite atualização das conversas** dos dois lados via socket
+
+Desbloquear faz UPDATE/DELETE inverso (deleta o block) mas **não restaura amizade automaticamente** — usuários precisam refazer o pedido se quiserem.
+
+## Colunas
+
+<Columns />
+
+## Funcionalidade dos campos
+
+- **`id`** — UUID, PK
+- **`blocker_id`** — quem bloqueou
+- **`blocked_id`** — quem foi bloqueado
+- **`created_at`** — momento do bloqueio
+
+Sem `updated_at` porque um block é estático: ou existe ou não.
+
+## Foreign keys
+
+<Fks />
+
+## Índices
+
+<Indexes />
+
+`user_blocks_blocker_blocked_unique` garante que um par (A, B) só pode ter um único registro. (B, A) é um par diferente — pode existir simultaneamente.
+
+## Constraints
+
+<Constraints />
+
+## Como o block é avaliado
+
+Em queries que retornam conteúdo entre usuários (perfil, feed, chat), o backend faz JOIN/EXISTS com `user_blocks` pra excluir conteúdo entre quem bloqueou ou foi bloqueado. Função helper:
+
+```ts
+function isBlockedBetween(a: string, b: string) {
+  return db.execute(sql`
+    SELECT 1 FROM user_blocks
+    WHERE (blocker_id = ${a} AND blocked_id = ${b})
+       OR (blocker_id = ${b} AND blocked_id = ${a})
+  `)
+}
+```
+
+## Padrões de uso
+
+- **Bloquear** — INSERT user_blocks + DELETE friendships entre os dois + emit socket events
+- **Desbloquear** — DELETE user_blocks + emit socket events (não recria amizade)
+- **Visibilidade query** — sempre filtrar `NOT EXISTS (SELECT 1 FROM user_blocks WHERE ...)`
+
+## Tabelas relacionadas
+
+- [`users`](/docs/data-model/tables/users) — blocker e blocked
+- [`friendships`](/docs/data-model/tables/friendships) — apagado em cascata pelo app (não por DB FK)
+- [`conversations`](/docs/data-model/tables/conversations) — chat fica desabilitado

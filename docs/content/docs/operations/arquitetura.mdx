@@ -1,0 +1,254 @@
+---
+title: Arquitetura de deployment
+description: Diagramas dos serviços, fluxos de dados e jobs em produção.
+---
+
+Visão alto-nível de **como tudo se conecta** quando o Geek Social roda em produção (VPS homelab).
+
+## Containers (alto-nível)
+
+<Mermaid chart={`graph TB
+  subgraph Internet
+    Browser[Browser do usuário]
+  end
+
+  subgraph VPS
+    Nginx[Nginx<br/>:80/:443]
+
+    subgraph DockerNetwork[docker network: geek-social]
+      Frontend[geek-social-frontend<br/>Nginx :8080<br/>SPA estática]
+      API[geek-social-api<br/>Fastify :3003]
+      Docs[geek-social-docs<br/>Next.js :3030<br/>SSG]
+      DB[(PostgreSQL 17<br/>:5432)]
+      MinIO[MinIO<br/>:9000<br/>S3 compatible]
+    end
+  end
+
+  Browser -->|HTTPS| Nginx
+  Nginx -->|app.geek-social.com.br| Frontend
+  Nginx -->|api.geek-social.com.br| API
+  Nginx -->|docs.geek-social.com.br| Docs
+  Nginx -->|cdn.geek-social.com.br| MinIO
+
+  Frontend -.->|XHR + Socket.IO| API
+  API --> DB
+  API --> MinIO`} />
+
+## Detalhamento por serviço
+
+### Nginx (proxy reverso)
+
+- **Único entrypoint público** (portas 80/443)
+- **TLS termination** via Let's Encrypt (Certbot)
+- **Roteamento por host** — sub-domínios pra cada serviço
+- **Rate limiting** básico (anti DoS)
+- **Compressão gzip/brotli**
+
+### geek-social-frontend (SPA)
+
+- Build estático (Vite) servido por Nginx interno na porta 8080
+- `entrypoint.sh` injeta `window.APP_CONFIG = { apiUrl: ... }` em runtime
+- PWA: service worker cacheado pelo client
+- Sem estado server-side
+
+### geek-social-api (backend)
+
+- Fastify single process
+- 1 container = 1 instância (sem horizontal scaling ainda)
+- Connections: pool de 10 com Postgres
+- Socket.IO no mesmo HTTP server (sem sticky sessions necessárias com 1 instância)
+- pg-boss workers no mesmo process (Steam imports)
+
+### geek-social-docs (este portal)
+
+- Next.js 16 com `output: 'standalone'`
+- Static generation (SSG) — 600+ páginas pré-renderizadas
+- Sem DB, sem state — só serve HTML/JS estático
+
+### PostgreSQL 17
+
+- Single container, single instance
+- Volume persistente (`pg_data`) montado fora do container
+- Backups: cron diário com `pg_dump` (ver [DB Operations](/docs/data-model/operations))
+- Migrations aplicadas no boot do API
+
+### MinIO
+
+- S3-compatible storage
+- Volume persistente (`minio_data`)
+- Bucket `geek-social-media` com acesso público (URLs diretas no frontend)
+- Backups: mirror periódico pra outro storage
+
+## Fluxo de uma request HTTP
+
+<Mermaid chart={`sequenceDiagram
+  autonumber
+  participant U as User
+  participant N as Nginx
+  participant F as Frontend container
+  participant A as API container
+  participant D as PostgreSQL
+  participant M as MinIO
+
+  U->>N: GET https://app.geek-social.com.br/feed
+  N->>N: TLS handshake
+  N->>F: proxy_pass http://frontend:8080/
+  F-->>U: HTML + JS bundle (cached por SW após primeira)
+
+  Note over U: SPA carrega; bundle inicia auth flow
+  U->>N: POST /auth/refresh (cookie HttpOnly)
+  N->>A: proxy_pass http://api:3003/auth/refresh
+  A->>D: SELECT refresh_tokens, INSERT new
+  A-->>N: 200 + Set-Cookie
+  N-->>U: 200
+
+  U->>N: GET /feed?cursor=...
+  N->>A: proxy_pass /feed
+  A->>D: complex query (posts JOIN ...)
+  A-->>U: { items: [...] }
+
+  U->>N: GET https://cdn.geek-social.com.br/posts/abc/img.jpg
+  N->>M: proxy_pass http://minio:9000/geek-social-media/posts/abc/img.jpg
+  M-->>U: image binary`} />
+
+## Fluxo de WebSocket
+
+<Mermaid chart={`sequenceDiagram
+  participant U as Frontend
+  participant N as Nginx
+  participant A as API (Socket.IO)
+  participant D as DB
+
+  U->>N: WebSocket upgrade /socket.io
+  N->>A: proxy_pass + Connection: Upgrade
+  A->>A: authMiddleware verifica JWT no auth.token
+  A-->>U: connect
+  A->>U: join room user:<id>, conv:<convIds>...
+
+  Note over U,A: Conexão persistente
+
+  par Backend emite eventos
+    A->>U: notification:new {...}
+    A->>U: message:new {...}
+  end
+
+  par Cliente emite ações
+    U->>A: conversation:read {...}
+    A->>D: UPDATE last_read_at
+    A->>U: relay 'conversation:read' pra outros membros
+  end`} />
+
+## Fluxo de import Steam (jobs)
+
+<Mermaid chart={`sequenceDiagram
+  autonumber
+  participant U as User
+  participant API as API
+  participant Q as pg-boss queue<br/>(table jobs no PG)
+  participant W1 as steam.import-game worker
+  participant W2 as steam.enrich-game worker
+  participant Steam as Steam API
+  participant D as DB
+  participant CG as Socket.IO
+
+  U->>API: POST /integrations/steam/import { appIds:[...] }
+  API->>D: gera batchId
+  loop Cada appId
+    API->>Q: enqueue 'steam.import-game'
+  end
+  API-->>U: { batchId }
+
+  par Workers consomem
+    Q->>W1: dispatch job
+    W1->>D: INSERT/UPDATE item
+    W1->>Q: enqueue 'steam.enrich-game'
+    W1->>CG: emit import:progress
+  and Throttled enrich
+    Q->>W2: 1 worker concurrency 1
+    W2->>Steam: appdetails (rate limit)
+    W2->>D: UPDATE item.fields
+    W2->>D: tryFinalize batch
+    alt última job
+      W2->>CG: emit import:done
+      W2->>D: notify steam_import_done/partial
+    end
+  end`} />
+
+## Volumes persistentes
+
+| Volume | Conteúdo | Backup |
+|---|---|---|
+| `postgres_data` | Banco completo (todos databases) | `pg_dump` diário cron |
+| `minio_data` | Mídia de users (avatares, posts, chat) | Mirror periódico |
+| `nginx_certs` | Certificados Let's Encrypt | Renovação automática (Certbot) |
+| `docs_static` | Build estático do docs (opcional) | Re-build qualquer hora |
+
+## Variáveis de ambiente sensíveis
+
+Em prod, **nunca** em arquivo commitado:
+
+| Variável | Valor | Uso |
+|---|---|---|
+| `JWT_SECRET` | random 64 hex | Sign de access tokens |
+| `GOOGLE_CLIENT_SECRET` | do Google Cloud | OAuth |
+| `VAPID_PRIVATE_KEY` | random | Web Push |
+| `AWS_SECRET_ACCESS_KEY` | minioadmin (dev) ou IAM (prod) | S3 access |
+| `DATABASE_URL` | conn string | Postgres |
+| `STORAGE_PUBLIC_URL` | CDN url | URLs de mídia retornadas pela API |
+
+Inject via:
+- `docker-compose.yml` lendo de `.env` (no host)
+- Secrets manager em deploys mais robustos
+
+## Resumo do `docker-compose` de produção
+
+```yaml
+# docker-compose.prod.yml (esquema; ver páginas seguintes pra completo)
+services:
+  api:
+    image: register.homelab-cloud.com/geek-social-api:1.x.x
+    environment:
+      DATABASE_URL: postgresql://dev:dev@postgres:5432/geek_social
+      # ... outras
+    depends_on:
+      postgres: { condition: service_healthy }
+      minio: { condition: service_started }
+    networks: [geek-social]
+
+  frontend:
+    image: register.homelab-cloud.com/geek-social-frontend:1.x.x
+    environment:
+      API_URL: https://api.geek-social.com.br
+    networks: [geek-social]
+
+  docs:
+    image: register.homelab-cloud.com/geek-social-docs:1.x.x
+    networks: [geek-social]
+
+  postgres:
+    image: postgres:17
+    volumes: [postgres_data:/var/lib/postgresql/data]
+    environment: { POSTGRES_USER: dev, POSTGRES_PASSWORD: dev }
+    networks: [geek-social]
+
+  minio:
+    image: minio/minio
+    volumes: [minio_data:/data]
+    environment: { MINIO_ROOT_USER: minio, MINIO_ROOT_PASSWORD: ... }
+    networks: [geek-social]
+
+volumes:
+  postgres_data: {}
+  minio_data: {}
+
+networks:
+  geek-social:
+    driver: bridge
+```
+
+## Próximas páginas
+
+- [Deploy step-by-step](/docs/operations/deploy)
+- [CI/CD com Gitea Actions](/docs/operations/ci-cd)
+- [Configuração Nginx](/docs/operations/nginx)
+- [Monitoring](/docs/operations/monitoring)

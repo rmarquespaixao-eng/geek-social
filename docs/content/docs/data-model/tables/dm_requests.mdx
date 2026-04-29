@@ -1,0 +1,72 @@
+---
+title: dm_requests
+description: Pedidos de DM entre não-amigos — caixa de "Solicitações" antes de virar conversa real.
+---
+
+import Columns from '@/generated/data-model/tables/dm_requests/columns'
+import Fks from '@/generated/data-model/tables/dm_requests/fks'
+import Indexes from '@/generated/data-model/tables/dm_requests/indexes'
+import Constraints from '@/generated/data-model/tables/dm_requests/constraints'
+
+Quando alguém que NÃO é seu amigo te manda uma DM pela primeira vez, o sistema cria um **DM request** em vez de criar conversa direta. Vai pra "Solicitações" do destinatário, que escolhe aceitar ou rejeitar.
+
+Aceitar cria a conversa real (ou abre uma já existente) e seta `conversation_id` no request. Rejeitar marca `status='rejected'` e o sender não pode tentar de novo (a unique constraint impede).
+
+## Colunas
+
+<Columns />
+
+## Funcionalidade dos campos
+
+- **`id`** — UUID, PK
+- **`sender_id`** — quem mandou. Cascade.
+- **`receiver_id`** — quem recebeu. Cascade.
+- **`status`** — `pending | accepted | rejected`. Imutável após `accepted`/`rejected` (decisão final).
+- **`conversation_id`** — set quando aceitar (FK pra `conversations`). Set null se conversa for deletada.
+- **`created_at` / `updated_at`** — managed.
+
+## Foreign keys
+
+<Fks />
+
+## Índices
+
+<Indexes />
+
+Unique `dm_requests_unique` em `(sender_id, receiver_id)` impede spam — se já existe request pendente OU rejected, novo INSERT falha. Aceito retorna 409 no controller (`DUPLICATE_REQUEST`).
+
+## Constraints
+
+<Constraints />
+
+## Fluxo
+
+```
+[non-friend manda DM]
+        ↓
+INSERT dm_requests (status=pending)
+        ↓
+Notification 'dm_request_received' pro receiver
+        ↓
+Receiver vê em /chat/requests
+        ↓
+   ┌─────────────┴──────────────┐
+[Accept]                    [Reject]
+   ↓                            ↓
+Cria/abre conversation     UPDATE status=rejected
+Insere message original    (sender não pode tentar de novo)
+status=accepted
+conversation_id set
+```
+
+## Padrões de uso
+
+- **Criar (auto)** — disparado quando `sender` (não-amigo) tenta `POST /chat/messages` direto a um destinatário. Backend detecta a não-amizade e cria `dm_request` em vez de message direta.
+- **Aceitar** — `POST /chat/requests/:id/accept` → cria conversa + insere message original + atualiza status
+- **Rejeitar** — `POST /chat/requests/:id/reject`
+
+## Tabelas relacionadas
+
+- [`users`](/docs/data-model/tables/users) — sender + receiver (cascade)
+- [`conversations`](/docs/data-model/tables/conversations) — vinculada após aceite
+- [`notifications`](/docs/data-model/tables/notifications) — `dm_request_received`

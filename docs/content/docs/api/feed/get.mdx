@@ -1,0 +1,41 @@
+---
+title: GET /feed/
+description: Feed do usuário
+---
+
+import Meta from '@/generated/api/feed/get/meta'
+import Request from '@/generated/api/feed/get/request'
+import Responses from '@/generated/api/feed/get/responses'
+import Errors from '@/generated/api/feed/get/errors'
+import Examples from '@/generated/api/feed/get/examples'
+
+<Meta />
+
+Posts dos amigos + próprios + públicos, respeitando visibility e filtrando user_blocks. Cursor pagination cronológica decrescente.
+
+## Request
+
+<Request />
+
+## Response
+
+<Responses />
+
+## Erros
+
+<Errors />
+
+{/* TODO: para cada código de erro acima, explique a causa e como resolver. */}
+
+## Exemplos
+
+<Examples />
+
+
+## Side effects
+
+{/* TODO: eventos de socket emitidos, notificações disparadas, jobs enfileirados, cascades. */}
+
+## Relacionados
+
+{/* TODO: links pra módulo, conceitos, endpoints relacionados. */}

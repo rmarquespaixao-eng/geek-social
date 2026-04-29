@@ -1,0 +1,41 @@
+---
+title: DELETE /users/me
+description: Excluir conta permanentemente
+---
+
+import Meta from '@/generated/api/users/delete-account/meta'
+import Request from '@/generated/api/users/delete-account/request'
+import Responses from '@/generated/api/users/delete-account/responses'
+import Errors from '@/generated/api/users/delete-account/errors'
+import Examples from '@/generated/api/users/delete-account/examples'
+
+<Meta />
+
+Apaga avatar/cover/background do S3 e DELETE FROM users (cascade nas tabelas relacionadas). Ação irreversível.
+
+## Request
+
+<Request />
+
+## Response
+
+<Responses />
+
+## Erros
+
+<Errors />
+
+{/* TODO: para cada código de erro acima, explique a causa e como resolver. */}
+
+## Exemplos
+
+<Examples />
+
+
+## Side effects
+
+{/* TODO: eventos de socket emitidos, notificações disparadas, jobs enfileirados, cascades. */}
+
+## Relacionados
+
+{/* TODO: links pra módulo, conceitos, endpoints relacionados. */}

@@ -1,0 +1,192 @@
+---
+title: Estrutura de pastas
+description: Detalhamento completo da árvore do frontend.
+---
+
+Detalhe da estrutura mencionada na [Visão geral](/docs/frontend/overview).
+
+## Árvore completa
+
+```
+geek-social-frontend/
+├── public/                    ← arquivos estáticos servidos como /
+│   ├── favicon.svg
+│   ├── icons/                 ← PWA icons
+│   └── sw.js (gerado)         ← service worker do plugin-pwa
+├── src/
+│   ├── App.vue                ← root component
+│   ├── main.ts                ← bootstrap
+│   ├── style.css              ← Tailwind + CSS vars + global styles
+│   ├── assets/                ← imgs/fontes/svgs importados em components
+│   ├── components/            ← UI global cross-module (ProfileBadge, ItemCard...)
+│   ├── modules/<area>/        ← features (estrutura abaixo)
+│   ├── router/
+│   │   └── index.ts           ← rotas + guards
+│   └── shared/                ← infra
+│       ├── auth/
+│       │   └── authStore.ts   ← Pinia store
+│       ├── http/
+│       │   └── api.ts         ← Axios singleton
+│       ├── pwa/
+│       │   ├── push.ts        ← register Web Push
+│       │   └── sw-registration.ts
+│       ├── socket/
+│       │   ├── socket.ts      ← io() singleton
+│       │   └── listeners.ts   ← global event handlers
+│       ├── types/
+│       │   ├── notification.ts
+│       │   ├── user.ts
+│       │   └── ... (tipos compartilhados)
+│       ├── ui/                ← Button, Input, Modal, etc.
+│       │   ├── Button.vue
+│       │   ├── Input.vue
+│       │   ├── Modal.vue
+│       │   └── ...
+│       └── utils/
+│           ├── formatDate.ts
+│           ├── debounce.ts
+│           └── ...
+├── index.html                 ← template Vite (com config.js loader)
+├── vite.config.ts             ← build config + plugin-pwa
+├── tsconfig.json              ← config base
+├── tsconfig.app.json          ← config app
+├── tsconfig.node.json         ← config build scripts
+├── package.json
+└── .env.example               ← exemplo de env vars
+```
+
+## Detalhe do módulo
+
+```
+src/modules/auth/
+├── views/                     ← páginas que viram rotas
+│   ├── LoginView.vue
+│   ├── RegisterView.vue
+│   ├── ForgotPasswordView.vue
+│   └── ResetPasswordView.vue
+├── components/                ← reutilizáveis dentro do módulo
+│   ├── LoginForm.vue
+│   ├── RegisterForm.vue
+│   ├── PasswordRules.vue
+│   └── GoogleSignInButton.vue
+├── composables/               ← lógica reativa reutilizável
+│   ├── useLogin.ts
+│   ├── useRegister.ts
+│   ├── useGoogleAuth.ts
+│   └── usePasswordReset.ts
+├── services/                  ← chamadas HTTP
+│   ├── authService.ts         ← login, register, refresh, logout
+│   └── googleAuthService.ts   ← Google-specific
+└── index.ts                   ← exporta as routes pra router/index.ts
+```
+
+## Convenções de import
+
+### Path alias
+
+`tsconfig.json` define:
+
+```json
+{
+  "compilerOptions": {
+    "paths": {
+      "@/*": ["./src/*"]
+    }
+  }
+}
+```
+
+Use `@/` em vez de `../../../`:
+
+```ts
+import { useAuthStore } from '@/shared/auth/authStore'
+import { api } from '@/shared/http/api'
+import { useLogin } from '@/modules/auth/composables/useLogin'
+```
+
+### Cross-module imports
+
+Evite `import from '@/modules/X/...'` em outro módulo. Se precisa de algo de outro módulo, mover pra `shared/` ou criar um service de bordas claras.
+
+Exceção: tipos genéricos (User, Notification) ficam em `shared/types/`.
+
+## Convenções de naming
+
+| Tipo | Padrão | Exemplo |
+|---|---|---|
+| Composables | `useX` | `useLogin`, `useFriends` |
+| Services | `xService` | `authService`, `chatService` |
+| Stores | `useXStore` | `useAuthStore`, `useNotificationsStore` |
+| Components | PascalCase | `LoginForm.vue`, `ProfileBadge.vue` |
+| Views | PascalCase + suffix `View` | `LoginView.vue`, `ProfileView.vue` |
+| Tipos | PascalCase | `User`, `NotificationType` |
+| Utils | camelCase | `formatDate`, `debounce` |
+| Files | kebab-case quando não-export | `vite.config.ts` |
+
+## Onde colocar coisas novas
+
+| Tipo de mudança | Onde |
+|---|---|
+| Nova rota /perfil | `modules/users/views/ProfileView.vue` + registrar em `users/index.ts` |
+| Componente reutilizável APP-wide | `components/` (top level) |
+| Componente do módulo X | `modules/X/components/` |
+| Lógica reativa do módulo X | `modules/X/composables/` |
+| Chamada HTTP nova | `modules/X/services/xService.ts` |
+| Estado global novo | `shared/<dominio>/<dominio>Store.ts` (mas considere se realmente é global) |
+| Util cross-module | `shared/utils/` |
+| Tipo compartilhado | `shared/types/` |
+| Event listener socket novo | `shared/socket/listeners.ts` |
+
+## Convenções de Vue 3
+
+- **Composition API** sempre. Não usamos Options API.
+- **`<script setup>`** quando viável (mais conciso)
+- **Reactivity**: `ref`, `computed`, `watch`. Stores via Pinia.
+- **Props**: `defineProps<{...}>()` com generic TS
+- **Emits**: `defineEmits<{...}>()`
+- **`v-html` proibido** em conteúdo de user — preserva proteção contra XSS
+
+## Stores Pinia padrão
+
+```ts
+// shared/auth/authStore.ts
+import { defineStore } from 'pinia'
+import { ref, computed } from 'vue'
+
+export const useAuthStore = defineStore('auth', () => {
+  const token = ref<string | null>(null)
+  const user = ref<User | null>(null)
+  const isLogged = computed(() => Boolean(token.value && user.value))
+
+  function setToken(t: string) { token.value = t }
+  function setUser(u: User) { user.value = u }
+  function clearAuth() { token.value = null; user.value = null }
+
+  return { token, user, isLogged, setToken, setUser, clearAuth }
+})
+```
+
+**Setup style** (factory function), não Options style. Mais conciso e composable.
+
+## Build output
+
+```
+dist/
+├── index.html
+├── assets/
+│   ├── index-<hash>.js          ← bundle principal
+│   ├── index-<hash>.css         ← CSS
+│   ├── vendor-<hash>.js         ← deps
+│   └── ...
+├── icons/                       ← PWA icons
+└── sw.js, manifest.webmanifest  ← PWA artifacts
+```
+
+Pronto pra servir via Nginx (Dockerfile multi-stage).
+
+## Próximos passos
+
+- [HttpClient — interceptors detalhados](/docs/frontend/http-client)
+- [Auth store](/docs/frontend/auth-store)
+- [Socket singleton](/docs/frontend/socket)
+- [PWA setup](/docs/frontend/pwa)

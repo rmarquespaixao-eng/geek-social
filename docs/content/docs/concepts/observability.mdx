@@ -1,0 +1,208 @@
+---
+title: Observability
+description: Logging, métricas e tracing — estado atual e roadmap.
+---
+
+Observability no Geek Social hoje é **minimalista**: logging estruturado via Fastify default + healthchecks via Docker. Sem APM/tracing/metrics em produção ainda.
+
+Esta página descreve **o que existe** e **o roadmap pra chegar em production-grade**.
+
+## Logging
+
+### Backend (Fastify)
+
+`Fastify({ logger: true })` configura **Pino** como logger default. Logs estruturados em JSON, level `info` em prod e `debug` em dev (configurável via env).
+
+```ts
+app.log.info({ userId, action: 'register' }, 'User registered')
+app.log.error({ err, ctx: 'export-openapi' }, 'export failed')
+```
+
+**Padrões**:
+- Use `app.log` em vez de `console.log` (estruturado, redirecionável)
+- Anexe contexto como objeto: `{ userId, ... }, 'mensagem'`
+- Nunca logue secrets (passwords, tokens, API keys)
+- Erros vão com a `err` própria pro Pino formatar stack: `app.log.error({ err })`
+
+### Onde aparecem
+
+**Dev**: stdout do `npm run dev` (pretty-printed se `pino-pretty` instalado).
+
+**Prod**: stdout do container, capturado pelo Docker → driver de logging configurado (`json-file` default).
+
+### Centralização (roadmap)
+
+Sem agregador central hoje. Cenários considerados:
+
+| Solução | Custo | Complexidade |
+|---|---|---|
+| **Loki + Grafana** | Free + self-host | Médio (Promtail/Vector pra ship) |
+| **Vector + Elasticsearch** | Free + self-host | Alto |
+| **Better Stack / Logtail** | Pago | Baixo |
+| **Cloudwatch (AWS)** | Pago | Baixo se já em AWS |
+
+Filosofia "self-hosted, sem custo recorrente" → preferência por **Loki + Grafana** quando chegar a hora.
+
+### Frontend
+
+Sem logger estruturado. `console.log/warn/error` direto. Em prod, considerar:
+- Integração com Sentry-clone self-host (GlitchTip)
+- Captura de errors via `window.onerror`/`unhandledrejection`
+
+## Métricas
+
+### Estado atual
+
+Zero métricas exportadas. Saúde detectada por:
+- **Healthcheck do Docker** — `dev-postgres`, `dev-minio` reportam HEALTHY
+- **HTTP 200 em /docs/json** (dev) ou ping endpoint manual
+
+### Roadmap
+
+**Prometheus + Grafana** — padrão self-host:
+
+1. Adicionar `fastify-metrics` plugin no backend
+   ```ts
+   await app.register(import('fastify-metrics'), { endpoint: '/metrics' })
+   ```
+2. Subir Prometheus apontando pro `/metrics`
+3. Grafana com dashboards Fastify + PG
+
+Métricas que valem a pena exportar:
+- HTTP request duration histogram (por route)
+- HTTP request rate por status code
+- Active socket connections
+- pg-boss queue size
+- DB pool size + active queries
+
+## Tracing (distributed)
+
+### Estado atual
+
+Sem tracing.
+
+### Roadmap
+
+**OpenTelemetry** — padrão da indústria:
+
+```ts
+import { NodeSDK } from '@opentelemetry/sdk-node'
+import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node'
+
+const sdk = new NodeSDK({
+  instrumentations: [getNodeAutoInstrumentations()],
+  traceExporter: new OTLPTraceExporter({ url: 'http://jaeger:4318/v1/traces' }),
+})
+sdk.start()
+```
+
+Auto-instrument cobre: Fastify, pg, socket.io, fetch — sem mudança no código de domínio.
+
+Backend pra traces: Jaeger (self-host gratuito) ou Tempo (Grafana stack).
+
+## Healthcheck endpoints
+
+Hoje **não existe** endpoint dedicado de health (`/health`, `/ready`).
+
+Workaround: `GET /docs/json` em dev confirma que o app subiu.
+
+**Implementação recomendada futura**:
+
+```ts
+app.get('/health', async () => ({ status: 'ok', uptime: process.uptime() }))
+
+app.get('/ready', async () => {
+  // Checa dependências críticas
+  await db.execute(sql`SELECT 1`)
+  return { status: 'ready' }
+})
+```
+
+`/health` = liveness (processo vivo). `/ready` = readiness (dependências OK).
+
+## Error tracking
+
+### Estado atual
+
+Erros vão pro log do Fastify; sem tracking estruturado de "esse erro aconteceu N vezes nas últimas 24h".
+
+### Roadmap
+
+**GlitchTip** (Sentry clone open-source) ou **Sentry self-hosted**:
+
+```ts
+import * as Sentry from '@sentry/node'
+Sentry.init({ dsn: env.SENTRY_DSN, environment: env.NODE_ENV })
+
+app.setErrorHandler((err, req, reply) => {
+  Sentry.captureException(err, { extra: { route: req.url } })
+  reply.status(500).send({ error: 'INTERNAL_ERROR' })
+})
+```
+
+Coleta agregada de exceptions, breadcrumbs (request → service → DB), e dedup automática.
+
+## Audit log
+
+### Estado atual
+
+**Não há audit log dedicado.** Eventos sensíveis (login, change-password, delete-account, transfer de offer) ficam apenas no log do app — sem tabela específica.
+
+### Roadmap
+
+Tabela `audit_log` futura:
+
+```sql
+CREATE TABLE audit_log (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid REFERENCES users(id),
+  action varchar NOT NULL,         -- ex: 'login', 'transfer_offer', 'delete_account'
+  entity_type varchar,
+  entity_id uuid,
+  metadata jsonb,
+  ip_address inet,
+  user_agent text,
+  created_at timestamptz DEFAULT now()
+);
+```
+
+Hooks em pontos críticos gravam aqui. Útil pra:
+- Investigação de fraude (alguém tentou logar 50x?)
+- Compliance LGPD (quem acessou dados de quem?)
+- Recuperação ("quando exatamente o user X bloqueou Y?")
+
+## Profiling local
+
+Performance issues durante dev podem ser investigados com:
+
+```bash
+# CPU profile
+node --inspect-brk dist/server.js
+# Abrir chrome://inspect → Performance tab
+
+# Memory snapshot
+node --inspect dist/server.js
+# chrome://inspect → Memory tab → Heap snapshot
+```
+
+Pra queries lentas no PG:
+
+```sql
+-- Habilita log de queries > 100ms
+ALTER SYSTEM SET log_min_duration_statement = 100;
+SELECT pg_reload_conf();
+```
+
+## Resumo do roadmap
+
+| Categoria | Estado | Próximo passo |
+|---|---|---|
+| Logging | Pino/Fastify default | Centralizar com Loki+Grafana |
+| Métricas | Nenhuma | `fastify-metrics` + Prometheus |
+| Tracing | Nenhum | OpenTelemetry + Jaeger |
+| Health | Não há endpoint | `/health` + `/ready` |
+| Errors | Logs apenas | GlitchTip self-host |
+| Audit | Logs apenas | Tabela `audit_log` dedicada |
+| Frontend errors | console | GlitchTip JS SDK |
+
+Stack recomendada quando for fazer: **Grafana + Loki + Prometheus + Jaeger + GlitchTip** — tudo open-source, self-host, sem custo recorrente.

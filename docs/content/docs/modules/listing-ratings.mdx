@@ -1,0 +1,112 @@
+---
+title: Listing Ratings
+description: Avaliações imutáveis pós-transação + reputação agregada com threshold de visibilidade.
+---
+
+## Visão geral
+
+Sistema de **avaliações pós-Vitrine**. Cada lado de uma transação completed pode dar uma rating ao outro (1=negative ou 2=positive). **Imutável**: sem PATCH/DELETE no backend, evita coação ou retaliação após arrependimento.
+
+Reputação aparece no perfil via `<ReputationBadge>` apenas se atingir **MIN_RATINGS = 3** — threshold pra evitar mostrar "1 estrela" baseado em 1 review hostil.
+
+Janela de avaliação: **30 dias** após confirmação da transação. Após isso, fica congelado (preserva reputação histórica).
+
+## Entidades principais
+
+| Tabela | Papel |
+|---|---|
+| [`listing_ratings`](/docs/data-model/tables/listing_ratings) | Ratings imutáveis (1 por par offer×rater) |
+| [`item_offers`](/docs/data-model/tables/item_offers) | Origem (apenas completed permite rate) |
+
+## Endpoints
+
+5 endpoints em `/ratings`:
+
+| Endpoint | Resumo |
+|---|---|
+| `POST /ratings` | Submeter (offerId + score) |
+| `GET /ratings/mine` | Minhas ratings (evita N+1) |
+| `GET /ratings/offers/:offerId/mine` | Minha rating numa oferta |
+| `GET /ratings/offers/:offerId` | Ratings de uma oferta (max 2) |
+| `GET /ratings/users/:userId` | Reputação agregada |
+
+## Fluxos
+
+### Submeter avaliação
+
+<Mermaid chart={`sequenceDiagram
+  autonumber
+  participant U as Usuário
+  participant FE as Frontend
+  participant API as Backend
+  participant DB as PostgreSQL
+  participant N as NotificationsService
+
+  U->>FE: Pós-transação → modal "Como foi?"
+  U->>FE: Clica 👍 (score 2) ou 👎 (score 1)
+  FE->>API: POST /ratings { offerId, score }
+  API->>API: Verifica:
+  Note over API: 1. offer.status === 'completed'<br/>2. user é offerer ou owner<br/>3. dentro da janela de 30 dias<br/>4. ainda não avaliou (unique offer×rater)
+  alt Falhas
+    API-->>FE: 4xx<br/>OFFER_NOT_COMPLETED / NOT_PARTICIPANT /<br/>RATING_WINDOW_CLOSED / DUPLICATE_RATING
+  else OK
+    API->>DB: INSERT listing_ratings<br/>(offer_id, rater_id, ratee_id, score)
+    API->>N: notify({ recipient: rateee, type:'rating_received' })
+    API-->>FE: 201 { rating }
+  end`} />
+
+### Reputação visual
+
+<Mermaid chart={`sequenceDiagram
+  participant FE as Frontend
+  participant API as Backend
+  participant DB as PostgreSQL
+
+  FE->>API: GET /ratings/users/:userId
+  API->>DB: SELECT count(*), avg(score)<br/>FROM listing_ratings<br/>WHERE ratee_id=?
+  alt count < 3 (MIN_RATINGS)
+    API-->>FE: { count, avgScore, visible: false }
+    FE->>FE: Render "Sem reputação ainda"
+  else count >= 3
+    API-->>FE: { count, avgScore, visible: true }
+    FE->>FE: Render <ReputationBadge> com count + avg
+  end`} />
+
+### Otimização N+1
+
+`GET /ratings/mine` retorna **lista de offer_ids** que o user já avaliou:
+
+```json
+{
+  "ratings": [
+    { "offerId": "...", "score": 2 },
+    { "offerId": "...", "score": 1 }
+  ]
+}
+```
+
+Frontend usa pra montar map em memória ao listar offers — evita 1 query por linha pra checar "já avaliei?".
+
+## Eventos de socket
+
+| Evento | Quando |
+|---|---|
+| `notification:new (rating_received)` | Quando alguém te avalia |
+
+Sem evento de "rating count atualizado" — frontend re-fetcha reputação ao ver notificação.
+
+## Edge cases e regras especiais
+
+- **Imutável** — backend NÃO tem endpoint de PATCH/DELETE. Decisão deliberada: evitar pressão pra mudar feedback após-fato.
+- **Score binário hoje** (1 ou 2). Schema permite expansão futura pra estrelas 1-5; UI já preparada (`<ReputationBadge>` lê avgScore).
+- **Threshold de visibilidade** — `MIN_RATINGS=3` constante no service. Abaixo: `visible:false`. Decidido pra dar margem a usuários novos.
+- **Janela de 30 dias** começa em `offer_completed_at`, não em `offer_created_at`. Calculada via `(now - max(offerer_confirmed_at, owner_confirmed_at)) < 30 days`.
+- **Sem cascade explícito** em `rater_id`/`ratee_id` → `users` — apaga conta com ratings causa FK constraint error. Pendência: tratar em `DELETE /users/me`.
+- **Apagar offer apaga ratings** — cascade via `offer_id`.
+- **Duas ratings por offer no máx**: 1 do offerer, 1 do owner. Unique `(offer_id, rater_id)`.
+
+## Dependências entre módulos
+
+- **Offers** — apenas offers completed permitem rate
+- **Notifications** — rating_received
+- **Users** — reputação aparece no perfil via `GET /users/:id/profile`

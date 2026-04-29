@@ -1,0 +1,198 @@
+---
+title: Como adicionar um endpoint novo
+description: Passo-a-passo de criar uma rota REST com schema Zod, controller, service, e teste.
+---
+
+Receita pra adicionar um endpoint novo num módulo já existente. Como exemplo, vamos adicionar `GET /users/me/stats` (retorna contadores: amigos, coleções, items).
+
+## 1. Defina o Zod schema (se houver body/query)
+
+`src/modules/users/users.schema.ts`:
+
+```ts
+export const userStatsResponseSchema = z.object({
+  friendsCount: z.number().int().nonnegative(),
+  collectionsCount: z.number().int().nonnegative(),
+  itemsCount: z.number().int().nonnegative(),
+})
+```
+
+GET tipicamente não tem body. Se tivesse query: `userStatsQuerySchema`.
+
+## 2. Adicione o método no service
+
+`src/modules/users/users.service.ts`:
+
+```ts
+async getStats(userId: string) {
+  const friends = await this.friendsRepository.countAccepted(userId)
+  const collections = await this.usersRepository.countCollections(userId)
+  const items = await this.usersRepository.countItems(userId)
+  return { friendsCount: friends, collectionsCount: collections, itemsCount: items }
+}
+```
+
+Se algum método não existe nos repositories, adicione antes (próximo passo). **Princípio**: lógica fica no service; repo só faz query.
+
+## 3. Adicione queries no repository
+
+`src/modules/users/users.repository.ts`:
+
+```ts
+async countCollections(userId: string): Promise<number> {
+  const result = await this.db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(collections)
+    .where(eq(collections.userId, userId))
+  return result[0]?.count ?? 0
+}
+```
+
+E adicione na interface `IUsersRepository` em `shared/contracts/`.
+
+## 4. Adicione o método no controller
+
+`src/modules/users/users.controller.ts`:
+
+```ts
+async getStats(request: FastifyRequest, reply: FastifyReply) {
+  const { userId } = request.user as AccessTokenClaims
+  const stats = await this.usersService.getStats(userId)
+  return reply.send(stats)
+}
+```
+
+## 5. Registre a rota
+
+`src/modules/users/users.routes.ts`:
+
+```ts
+app.get('/me/stats', {
+  schema: {
+    operationId: 'users_get_stats',
+    tags: ['Users'],
+    summary: 'Contadores do usuário (amigos, coleções, items)',
+    description: 'Retorna stats agregadas pra exibir no perfil ou settings.',
+    security: [{ accessToken: [] }],
+    response: {
+      200: userStatsResponseSchema,
+    },
+  },
+  preHandler: [authenticate],
+  handler: controller.getStats.bind(controller),
+})
+```
+
+## 6. Verifique tipos
+
+```bash
+cd ~/workspace_ssh/geek-social-api
+npx tsc --noEmit
+```
+
+Erros comuns:
+- `Property 'getStats' does not exist on UsersController` — esqueceu de adicionar no controller
+- Querystring inferida `unknown` — controller tem tipo explícito que não bate com o schema. Remover tipo explícito do controller.
+
+## 7. Adicione teste
+
+Unit (service):
+
+```ts
+// users.service.test.ts
+describe('UsersService.getStats', () => {
+  it('retorna contagens corretas', async () => {
+    const repo = { countCollections: async () => 5, countItems: async () => 100, ... }
+    const service = new UsersService(repo, ..., friendsRepoFake, ...)
+    expect(await service.getStats('uuid-1')).toEqual({
+      friendsCount: 12, collectionsCount: 5, itemsCount: 100,
+    })
+  })
+})
+```
+
+Integration (rota completa):
+
+```ts
+test('GET /users/me/stats retorna stats do user logado', async () => {
+  const { request, tokens } = await setupTestApp()
+  const userA = await register(request, { ... })
+  const r = await request.get('/users/me/stats', { headers: tokenA })
+  expect(r.status).toBe(200)
+  expect(r.body).toMatchObject({ friendsCount: 0, collectionsCount: 0, itemsCount: 0 })
+})
+```
+
+## 8. Atualize a documentação
+
+```bash
+cd ~/workspace_ssh/geek-social-api && npm run export:openapi
+cd ~/workspace_ssh/geek-social-docs && npm run sync && npm run gen
+```
+
+`npm run gen` cria stub MDX em `content/docs/api/users/get-stats.mdx`. **Edite o stub** com prose detalhada (como descrito em [Como documentar um endpoint](/docs/tutoriais/documentar-endpoint)).
+
+## 9. Adicione na sidebar (se não auto-aparecer)
+
+`content/docs/api/users/meta.json` — adicione `get-stats` na ordem desejada.
+
+## 10. Adicione códigos de erro novos (se houver)
+
+Se introduziu erros novos no service, atualize:
+- [Catálogo de códigos de erro](/docs/reference/codigos-erro) — adicione na seção do módulo
+- `STATUS_BY_CODE` no controller (se for o padrão do módulo)
+
+## 11. Testes E2E (se for fluxo crítico)
+
+`tests/e2e/users.spec.ts` — adicione um teste que cobre o fluxo ponta-a-ponta: signup → create coleção → create item → assert stats.
+
+## Checklist final
+
+- [ ] Schema Zod definido (input + output)
+- [ ] Service com lógica + repo com queries
+- [ ] Controller mapeia request → service → response
+- [ ] Rota declara schema completo (operationId, tags, summary, description, body, response)
+- [ ] `tsc --noEmit` passa
+- [ ] Unit test cobre lógica do service
+- [ ] Integration test cobre rota
+- [ ] `npm run export:openapi` + `gen` rodaram no docs
+- [ ] Stub MDX enriquecido com prose
+- [ ] Erros novos documentados em `codigos-erro.mdx`
+- [ ] sidebar atualizada se necessário
+
+## Variantes
+
+### Endpoint que não precisa de auth
+
+Remove `preHandler: [authenticate]` e `security: [...]` do schema.
+
+### Endpoint público com auth opcional
+
+```ts
+preHandler: [optionalAuthenticate],
+```
+
+`request.user` pode ser undefined. Útil pra endpoints como `GET /users/:id/profile` que mostram menos info pra anônimos.
+
+### Endpoint que faz upload (multipart)
+
+Não declare `body:` no schema (multipart não é JSON). Use `request.file()` no controller:
+
+```ts
+async uploadAvatar(request: FastifyRequest, reply: FastifyReply) {
+  const file = await request.file()
+  if (!file) throw new UsersError('NO_FILE')
+  // ... processa file.file (stream)
+}
+```
+
+### Endpoint com response variável (200 vs 204)
+
+```ts
+response: {
+  200: userStatsResponseSchema,
+  204: z.void(),
+},
+```
+
+Controller decide qual retornar com `reply.status(204).send()`.

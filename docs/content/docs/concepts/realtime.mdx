@@ -1,0 +1,109 @@
+---
+title: Realtime (Sockets)
+description: Como notificações, mensagens e presence chegam em tempo real.
+---
+
+O Geek Social usa **Socket.IO** pra comunicação em tempo real entre backend e frontend. Toda interação que precisa de "agora" — mensagens novas, atualizações de presença, notificações in-app, progresso de imports Steam — passa pelo socket.
+
+## Setup
+
+**Backend** (`geek-social-api`): `socket.io@^4.8` registrado em `app.server` (mesmo HTTP server do Fastify) via `ChatGateway`. Não há namespace — tudo no default `/`.
+
+**Frontend** (`geek-social-frontend`): `socket.io-client` numa Pinia store singleton, conecta no boot após login.
+
+## Autenticação no handshake
+
+Cliente envia o **access JWT** no `auth.token`:
+
+```ts
+const socket = io(API_BASE_URL, {
+  auth: { token: accessToken },
+})
+```
+
+Backend verifica o JWT no handshake via `authMiddleware` do Socket.IO. Se inválido, conexão é rejeitada.
+
+```ts
+io.use((socket, next) => {
+  try {
+    const { userId } = app.jwt.verify(socket.handshake.auth.token)
+    socket.data.userId = userId
+    next()
+  } catch {
+    next(new Error('UNAUTHORIZED'))
+  }
+})
+```
+
+## Re-conexão e expiração de JWT
+
+Access JWT vale 15 minutos; o socket pode ficar conectado mais que isso. Quando o JWT expira, o backend não desconecta automaticamente — eventos continuam chegando até o socket cair por outro motivo.
+
+**Mitigação no frontend**: ao receber novo access token (via `/auth/refresh`), re-emit `auth` ou re-conectar com novo token. Implementação atual: re-conexão completa no refresh.
+
+## Rooms (canais)
+
+Cada socket entra em rooms ao conectar:
+- `user:<userId>` — sala pessoal pra notificações dirigidas
+- Para cada conversation que o user é membro: `conv:<conversationId>`
+- Para cada amigo: `friend-of:<friendUserId>` (recebe presence updates)
+
+## Eventos emitidos pelo backend
+
+Lista completa em [Eventos de socket](/docs/reference/eventos-socket).
+
+Categorias:
+- **Notifications** — `notification:new` (objeto da notificação)
+- **Chat** — `message:new`, `message:edited`, `message:deleted`, `message:reaction`, `conversation:read`, `conversation:refresh`, `conversation:typing`
+- **Presence** — `presence:update`, `presence:online`, `presence:offline`
+- **Steam imports** — `import:progress`, `import:done`
+- **Calls** — `call:incoming`, `call:answer`, `call:hangup`, `call:ice-candidate`, `call:offer`
+
+## Eventos emitidos pelo frontend
+
+- `conversation:read` — marcar conversa como lida (também via REST `POST /chat/conversations/:id/read`)
+- `conversation:typing` — emit "está digitando" (ephemeral, não persiste)
+- `call:*` — sinalização WebRTC pra video/audio call 1-1
+
+## Quebra de circular deps
+
+`ChatGateway` é instanciado depois de muitos services e injetado de volta via setters:
+
+```ts
+notificationsService.setEmitter((userId, notification) =>
+  chatGateway.emitNotification(userId, notification)
+)
+```
+
+Padrão semelhante usado em `listingsService.setOffersIntegration(...)`. Permite quebrar import circular sem perder type safety.
+
+## Notify safe
+
+Hooks de notificação chamam métodos do `ChatGateway` com `.catch(() => {})` pra não derrubar fluxos principais (`notifySafe`):
+
+```ts
+notificationsService.notify({ recipientId, actorId, type, entityId }).catch(() => {})
+```
+
+Se o socket falhar, a notificação ainda foi persistida — frontend pega na próxima `GET /notifications`.
+
+## Push (Web Push) vs Socket
+
+Os dois caminhos coexistem:
+- **Socket** — entrega in-app real-time enquanto a app está aberta
+- **Push** — entrega quando a app está fechada (notificação do navegador / mobile)
+
+Não-mutuamente-exclusivos: ambos disparam pra cada evento relevante. Frontend dedupe se necessário (ex: marcar push como read se a notificação já chegou via socket).
+
+## Diagnóstico
+
+Logs de socket em `app.log` (Fastify). Cliente tem console.log de `connect`/`disconnect`/`error` em dev.
+
+Comum: sockets aparecem desconectados mas `presenceService.isOnline(userId)` ainda retorna true. Causa: cleanup não rodou. Reset: reiniciar backend.
+
+## Relacionados
+
+- [Eventos de socket](/docs/reference/eventos-socket) — catálogo completo
+- [Notificações](/docs/concepts/notificacoes) — fluxo de notificação completo
+- Tabela [`user_presence`](/docs/data-model/tables/user_presence)
+- Tabela [`notifications`](/docs/data-model/tables/notifications)

@@ -1,0 +1,41 @@
+---
+title: POST /offers/{id}/confirm
+description: Confirmar transação (dual)
+---
+
+import Meta from '@/generated/api/offers/confirm/meta'
+import Request from '@/generated/api/offers/confirm/request'
+import Responses from '@/generated/api/offers/confirm/responses'
+import Errors from '@/generated/api/offers/confirm/errors'
+import Examples from '@/generated/api/offers/confirm/examples'
+
+<Meta />
+
+Cada lado confirma uma vez. Quando ambos confirmam, executeTransfer move itens entre coleções, status=completed, listing=closed. Idempotente: re-confirmar tenta executar transferência se ainda não rodou.
+
+## Request
+
+<Request />
+
+## Response
+
+<Responses />
+
+## Erros
+
+<Errors />
+
+{/* TODO: para cada código de erro acima, explique a causa e como resolver. */}
+
+## Exemplos
+
+<Examples />
+
+
+## Side effects
+
+{/* TODO: eventos de socket emitidos, notificações disparadas, jobs enfileirados, cascades. */}
+
+## Relacionados
+
+{/* TODO: links pra módulo, conceitos, endpoints relacionados. */}

@@ -1,0 +1,78 @@
+---
+title: messages
+description: Mensagens de chat — texto, áudio, vídeo, imagem, arquivo, calls.
+---
+
+import Columns from '@/generated/data-model/tables/messages/columns'
+import Fks from '@/generated/data-model/tables/messages/fks'
+import Indexes from '@/generated/data-model/tables/messages/indexes'
+import Constraints from '@/generated/data-model/tables/messages/constraints'
+
+Mensagens enviadas em conversas. Suporta vários formatos:
+- **Texto** — `content` preenchido, sem attachments
+- **Áudio/Vídeo/Imagem/Arquivo** — anexos em [`message_attachments`](/docs/data-model/tables/message_attachments) com `mime_type` indicando tipo
+- **Call** — `call_metadata` JSONB com info da call (status, duração, iniciador)
+- **Reply** — `reply_to_id` referencia outra message do mesmo conversation
+
+Mensagens podem ser **deletadas** (soft via `deleted_at`) ou **escondidas per-user** (`hidden_for_user_ids`).
+
+## Colunas
+
+<Columns />
+
+## Funcionalidade dos campos
+
+- **`id`** — UUID, PK
+- **`conversation_id`** — FK pra `conversations`. Cascade delete.
+- **`user_id`** — autor. Cascade delete.
+- **`content`** — texto da mensagem. Pode ser `NULL` (mensagens de só-mídia ou só-call).
+- **`reply_to_id`** — FK auto-referencial pra `messages.id`. Usado pra "reply quoted" na UI. **Sem cascade enforcement** — apagar a msg referenciada deixa o reply órfão (frontend mostra "mensagem deletada").
+- **`call_metadata`** — JSONB com `{ status, durationSec, startedAt, endedAt, initiatorId }` para mensagens de call. Status: `completed | missed | rejected | cancelled | failed`.
+- **`is_temporary`** — flag set se a conversa estava em modo temporário no momento do envio
+- **`temporary_event`** — JSONB com `{ enabled: bool, byUserId: string }`. Marca o ponto de **mudança de estado** (ligar/desligar modo temp). Mensagem-evento mostra "Joe ativou mensagens temporárias".
+- **`hidden_for_user_ids`** — JSONB array. Quando user X marca msg como "lida + escondida" no modo temp, seu id entra aqui. Quando todos os destinatários estão na lista, cron deleta a msg.
+- **`deleted_at`** — soft delete. Frontend mostra "Mensagem apagada" no lugar do conteúdo.
+- **`created_at` / `updated_at`** — managed.
+
+## Foreign keys
+
+<Fks />
+
+## Índices
+
+<Indexes />
+
+`messages_conversation_created_at_idx` — query principal (paginar mensagens da conversa em ordem cronológica).
+
+## Constraints
+
+<Constraints />
+
+## Soft delete vs hard delete
+
+- **Apagar pra mim** — adiciona meu user_id em `hidden_for_user_ids`. Outros continuam vendo.
+- **Apagar pra todos** — UPDATE `deleted_at = now()`. Todos veem "Mensagem apagada".
+- **Apagar pelo cron temp** — UPDATE `deleted_at` quando `hidden_for_user_ids` cobre todos os membros (a mensagem some pra todos efetivamente).
+
+## Forward / share / download
+
+Endpoints separados:
+- `POST /chat/messages/:id/forward { conversationIds }` — replica em N conversas
+- `GET /chat/messages/:id/share` — gera link público temporário (raro, ainda é débito)
+- `GET /chat/messages/:id/download` — para attachments, retorna URL S3 com signed URL
+
+## Padrões de uso
+
+- **Enviar texto** — `POST /chat/messages { conversationId, content }`
+- **Enviar mídia** — multipart upload, backend cria message + attachments numa transação
+- **Reply** — campo `replyToId` no body
+- **Marcar lida** — `POST /chat/conversations/:id/read` (atualiza `conversation_members.last_read_at`)
+- **Reagir** — `POST /chat/messages/:id/react { emoji }` (insere em [`message_reactions`](/docs/data-model/tables/message_reactions))
+
+## Tabelas relacionadas
+
+- [`conversations`](/docs/data-model/tables/conversations) — pai (cascade)
+- [`users`](/docs/data-model/tables/users) — autor (cascade)
+- [`message_attachments`](/docs/data-model/tables/message_attachments) — anexos (cascade)
+- [`message_reactions`](/docs/data-model/tables/message_reactions) — reações (cascade)
+- [`conversation_members`](/docs/data-model/tables/conversation_members) — `last_read_at` comparado contra `created_at`

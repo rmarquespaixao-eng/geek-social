@@ -1,0 +1,137 @@
+---
+title: Notificações
+description: Fluxo end-to-end das notificações in-app e Web Push.
+---
+
+Notificações no Geek Social são **dual-channel**: socket (in-app real-time) + Web Push (notificação do navegador / sistema operacional). Ambos compartilham o mesmo evento gerador.
+
+## Tipos
+
+Lista completa em [Tipos de notificação](/docs/reference/tipos-notificacao). Resumo:
+
+- **Sociais** — `friend_request`, `friend_accepted`, `dm_request_received`, `post_comment`, `post_reaction`
+- **Vitrine** — `offer_received`, `offer_accepted`, `offer_rejected`, `offer_completed`, `offer_cancelled`, `offer_expired`, `counter_proposal_received`, `proposal_rejected`, `rating_received`
+- **Steam** — `steam_import_done`, `steam_import_partial`
+
+## Fluxo end-to-end
+
+<Mermaid chart={`sequenceDiagram
+  autonumber
+  participant API as Backend (service que dispara)
+  participant N as NotificationsService
+  participant DB as PostgreSQL
+  participant CG as ChatGateway (socket)
+  participant PS as PushService
+  participant SR as Push Service Worker
+  participant SW as Browser SW
+
+  API->>N: notify({ recipientId, actorId, type, entityId })
+  N->>DB: INSERT INTO notifications (...)
+  DB-->>N: { id, ... }
+  par Socket emit
+    N->>CG: emit('notification:new', notif)
+    CG->>SR: io.to('user:'+recipientId).emit(...)
+    Note over SR: Frontend marca dot vermelho<br/>+ toast in-app
+  and Push emit
+    N->>PS: sendToUser(recipientId, payload)
+    PS->>DB: SELECT * FROM push_subscriptions WHERE user_id=?
+    DB-->>PS: subscriptions[]
+    loop por subscription
+      PS->>SW: web-push.sendNotification(sub, payload)
+      alt 410 Gone
+        PS->>DB: DELETE expired subscription
+      end
+    end
+    SW-->>SR: showNotification (sistema)
+  end`} />
+
+## NotificationsService
+
+`src/modules/notifications/notifications.service.ts`. API simples:
+
+```ts
+class NotificationsService {
+  setEmitter(fn: (userId: string, notif: Notification) => void): void
+  notify(input: { recipientId, actorId, type, entityId }): Promise<Notification>
+  notifySelf(input: { userId, type, entityId }): Promise<Notification>
+  list(userId, cursor, limit): Promise<{ items, nextCursor }>
+  markRead(userId, id): Promise<void>
+  markAllRead(userId): Promise<void>
+  unreadCount(userId): Promise<number>
+}
+```
+
+`setEmitter` é chamado durante boot pra injetar o `chatGateway.emitNotification` — quebra a circular dep entre Notifications ↔ Gateway.
+
+## NotifySafe wrapper
+
+Hooks em outros services chamam:
+
+```ts
+notificationsService.notify({...}).catch(() => {})
+```
+
+Razão: notificação é "fire and forget" — falha não deve quebrar fluxo principal (ex: usuário consegue postar mesmo se a notificação por algum motivo falhar). A notificação é sempre persistida (INSERT é a primeira ação); os emit são side effects.
+
+## entity_id polimórfico
+
+Notification carrega `entity_id` (UUID) cuja semântica depende de `type`:
+
+| `type` | `entity_id` aponta pra |
+|---|---|
+| `friend_request`, `friend_accepted` | `friendships.id` |
+| `post_comment`, `post_reaction` | `posts.id` |
+| `dm_request_received` | `dm_requests.id` |
+| `offer_*` | `item_offers.id` |
+| `counter_proposal_received`, `proposal_rejected` | `offer_proposals.id` |
+| `rating_received` | `listing_ratings.id` |
+| `steam_import_done`, `steam_import_partial` | `collections.id` (destino do import) |
+
+Frontend resolve por type pra decidir copy + link de destino.
+
+## Privacidade e mute
+
+- **Per-conversation mute** — `conversation_members.is_muted`. Mensagens novas aparecem na conversa mas não disparam push.
+- **Per-user notif mute** — não implementado granularmente. Hoje, ou recebe tudo, ou desliga push completo no nível do navegador.
+
+## Push payload
+
+Encrypted via Web Push protocol. Structure:
+
+```json
+{
+  "title": "Novo amigo!",
+  "body": "Joe aceitou seu pedido de amizade",
+  "icon": "/icons/notification.png",
+  "data": {
+    "type": "friend_accepted",
+    "entityId": "...",
+    "url": "/perfil/joe"
+  }
+}
+```
+
+Service Worker (`/sw.js` no frontend) recebe e chama `showNotification(payload.title, payload)`. Click handler abre `payload.data.url`.
+
+## Estado read/unread
+
+`notifications.read` é `false` por default. Ações que marcam como lido:
+- Click na notificação no UI (`POST /notifications/:id/read`)
+- "Marcar todas como lidas" (`POST /notifications/read-all`)
+- Algumas ações implícitas (ex: aceitar friend request marca `friend_request` correspondente como lida)
+
+Endpoint de **count unread**: `GET /notifications/unread-count`. Frontend usa pra mostrar dot vermelho no ícone de bell.
+
+## Retenção
+
+Hoje notificações **não são apagadas**. Tabela cresce indefinidamente.
+
+Pendência: cron pra deletar notificações lidas com `created_at` antiga (ex: > 90 dias) pra controlar tamanho.
+
+## Relacionados
+
+- Tabela [`notifications`](/docs/data-model/tables/notifications)
+- Tabela [`push_subscriptions`](/docs/data-model/tables/push_subscriptions)
+- Conceito [Realtime (Sockets)](/docs/concepts/realtime)
+- Referência [Tipos de notificação](/docs/reference/tipos-notificacao)
+- Referência [Eventos de socket](/docs/reference/eventos-socket)

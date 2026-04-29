@@ -1,0 +1,66 @@
+---
+title: import_batch_finalized
+description: Marca de finalização de lotes de importação Steam — usado pra detectar fim do batch.
+---
+
+import Columns from '@/generated/data-model/tables/import_batch_finalized/columns'
+import Fks from '@/generated/data-model/tables/import_batch_finalized/fks'
+import Indexes from '@/generated/data-model/tables/import_batch_finalized/indexes'
+import Constraints from '@/generated/data-model/tables/import_batch_finalized/constraints'
+
+Mecanismo auxiliar do fluxo de importação Steam (workers `steam.import-game` + `steam.enrich-game`). Como a importação é distribuída em **N jobs paralelos**, precisa-se de uma forma de saber **qual job terminou por último** pra emitir o evento "import done" e disparar a notificação.
+
+Cada batch (importação completa de um user) tem um `batch_id` (UUID gerado no início). Workers checam atomicamente se já houve finalização pra evitar duplicação. O **primeiro job a achar que todos terminaram** insere aqui — o INSERT atomico (PK `batch_id` impede duplicatas) é o sinal de finalização.
+
+## Colunas
+
+<Columns />
+
+## Funcionalidade dos campos
+
+- **`batch_id`** — UUID, **PK** (não há `id` separado). Identificador do batch — também usado em queues e logs.
+- **`user_id`** — quem fez a importação (cascade)
+- **`collection_id`** — coleção destino dos jogos importados (cascade)
+- **`total`** — quantos jogos no input
+- **`imported`** — quantos foram inseridos como itens novos
+- **`updated`** — quantos já existiam e foram atualizados
+- **`failed`** — quantos falharam (erro Steam API, formato inválido)
+- **`finalized_at`** — momento exato da finalização
+
+## Foreign keys
+
+<Fks />
+
+## Índices
+
+<Indexes />
+
+`import_batch_finalized_user_idx` — usado pra "histórico de importações do user X".
+
+## Constraints
+
+<Constraints />
+
+PK em `batch_id` é o que torna a finalização atômica — se dois workers tentam inserir, apenas um sucede; o outro recebe constraint violation e silencia.
+
+## Como o batch detecta fim
+
+Lógica em `ImportBatchFinalizationRepository.tryFinalize(batchId, ...)`:
+
+1. Worker termina seu job (sucesso ou falha)
+2. Decremente o pending counter (em pg-boss state ou tabela auxiliar)
+3. Se `pending === 0`: tenta `INSERT INTO import_batch_finalized (...)` 
+4. Se INSERT sucede → este job é o "finalizador"; dispara `notifySafe({type: 'steam_import_done' | 'steam_import_partial'})`
+5. Se INSERT falha por unique violation → outro job já finalizou; este sai silencioso
+
+## Padrões de uso
+
+- **INSERT atomico** — pelo último worker do batch
+- **Lookup de histórico** — `GET /integrations/steam/imports?userId=...`
+
+## Tabelas relacionadas
+
+- [`users`](/docs/data-model/tables/users) — quem importou (cascade)
+- [`collections`](/docs/data-model/tables/collections) — destino dos itens (cascade)
+- [`items`](/docs/data-model/tables/items) — alvo dos jobs
+- [`notifications`](/docs/data-model/tables/notifications) — `steam_import_done` / `steam_import_partial`

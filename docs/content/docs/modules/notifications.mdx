@@ -1,0 +1,123 @@
+---
+title: Notifications
+description: Notificações persistidas + entrega real-time via socket + Web Push.
+---
+
+## Visão geral
+
+Sistema dual-channel de notificações:
+- **In-app** — INSERT em `notifications` + emit socket `notification:new`
+- **Push** — Web Push (VAPID) pra notificar quando app está fechada/minimizada
+
+Mesmos eventos disparam ambos os canais. Cliente dedupe se necessário.
+
+Notificações são **flat** — sem subtipos, polimorfismo via `type` (enum) + `entity_id` (UUID que aponta pra qualquer recurso dependendo do type). Frontend traduz `type` em copy + ícone + link.
+
+## Entidades principais
+
+| Tabela | Papel |
+|---|---|
+| [`notifications`](/docs/data-model/tables/notifications) | Notificação persistida |
+| [`push_subscriptions`](/docs/data-model/tables/push_subscriptions) | Subscriptions Web Push do user |
+
+## Endpoints
+
+6 endpoints:
+
+| Endpoint | Resumo |
+|---|---|
+| `GET /notifications` | Listar (cursor pagination) |
+| `GET /notifications/unread-count` | Badge no sino |
+| `POST /notifications/read-all` | Marcar todas como lidas |
+| `PATCH /notifications/:id/read` | Marcar 1 como lida |
+| `DELETE /notifications` | Apagar todas |
+| `DELETE /notifications/:id` | Apagar 1 |
+
+Push subscriptions são gerenciadas em [`POST/DELETE /chat/push-subscriptions`](/docs/api/chat/chat-register-push) (estão dentro do módulo Chat por proximidade).
+
+## Fluxos
+
+### Disparar notificação (padrão notifySafe)
+
+<Mermaid chart={`sequenceDiagram
+  autonumber
+  participant Origin as Outro service<br/>(ex: PostsService)
+  participant N as NotificationsService
+  participant DB as PostgreSQL
+  participant CG as ChatGateway (socket)
+  participant PS as PushService
+
+  Origin->>N: notify({ recipient, actor, type, entityId }).catch(()=>{})
+  Note over Origin: notifySafe — falha não derruba fluxo principal
+  N->>DB: INSERT notifications
+  par Socket
+    N->>CG: emit notification:new room=user:recipient
+  and Web Push
+    N->>PS: sendToUser(recipient, payload)
+    PS->>DB: SELECT push_subscriptions WHERE user_id=?
+    loop Cada subscription
+      PS->>PS: web-push.sendNotification(sub, payload)
+      alt 410 Gone
+        PS->>DB: DELETE expired sub
+      end
+    end
+  end`} />
+
+### Listagem com paginação
+
+<Mermaid chart={`sequenceDiagram
+  participant FE as Frontend
+  participant API as Backend
+  participant DB as PostgreSQL
+
+  FE->>API: GET /notifications?cursor=...&limit=20
+  API->>DB: SELECT notifications.*, actor.id, actor.displayName, actor.avatarUrl<br/>FROM notifications<br/>JOIN users actor ON actor.id = actor_id<br/>WHERE recipient_id = $me<br/>AND created_at < cursor<br/>ORDER BY created_at DESC<br/>LIMIT 21
+  API-->>FE: { items: 20, nextCursor: items[19].created_at }`} />
+
+### Marcar como lida (manual ou implícito)
+
+Marca-lida pode acontecer:
+- **Manual** — user clica "marcar lidas" ou clica numa notificação específica
+- **Implícito** — alguns flows marcam automaticamente:
+  - Aceitar friendship → marca friend_request correspondente como lida
+  - Visualizar oferta → marca offer_received como lida (se implementado)
+
+Ainda não há marcação implícita rica — flow primário é click do usuário.
+
+## Eventos de socket
+
+Apenas **um evento outbound**:
+
+| Evento | Sentido | Payload |
+|---|---|---|
+| `notification:new` | server → user | `{ id, type, actorId, entityId, createdAt, actor: { id, displayName, avatarUrl } }` |
+
+Frontend escuta e:
+1. Adiciona ao topo da lista local
+2. Incrementa badge unread
+3. Mostra toast efêmero ("Joe comentou seu post")
+
+## Tipos de notificação
+
+Lista completa em [Tipos de notificação](/docs/reference/tipos-notificacao). Categorias:
+
+- **Sociais** — friend_request, friend_accepted, dm_request_received, post_comment, post_reaction
+- **Vitrine** — offer_received, offer_accepted, offer_rejected, offer_completed, offer_cancelled, offer_expired
+- **Vitrine — propostas** — counter_proposal_received, proposal_rejected
+- **Vitrine — reputação** — rating_received
+- **Steam** — steam_import_done, steam_import_partial
+
+## Edge cases e regras especiais
+
+- **`actor_id == recipient_id`** possível em casos como `steam_import_done` (notify self). Usa `notifySelf` em vez de `notify`.
+- **Sem retenção automática** — tabela cresce indefinidamente. Pendência: cron pra deletar lidas > 90 dias.
+- **Duplicação possível** — backend não dedupe. Reagir 2x rápido pode gerar 2 notifs (UPDATE também dispara hook). Hoje aceito.
+- **`entity_id` polimórfico** — frontend resolve por `type`. Se entity foi deletada, link fica quebrado (mostra "conteúdo removido").
+- **Push pode falhar** — 410 (subscription expired) é tratado deletando; outros erros são logados mas silenciosos.
+- **`isMuted` per-conversa** suprime push de mensagens novas; mas notificações de outros tipos (offer, comment etc.) **passam normais**.
+
+## Dependências entre módulos
+
+- **Todos os outros módulos** disparam notify para eventos relevantes
+- **Chat (PushService)** — entrega Web Push; mesmo módulo cuida das push_subscriptions
+- **ChatGateway (socket)** — entrega in-app real-time

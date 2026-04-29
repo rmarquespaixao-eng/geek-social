@@ -1,0 +1,82 @@
+---
+title: POST /auth/refresh
+description: Rotacionar tokens via refresh cookie
+---
+
+import Meta from '@/generated/api/auth/refresh/meta'
+import Request from '@/generated/api/auth/refresh/request'
+import Responses from '@/generated/api/auth/refresh/responses'
+import Errors from '@/generated/api/auth/refresh/errors'
+import Examples from '@/generated/api/auth/refresh/examples'
+
+<Meta />
+
+Lê o cookie HttpOnly `refreshToken`, valida contra `refresh_tokens.token_hash`, **deleta** o registro corrente, **insere** um novo, e retorna um novo access token + um novo cookie. Isso é a rotação clássica — cada refresh "queima" o token anterior.
+
+Use sempre que um request normal voltar `401`. O frontend deve interceptar globalmente (ex: Axios/fetch interceptor): se 401, chamar `/auth/refresh`, e re-executar o request original com o novo access token.
+
+## Quando chamar
+
+- Quando um request retorna `401` por access token expirado
+- Na **inicialização** do frontend (mount), pra restaurar sessão silenciosa: se o cookie ainda for válido, o user é re-logado sem ver tela de login. Se 401, redireciona pra `/login`.
+- Não precisa chamar antes de cada request "preventivamente" — o JWT carrega `exp` e o frontend pode comparar local-side, mas é simples deixar o backend rejeitar e reagir ao 401.
+
+## Request
+
+<Request />
+
+**Cookie obrigatório**: `refreshToken`. Setado por login/register/refresh anteriores. Se ausente, o backend retorna 401 imediatamente sem nem consultar o DB.
+
+## Response
+
+<Responses />
+
+**Apenas `accessToken`** — diferente de `/login` e `/register`, NÃO retorna o objeto `user`. O frontend pode reusar o user em cache.
+
+O cookie de refresh é **rotacionado** no header de resposta — o navegador atualiza automaticamente.
+
+## Erros
+
+<Errors />
+
+**Como resolver cada caso**:
+
+| Status | Mensagem retornada hoje (legacy PT) | Causa | Como resolver |
+|---|---|---|---|
+| 401 | `"Não autorizado"` | Cookie ausente | Redirecione pra login |
+| 401 | `"Sessão expirada"` | Token não bate (já foi consumido / nunca existiu / expirou) | Limpe cache local e redirecione pra login |
+
+⚠️ **Race condition em rotação**: duas tabs do mesmo navegador podem chamar `/auth/refresh` simultaneamente. O backend processa em ordem; uma das tabs vai pegar o registro deletado e falhar com 401. **Comportamento aceito** — a tab perdedora cai pro login. Mitigação no frontend: serializar refresh entre tabs via `BroadcastChannel` ou lock no localStorage (não implementado).
+
+## Exemplos
+
+<Examples />
+
+
+### Resposta de sucesso (200)
+
+```json
+{
+  "accessToken": "eyJhbGc..."
+}
+```
+
+E no `Set-Cookie`:
+```
+refreshToken=novo_64_hex; Path=/; HttpOnly; SameSite=Lax; Expires=Mon, 06 May 2026 12:00:00 GMT
+```
+
+## Side effects
+
+- **DB**: `DELETE FROM refresh_tokens WHERE token_hash = sha256(rawCookie)` — o token antigo deixa de existir
+- **DB**: `INSERT INTO refresh_tokens (...)` — novo token rotacionado
+- **Cookie**: `Set-Cookie` atualiza o navegador
+- **Sem notificações** ou eventos de socket
+
+## Relacionados
+
+- Conceito: [Autenticação](/docs/concepts/autenticacao#refresh-token-rotation) — explicação detalhada da rotação
+- Módulo: [Auth](/docs/modules/auth#4-refresh-token-rotation) — sequence diagram
+- Endpoint: [`POST /auth/login`](/docs/api/auth/login) — onde a sessão começa
+- Endpoint: [`POST /auth/logout`](/docs/api/auth/logout) — encerrar antes de expirar
+- Tabela: [`refresh_tokens`](/docs/data-model/tables/refresh_tokens) — onde o token vive

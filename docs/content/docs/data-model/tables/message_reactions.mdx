@@ -1,0 +1,54 @@
+---
+title: message_reactions
+description: Reações em mensagens de chat (emojis livres).
+---
+
+import Columns from '@/generated/data-model/tables/message_reactions/columns'
+import Fks from '@/generated/data-model/tables/message_reactions/fks'
+import Indexes from '@/generated/data-model/tables/message_reactions/indexes'
+import Constraints from '@/generated/data-model/tables/message_reactions/constraints'
+
+Reações em mensagens. **Diferente de `post_reactions`**, aqui o emoji é livre (string até 16 chars). Cada usuário pode reagir com **múltiplos emojis na mesma mensagem** (não está limitado a 1 reação como nos posts), mas cada par `(message_id, user_id, emoji)` é único — não dá pra reagir com o mesmo emoji 2x.
+
+## Colunas
+
+<Columns />
+
+## Funcionalidade dos campos
+
+- **`id`** — UUID, PK
+- **`message_id`** — FK pra `messages` (cascade)
+- **`user_id`** — FK pra `users` (cascade)
+- **`emoji`** — string até 16 chars. Suporta emojis multi-byte (ex: 👨‍🚀 family). Backend não normaliza Unicode (variantes podem fragmentar contagem).
+- **`created_at`** — momento da reação
+
+## Foreign keys
+
+<Fks />
+
+## Índices
+
+<Indexes />
+
+**Detalhes**:
+- **`message_reactions_unique`** — `(message_id, user_id, emoji)` impede mesma reação repetida do mesmo user
+- **`message_reactions_message_idx`** — usado pra carregar todas reações de uma mensagem rapidamente
+
+## Constraints
+
+<Constraints />
+
+## Agregação na UI
+
+Frontend agrupa por emoji: `{ '🎉': [user1, user2], '👀': [user3] }`. Mostra com count e tooltip de quem reagiu.
+
+## Padrões de uso
+
+- **Reagir** — `POST /chat/messages/:id/react { emoji }` → INSERT
+- **Remover** — `DELETE /chat/messages/:id/react?emoji=...` → DELETE
+- **Toggle** — frontend faz POST e se 409 (já existe), faz DELETE em vez
+
+## Tabelas relacionadas
+
+- [`messages`](/docs/data-model/tables/messages) — pai (cascade)
+- [`users`](/docs/data-model/tables/users) — autor (cascade)

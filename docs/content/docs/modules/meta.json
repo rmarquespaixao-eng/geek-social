@@ -1,0 +1,18 @@
+{
+  "title": "Módulos",
+  "pages": [
+    "auth",
+    "users",
+    "friends",
+    "collections-items",
+    "field-definitions",
+    "posts-feed",
+    "chat",
+    "notifications",
+    "listings",
+    "offers",
+    "listing-ratings",
+    "steam",
+    "reports"
+  ]
+}

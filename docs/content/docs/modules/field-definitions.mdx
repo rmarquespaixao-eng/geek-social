@@ -1,0 +1,82 @@
+---
+title: Field Definitions
+description: Catálogo de campos customizados para itens (sistema + custom do usuário).
+---
+
+## Visão geral
+
+Field definitions são as **definições de atributos** que itens podem ter. Existem dois tipos:
+
+- **Sistema** (`is_system=true`, sem `user_id`) — vem com seeds, compartilhado entre todos os usuários
+- **Custom do usuário** (`is_system=false`, com `user_id`) — criadas pelo próprio user pra estender
+
+Cada definition tem **type** (`text`, `number`, `date`, `boolean`, `select`, `money`) que controla a UI de input e o formato persistido em `items.fields`.
+
+## Entidades principais
+
+| Tabela | Papel |
+|---|---|
+| [`field_definitions`](/docs/data-model/tables/field_definitions) | Catálogo |
+| [`collection_field_schema`](/docs/data-model/tables/collection_field_schema) | Onde são referenciadas |
+
+## Endpoints
+
+3 endpoints simples:
+
+| Endpoint | Auth | Resumo |
+|---|---|---|
+| `GET /field-definitions` | JWT | Lista (sistema + custom) |
+| `POST /field-definitions` | JWT | Criar custom |
+| `DELETE /field-definitions/:id` | JWT | Remover custom (system NÃO pode) |
+
+## Fluxos
+
+### Criar campo customizado
+
+<Mermaid chart={`sequenceDiagram
+  autonumber
+  participant U as Usuário
+  participant FE as Frontend
+  participant API as Backend
+  participant DB as PostgreSQL
+
+  U->>FE: Settings → "Criar campo customizado"
+  U->>FE: Nome="Local de compra", type="select", options=["Loja", "Online", "Presente"]
+  FE->>API: POST /field-definitions {<br/>name, fieldType, selectOptions<br/>}
+  API->>API: Valida via createFieldDefinitionSchema:<br/>- select exige ≥1 selectOptions<br/>- money exige selectOptions[0] = código ISO 4217
+  API->>API: Gera field_key = slug(name)
+  API->>DB: INSERT field_definitions<br/>(user_id, is_system=false, ...)
+  API-->>FE: 201 { fieldDefinition }`} />
+
+### Tipos especiais: select e money
+
+<Mermaid chart={`graph LR
+  T[Field type] --> Text
+  T --> Number
+  T --> Date
+  T --> Boolean
+  T --> Select[Select<br/>selectOptions: array de opções]
+  T --> Money[Money<br/>selectOptions: 1 código ISO 4217<br/>BRL, USD, EUR...]`} />
+
+**Select**: o frontend renderiza dropdown com as `selectOptions`. Validação no save: valor enviado precisa estar nas options.
+
+**Money**: o frontend renderiza input numérico + label da moeda (`selectOptions[0]`). Persiste valor numérico em `items.fields[key]`.
+
+## Eventos de socket
+
+Não emite eventos.
+
+## Edge cases e regras especiais
+
+- **field_key** gerado do nome via slug — não é editável depois (mudaria os items que já guardaram valor com a key antiga)
+- **Sistema é imutável** — usuário não pode editar nem deletar definitions do seed
+- **`is_hidden`** preserva dados em items existentes mas remove da UI — usado quando uma definition do sistema é "descontinuada"
+- **Colisão de field_key** — backend gera key única por user (suffix numérico se duplicata)
+- **selectOptions imutáveis** — em teoria, editar opções de uma select-definition após uso pode invalidar valores em items existentes. UI desincentiva edição.
+- **Money com moedas múltiplas** — não suportado; cada definition é uma moeda fixa. Se quiser USD e BRL pra mesmo conceito, criar 2 definitions.
+
+## Dependências entre módulos
+
+- **Collections** — `collection_field_schema` referencia field_definitions
+- **Items** — `items.fields` indexado por `field_key`
+- **Steam** — workers usam definitions de sistema (Plataforma, Horas jogadas, App ID) ao popular items

@@ -1,0 +1,62 @@
+---
+title: post_reactions
+description: Reações (gamer-themed) em posts.
+---
+
+import Columns from '@/generated/data-model/tables/post_reactions/columns'
+import Fks from '@/generated/data-model/tables/post_reactions/fks'
+import Indexes from '@/generated/data-model/tables/post_reactions/indexes'
+import Constraints from '@/generated/data-model/tables/post_reactions/constraints'
+
+Reações em posts. O Geek Social usa um set fixo de reações temáticas (não emoji livre):
+
+- `power_up` (⚡) — gostei muito / força
+- `epic` (🌟) — épico, espetacular
+- `critical` (💥) — crítico, golpe certeiro
+- `loot` (💎) — quero! / desejado
+- `gg` (🎯) — good game, bem jogado
+
+Cada usuário pode reagir uma vez por post (unique `(post_id, user_id)`). Reagir de novo trocando o tipo é UPDATE.
+
+## Colunas
+
+<Columns />
+
+## Funcionalidade dos campos
+
+- **`id`** — UUID, PK
+- **`post_id`** — FK pra `posts` (cascade delete)
+- **`user_id`** — FK pra `users` (cascade delete)
+- **`type`** — enum `reactionTypeEnum`: `power_up | epic | critical | loot | gg`
+- **`created_at`** — momento da reação (mesmo se trocar tipo, o created_at original permanece — é apenas a reação inicial)
+
+## Foreign keys
+
+<Fks />
+
+## Índices
+
+<Indexes />
+
+Unique `post_reactions_post_user_unique` em `(post_id, user_id)`. Reagir de novo: UPSERT (Drizzle: `onConflictDoUpdate`).
+
+## Constraints
+
+<Constraints />
+
+## Contagem por post
+
+`PostsService` carrega `reaction_counts: { power_up: N, epic: N, ... }` agregado por type pra exibir no card do post. Implementação atual usa `GROUP BY type`. Para alta volumetria, considerar denormalização em `posts` com triggers.
+
+## Padrões de uso
+
+- **Reagir** — `POST /posts/:id/react { type }` faz UPSERT
+- **Trocar reação** — UPSERT mesmo endpoint com type diferente
+- **Remover** — `DELETE /posts/:id/react`
+- **Listar quem reagiu** — `GET /posts/:id/reactions` (paginado)
+
+## Tabelas relacionadas
+
+- [`posts`](/docs/data-model/tables/posts) — pai (cascade)
+- [`users`](/docs/data-model/tables/users) — autor da reação (cascade)
+- [`notifications`](/docs/data-model/tables/notifications) — `post_reaction`

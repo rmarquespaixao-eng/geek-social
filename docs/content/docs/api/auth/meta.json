@@ -1,0 +1,17 @@
+{
+  "title": "Auth",
+  "pages": [
+    "register",
+    "login",
+    "logout",
+    "refresh",
+    "forgot-password",
+    "reset-password",
+    "change-password",
+    "set-password",
+    "google-start",
+    "google-link-start",
+    "google-callback",
+    "google-unlink"
+  ]
+}

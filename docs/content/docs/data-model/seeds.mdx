@@ -1,0 +1,110 @@
+---
+title: Seeds
+description: Dados padrão populados no boot — system field definitions.
+---
+
+Seeds rodam **automaticamente no boot** do backend, dentro de `buildApp()`. São idempotentes (UPSERT por chave): rodar 2x não duplica nem sobrescreve dados de usuário.
+
+## O que é seed
+
+| Arquivo | Tabela | O que popula |
+|---|---|---|
+| `src/shared/infra/database/seeds/field-definitions.seed.ts` | [`field_definitions`](/docs/data-model/tables/field_definitions) | ~50 definitions de sistema (`is_system=true`, `user_id=null`) cobrindo games, books, cardgames, boardgames |
+
+> Note que **não há seed de users, collections, items, etc.** — esses são populados quando usuários reais usam o app. Seeds são só pra **dados de domínio do sistema** que precisam existir antes de qualquer user.
+
+## Field definitions de sistema
+
+Cobertura por `collection_type`:
+
+### `games`
+| Field key | Tipo | Opções (select) |
+|---|---|---|
+| `platform` | select | PS1–PS5, Xbox família, Switch, PC, Mobile, Outro |
+| `genre` | select | Ação, RPG, FPS, MMORPG, Souls-like, Indie, ... (~25 opções) |
+| `release_year` | number | — |
+| `developer` | text | — |
+| `status` | select | Na fila, Em andamento, Zerado, Platinado |
+| `completion_date` | date | — |
+| `steam_appid` | number (hidden) | — — usado pela integração Steam, não aparece na UI |
+| `playtime_minutes` | number | — |
+
+### `books`
+| Field key | Tipo | Opções |
+|---|---|---|
+| `author` | text | — |
+| `publisher` | text | — |
+| `publication_year` | number | — |
+| `genre` | select | Ficção, RPG, Mangá, Romance, ... (~27 opções) |
+| `page_count` | number | — |
+| `isbn` | text | — |
+| `status` | select | Quero ler, Lendo, Lido |
+
+### `cardgames`
+| Field key | Tipo | Opções |
+|---|---|---|
+| `game_base` | select | Magic, Pokémon, Yu-Gi-Oh, Outro |
+| `rarity` | text | — |
+| `condition` | select | Mint, Near Mint, Played |
+| `quantity` | number | — |
+
+### `boardgames`
+| Field key | Tipo | Opções |
+|---|---|---|
+| `genre` | select | Eurogame, Worker Placement, Deck-builder, ... (~20 opções) |
+| `status` | select | Tenho, Quero, Emprestado |
+
+### `custom`
+Sem definitions de sistema — coleções `custom` começam com schema vazio. User adiciona suas próprias definitions via `POST /field-definitions` + monta schema com `POST /collections/:id/schema`.
+
+## Como funciona o UPSERT
+
+`FieldDefinitionRepository.upsertSystem(field)`:
+
+```sql
+INSERT INTO field_definitions (...)
+ON CONFLICT (field_key, collection_type) WHERE is_system = true AND user_id IS NULL
+DO UPDATE SET name = excluded.name, select_options = excluded.select_options, is_hidden = excluded.is_hidden
+```
+
+Conflict key: `(field_key, collection_type)` para definitions de sistema. Significa:
+- Editar nome no seed → próximo boot atualiza
+- Adicionar opção em `select` → próximo boot adiciona
+- Mudar `field_key` → cria definition NOVA (a antiga fica com `is_hidden=true` se você marcar manualmente)
+
+## Adicionar novo field do sistema
+
+1. Edite `field-definitions.seed.ts`, adicione objeto:
+   ```ts
+   { name: 'Plataforma online', fieldKey: 'online_platform',
+     fieldType: 'select' as const, collectionType: 'games' as const,
+     selectOptions: ['Steam', 'Epic', 'GOG'],
+     isSystem: true, userId: null },
+   ```
+2. Reinicie o backend (`npm run dev`)
+3. Seed rodará automático no boot
+
+## Esconder field descontinuado
+
+Se um campo do sistema vai sair de circulação:
+
+```ts
+{ name: '...', fieldKey: '...', ..., isHidden: true, userId: null }
+```
+
+`is_hidden=true` faz a UI esconder o campo em forms de novos items, mas **preserva valores em items existentes** que já tinham preenchido.
+
+## Por que não tem seed de outras coisas
+
+Pelo princípio "[Zero débito técnico](/docs/intro/filosofia)" — não criamos dados artificiais que precisariam ser cleanup depois. A app sobe vazia; primeiro user cria primeira conta; primeira coleção; primeiro item.
+
+Para **dev/testing** com dados realistas, abordagem futura é:
+- Fixtures via factory (Faker.js) gerados on-demand em scripts de teste
+- NÃO seeds checked-in com user "joe@example.com" pré-existente
+
+## Roadmap de seeds
+
+Possíveis no futuro:
+- **`reportReasons` traduzidos** — hoje hardcoded em `enum`; se virarem dados, seed inicial
+- **Default avatars/covers** — pool de imagens default no S3
+- **Tutorial post** automático no signup pra pôr conteúdo no perfil novo

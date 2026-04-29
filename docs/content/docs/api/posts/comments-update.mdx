@@ -1,0 +1,41 @@
+---
+title: PATCH /posts/{postId}/comments/{id}
+description: Editar comentário
+---
+
+import Meta from '@/generated/api/posts/comments-update/meta'
+import Request from '@/generated/api/posts/comments-update/request'
+import Responses from '@/generated/api/posts/comments-update/responses'
+import Errors from '@/generated/api/posts/comments-update/errors'
+import Examples from '@/generated/api/posts/comments-update/examples'
+
+<Meta />
+
+Apenas o autor pode editar. Atualiza updated_at; UI mostra "editado".
+
+## Request
+
+<Request />
+
+## Response
+
+<Responses />
+
+## Erros
+
+<Errors />
+
+{/* TODO: para cada código de erro acima, explique a causa e como resolver. */}
+
+## Exemplos
+
+<Examples />
+
+
+## Side effects
+
+{/* TODO: eventos de socket emitidos, notificações disparadas, jobs enfileirados, cascades. */}
+
+## Relacionados
+
+{/* TODO: links pra módulo, conceitos, endpoints relacionados. */}

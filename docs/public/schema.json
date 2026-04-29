@@ -1,0 +1,3514 @@
+{
+  "generatedAt": "2026-04-28T17:58:42.439Z",
+  "tables": [
+    {
+      "name": "collection_field_schema",
+      "schema": null,
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "string",
+          "columnType": "PgUUID",
+          "notNull": true,
+          "hasDefault": true,
+          "default": "gen_random_uuid()",
+          "primary": true,
+          "isUnique": false
+        },
+        {
+          "name": "collection_id",
+          "dataType": "string",
+          "columnType": "PgUUID",
+          "notNull": true,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "field_definition_id",
+          "dataType": "string",
+          "columnType": "PgUUID",
+          "notNull": true,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "is_required",
+          "dataType": "boolean",
+          "columnType": "PgBoolean",
+          "notNull": true,
+          "hasDefault": true,
+          "default": false,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "display_order",
+          "dataType": "number",
+          "columnType": "PgInteger",
+          "notNull": true,
+          "hasDefault": true,
+          "default": 0,
+          "primary": false,
+          "isUnique": false
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "collection_id"
+          ],
+          "foreignTable": "collections",
+          "foreignColumns": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        {
+          "columns": [
+            "field_definition_id"
+          ],
+          "foreignTable": "field_definitions",
+          "foreignColumns": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      ],
+      "indexes": [],
+      "primaryKey": [
+        "id"
+      ]
+    },
+    {
+      "name": "collections",
+      "schema": null,
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "string",
+          "columnType": "PgUUID",
+          "notNull": true,
+          "hasDefault": true,
+          "default": "gen_random_uuid()",
+          "primary": true,
+          "isUnique": false
+        },
+        {
+          "name": "user_id",
+          "dataType": "string",
+          "columnType": "PgUUID",
+          "notNull": true,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "name",
+          "dataType": "string",
+          "columnType": "PgVarchar",
+          "notNull": true,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "description",
+          "dataType": "string",
+          "columnType": "PgText",
+          "notNull": false,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "icon_url",
+          "dataType": "string",
+          "columnType": "PgVarchar",
+          "notNull": false,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "cover_url",
+          "dataType": "string",
+          "columnType": "PgVarchar",
+          "notNull": false,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "type",
+          "dataType": "string",
+          "columnType": "PgEnumColumn",
+          "notNull": true,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "visibility",
+          "dataType": "string",
+          "columnType": "PgEnumColumn",
+          "notNull": true,
+          "hasDefault": true,
+          "default": "public",
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "auto_share_to_feed",
+          "dataType": "boolean",
+          "columnType": "PgBoolean",
+          "notNull": true,
+          "hasDefault": true,
+          "default": false,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "created_at",
+          "dataType": "date",
+          "columnType": "PgTimestamp",
+          "notNull": true,
+          "hasDefault": true,
+          "default": "now()",
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "updated_at",
+          "dataType": "date",
+          "columnType": "PgTimestamp",
+          "notNull": true,
+          "hasDefault": true,
+          "default": "now()",
+          "primary": false,
+          "isUnique": false
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "user_id"
+          ],
+          "foreignTable": "users",
+          "foreignColumns": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      ],
+      "indexes": [],
+      "primaryKey": [
+        "id"
+      ]
+    },
+    {
+      "name": "conversation_members",
+      "schema": null,
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "string",
+          "columnType": "PgUUID",
+          "notNull": true,
+          "hasDefault": true,
+          "default": "gen_random_uuid()",
+          "primary": true,
+          "isUnique": false
+        },
+        {
+          "name": "conversation_id",
+          "dataType": "string",
+          "columnType": "PgUUID",
+          "notNull": true,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "user_id",
+          "dataType": "string",
+          "columnType": "PgUUID",
+          "notNull": true,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "role",
+          "dataType": "string",
+          "columnType": "PgEnumColumn",
+          "notNull": true,
+          "hasDefault": true,
+          "default": "member",
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "permissions",
+          "dataType": "json",
+          "columnType": "PgJsonb",
+          "notNull": true,
+          "hasDefault": true,
+          "default": "{\"can_send_messages\":true,\"can_send_files\":true}",
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "joined_at",
+          "dataType": "date",
+          "columnType": "PgTimestamp",
+          "notNull": true,
+          "hasDefault": true,
+          "default": "now()",
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "last_read_at",
+          "dataType": "date",
+          "columnType": "PgTimestamp",
+          "notNull": false,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "is_archived",
+          "dataType": "boolean",
+          "columnType": "PgBoolean",
+          "notNull": true,
+          "hasDefault": true,
+          "default": false,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "hidden_at",
+          "dataType": "date",
+          "columnType": "PgTimestamp",
+          "notNull": false,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "is_muted",
+          "dataType": "boolean",
+          "columnType": "PgBoolean",
+          "notNull": true,
+          "hasDefault": true,
+          "default": false,
+          "primary": false,
+          "isUnique": false
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "conversation_id"
+          ],
+          "foreignTable": "conversations",
+          "foreignColumns": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        {
+          "columns": [
+            "user_id"
+          ],
+          "foreignTable": "users",
+          "foreignColumns": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "conversation_members_unique",
+          "unique": true,
+          "columns": [
+            "conversation_id",
+            "user_id"
+          ],
+          "where": null
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ]
+    },
+    {
+      "name": "conversations",
+      "schema": null,
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "string",
+          "columnType": "PgUUID",
+          "notNull": true,
+          "hasDefault": true,
+          "default": "gen_random_uuid()",
+          "primary": true,
+          "isUnique": false
+        },
+        {
+          "name": "type",
+          "dataType": "string",
+          "columnType": "PgEnumColumn",
+          "notNull": true,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "name",
+          "dataType": "string",
+          "columnType": "PgVarchar",
+          "notNull": false,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "description",
+          "dataType": "string",
+          "columnType": "PgText",
+          "notNull": false,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "cover_url",
+          "dataType": "string",
+          "columnType": "PgVarchar",
+          "notNull": false,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "created_by",
+          "dataType": "string",
+          "columnType": "PgUUID",
+          "notNull": false,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "is_temporary",
+          "dataType": "boolean",
+          "columnType": "PgBoolean",
+          "notNull": true,
+          "hasDefault": true,
+          "default": false,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "created_at",
+          "dataType": "date",
+          "columnType": "PgTimestamp",
+          "notNull": true,
+          "hasDefault": true,
+          "default": "now()",
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "updated_at",
+          "dataType": "date",
+          "columnType": "PgTimestamp",
+          "notNull": true,
+          "hasDefault": true,
+          "default": "now()",
+          "primary": false,
+          "isUnique": false
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "created_by"
+          ],
+          "foreignTable": "users",
+          "foreignColumns": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      ],
+      "indexes": [],
+      "primaryKey": [
+        "id"
+      ]
+    },
+    {
+      "name": "dm_requests",
+      "schema": null,
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "string",
+          "columnType": "PgUUID",
+          "notNull": true,
+          "hasDefault": true,
+          "default": "gen_random_uuid()",
+          "primary": true,
+          "isUnique": false
+        },
+        {
+          "name": "sender_id",
+          "dataType": "string",
+          "columnType": "PgUUID",
+          "notNull": true,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "receiver_id",
+          "dataType": "string",
+          "columnType": "PgUUID",
+          "notNull": true,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "status",
+          "dataType": "string",
+          "columnType": "PgEnumColumn",
+          "notNull": true,
+          "hasDefault": true,
+          "default": "pending",
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "conversation_id",
+          "dataType": "string",
+          "columnType": "PgUUID",
+          "notNull": false,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "created_at",
+          "dataType": "date",
+          "columnType": "PgTimestamp",
+          "notNull": true,
+          "hasDefault": true,
+          "default": "now()",
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "updated_at",
+          "dataType": "date",
+          "columnType": "PgTimestamp",
+          "notNull": true,
+          "hasDefault": true,
+          "default": "now()",
+          "primary": false,
+          "isUnique": false
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "sender_id"
+          ],
+          "foreignTable": "users",
+          "foreignColumns": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        {
+          "columns": [
+            "receiver_id"
+          ],
+          "foreignTable": "users",
+          "foreignColumns": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        {
+          "columns": [
+            "conversation_id"
+          ],
+          "foreignTable": "conversations",
+          "foreignColumns": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "dm_requests_unique",
+          "unique": true,
+          "columns": [
+            "sender_id",
+            "receiver_id"
+          ],
+          "where": null
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ]
+    },
+    {
+      "name": "field_definitions",
+      "schema": null,
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "string",
+          "columnType": "PgUUID",
+          "notNull": true,
+          "hasDefault": true,
+          "default": "gen_random_uuid()",
+          "primary": true,
+          "isUnique": false
+        },
+        {
+          "name": "user_id",
+          "dataType": "string",
+          "columnType": "PgUUID",
+          "notNull": false,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "name",
+          "dataType": "string",
+          "columnType": "PgVarchar",
+          "notNull": true,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "field_key",
+          "dataType": "string",
+          "columnType": "PgVarchar",
+          "notNull": true,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "field_type",
+          "dataType": "string",
+          "columnType": "PgEnumColumn",
+          "notNull": true,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "collection_type",
+          "dataType": "string",
+          "columnType": "PgEnumColumn",
+          "notNull": false,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "select_options",
+          "dataType": "json",
+          "columnType": "PgJsonb",
+          "notNull": false,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "is_system",
+          "dataType": "boolean",
+          "columnType": "PgBoolean",
+          "notNull": true,
+          "hasDefault": true,
+          "default": false,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "is_hidden",
+          "dataType": "boolean",
+          "columnType": "PgBoolean",
+          "notNull": true,
+          "hasDefault": true,
+          "default": false,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "created_at",
+          "dataType": "date",
+          "columnType": "PgTimestamp",
+          "notNull": true,
+          "hasDefault": true,
+          "default": "now()",
+          "primary": false,
+          "isUnique": false
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "user_id"
+          ],
+          "foreignTable": "users",
+          "foreignColumns": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      ],
+      "indexes": [],
+      "primaryKey": [
+        "id"
+      ]
+    },
+    {
+      "name": "friendships",
+      "schema": null,
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "string",
+          "columnType": "PgUUID",
+          "notNull": true,
+          "hasDefault": true,
+          "default": "gen_random_uuid()",
+          "primary": true,
+          "isUnique": false
+        },
+        {
+          "name": "requester_id",
+          "dataType": "string",
+          "columnType": "PgUUID",
+          "notNull": true,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "receiver_id",
+          "dataType": "string",
+          "columnType": "PgUUID",
+          "notNull": true,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "status",
+          "dataType": "string",
+          "columnType": "PgEnumColumn",
+          "notNull": true,
+          "hasDefault": true,
+          "default": "pending",
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "created_at",
+          "dataType": "date",
+          "columnType": "PgTimestamp",
+          "notNull": true,
+          "hasDefault": true,
+          "default": "now()",
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "updated_at",
+          "dataType": "date",
+          "columnType": "PgTimestamp",
+          "notNull": true,
+          "hasDefault": true,
+          "default": "now()",
+          "primary": false,
+          "isUnique": false
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "requester_id"
+          ],
+          "foreignTable": "users",
+          "foreignColumns": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        {
+          "columns": [
+            "receiver_id"
+          ],
+          "foreignTable": "users",
+          "foreignColumns": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "friendships_requester_receiver_unique",
+          "unique": true,
+          "columns": [
+            "requester_id",
+            "receiver_id"
+          ],
+          "where": null
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ]
+    },
+    {
+      "name": "import_batch_finalized",
+      "schema": null,
+      "columns": [
+        {
+          "name": "batch_id",
+          "dataType": "string",
+          "columnType": "PgUUID",
+          "notNull": true,
+          "hasDefault": false,
+          "default": null,
+          "primary": true,
+          "isUnique": false
+        },
+        {
+          "name": "user_id",
+          "dataType": "string",
+          "columnType": "PgUUID",
+          "notNull": true,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "collection_id",
+          "dataType": "string",
+          "columnType": "PgUUID",
+          "notNull": true,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "total",
+          "dataType": "number",
+          "columnType": "PgInteger",
+          "notNull": true,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "imported",
+          "dataType": "number",
+          "columnType": "PgInteger",
+          "notNull": true,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "updated",
+          "dataType": "number",
+          "columnType": "PgInteger",
+          "notNull": true,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "failed",
+          "dataType": "number",
+          "columnType": "PgInteger",
+          "notNull": true,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "finalized_at",
+          "dataType": "date",
+          "columnType": "PgTimestamp",
+          "notNull": true,
+          "hasDefault": true,
+          "default": "now()",
+          "primary": false,
+          "isUnique": false
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "user_id"
+          ],
+          "foreignTable": "users",
+          "foreignColumns": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        {
+          "columns": [
+            "collection_id"
+          ],
+          "foreignTable": "collections",
+          "foreignColumns": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "import_batch_finalized_user_idx",
+          "unique": false,
+          "columns": [
+            "user_id",
+            "finalized_at"
+          ],
+          "where": null
+        }
+      ],
+      "primaryKey": [
+        "batch_id"
+      ]
+    },
+    {
+      "name": "item_offers",
+      "schema": null,
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "string",
+          "columnType": "PgUUID",
+          "notNull": true,
+          "hasDefault": true,
+          "default": "gen_random_uuid()",
+          "primary": true,
+          "isUnique": false
+        },
+        {
+          "name": "type",
+          "dataType": "string",
+          "columnType": "PgEnumColumn",
+          "notNull": true,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "item_id",
+          "dataType": "string",
+          "columnType": "PgUUID",
+          "notNull": true,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "owner_id",
+          "dataType": "string",
+          "columnType": "PgUUID",
+          "notNull": true,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "offerer_id",
+          "dataType": "string",
+          "columnType": "PgUUID",
+          "notNull": true,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "offered_item_id",
+          "dataType": "string",
+          "columnType": "PgUUID",
+          "notNull": false,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "offered_price",
+          "dataType": "string",
+          "columnType": "PgNumeric",
+          "notNull": false,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "message",
+          "dataType": "string",
+          "columnType": "PgText",
+          "notNull": false,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "status",
+          "dataType": "string",
+          "columnType": "PgEnumColumn",
+          "notNull": true,
+          "hasDefault": true,
+          "default": "pending",
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "offerer_confirmed_at",
+          "dataType": "date",
+          "columnType": "PgTimestamp",
+          "notNull": false,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "owner_confirmed_at",
+          "dataType": "date",
+          "columnType": "PgTimestamp",
+          "notNull": false,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "listing_id",
+          "dataType": "string",
+          "columnType": "PgUUID",
+          "notNull": false,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "created_at",
+          "dataType": "date",
+          "columnType": "PgTimestamp",
+          "notNull": true,
+          "hasDefault": true,
+          "default": "now()",
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "updated_at",
+          "dataType": "date",
+          "columnType": "PgTimestamp",
+          "notNull": true,
+          "hasDefault": true,
+          "default": "now()",
+          "primary": false,
+          "isUnique": false
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "item_id"
+          ],
+          "foreignTable": "items",
+          "foreignColumns": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        {
+          "columns": [
+            "owner_id"
+          ],
+          "foreignTable": "users",
+          "foreignColumns": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        {
+          "columns": [
+            "offerer_id"
+          ],
+          "foreignTable": "users",
+          "foreignColumns": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        {
+          "columns": [
+            "offered_item_id"
+          ],
+          "foreignTable": "items",
+          "foreignColumns": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        {
+          "columns": [
+            "listing_id"
+          ],
+          "foreignTable": "listings",
+          "foreignColumns": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "item_offers_pending_unique",
+          "unique": true,
+          "columns": [
+            "item_id",
+            "offerer_id"
+          ],
+          "where": "[object Object] = 'pending'"
+        },
+        {
+          "name": "item_offers_owner_status_idx",
+          "unique": false,
+          "columns": [
+            "owner_id",
+            "status",
+            "created_at"
+          ],
+          "where": null
+        },
+        {
+          "name": "item_offers_offerer_status_idx",
+          "unique": false,
+          "columns": [
+            "offerer_id",
+            "status",
+            "created_at"
+          ],
+          "where": null
+        },
+        {
+          "name": "item_offers_listing_idx",
+          "unique": false,
+          "columns": [
+            "listing_id"
+          ],
+          "where": null
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ]
+    },
+    {
+      "name": "items",
+      "schema": null,
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "string",
+          "columnType": "PgUUID",
+          "notNull": true,
+          "hasDefault": true,
+          "default": "gen_random_uuid()",
+          "primary": true,
+          "isUnique": false
+        },
+        {
+          "name": "collection_id",
+          "dataType": "string",
+          "columnType": "PgUUID",
+          "notNull": true,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "name",
+          "dataType": "string",
+          "columnType": "PgVarchar",
+          "notNull": true,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "cover_url",
+          "dataType": "string",
+          "columnType": "PgVarchar",
+          "notNull": false,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "fields",
+          "dataType": "json",
+          "columnType": "PgJsonb",
+          "notNull": true,
+          "hasDefault": true,
+          "default": "{}",
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "rating",
+          "dataType": "number",
+          "columnType": "PgSmallInt",
+          "notNull": false,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "comment",
+          "dataType": "string",
+          "columnType": "PgText",
+          "notNull": false,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "created_at",
+          "dataType": "date",
+          "columnType": "PgTimestamp",
+          "notNull": true,
+          "hasDefault": true,
+          "default": "now()",
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "updated_at",
+          "dataType": "date",
+          "columnType": "PgTimestamp",
+          "notNull": true,
+          "hasDefault": true,
+          "default": "now()",
+          "primary": false,
+          "isUnique": false
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "collection_id"
+          ],
+          "foreignTable": "collections",
+          "foreignColumns": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      ],
+      "indexes": [],
+      "primaryKey": [
+        "id"
+      ]
+    },
+    {
+      "name": "listing_ratings",
+      "schema": null,
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "string",
+          "columnType": "PgUUID",
+          "notNull": true,
+          "hasDefault": true,
+          "default": "gen_random_uuid()",
+          "primary": true,
+          "isUnique": false
+        },
+        {
+          "name": "offer_id",
+          "dataType": "string",
+          "columnType": "PgUUID",
+          "notNull": true,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "rater_id",
+          "dataType": "string",
+          "columnType": "PgUUID",
+          "notNull": true,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "ratee_id",
+          "dataType": "string",
+          "columnType": "PgUUID",
+          "notNull": true,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "score",
+          "dataType": "number",
+          "columnType": "PgSmallInt",
+          "notNull": true,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "created_at",
+          "dataType": "date",
+          "columnType": "PgTimestamp",
+          "notNull": true,
+          "hasDefault": true,
+          "default": "now()",
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "updated_at",
+          "dataType": "date",
+          "columnType": "PgTimestamp",
+          "notNull": true,
+          "hasDefault": true,
+          "default": "now()",
+          "primary": false,
+          "isUnique": false
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "offer_id"
+          ],
+          "foreignTable": "item_offers",
+          "foreignColumns": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        {
+          "columns": [
+            "rater_id"
+          ],
+          "foreignTable": "users",
+          "foreignColumns": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        {
+          "columns": [
+            "ratee_id"
+          ],
+          "foreignTable": "users",
+          "foreignColumns": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "listing_ratings_offer_rater_uniq",
+          "unique": true,
+          "columns": [
+            "offer_id",
+            "rater_id"
+          ],
+          "where": null
+        },
+        {
+          "name": "listing_ratings_ratee_idx",
+          "unique": false,
+          "columns": [
+            "ratee_id"
+          ],
+          "where": null
+        },
+        {
+          "name": "listing_ratings_offer_idx",
+          "unique": false,
+          "columns": [
+            "offer_id"
+          ],
+          "where": null
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ]
+    },
+    {
+      "name": "listings",
+      "schema": null,
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "string",
+          "columnType": "PgUUID",
+          "notNull": true,
+          "hasDefault": true,
+          "default": "gen_random_uuid()",
+          "primary": true,
+          "isUnique": false
+        },
+        {
+          "name": "item_id",
+          "dataType": "string",
+          "columnType": "PgUUID",
+          "notNull": true,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "owner_id",
+          "dataType": "string",
+          "columnType": "PgUUID",
+          "notNull": true,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "availability",
+          "dataType": "string",
+          "columnType": "PgEnumColumn",
+          "notNull": true,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "asking_price",
+          "dataType": "string",
+          "columnType": "PgNumeric",
+          "notNull": false,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "payment_methods",
+          "dataType": "array",
+          "columnType": "PgArray",
+          "notNull": true,
+          "hasDefault": true,
+          "default": "[]",
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "status",
+          "dataType": "string",
+          "columnType": "PgEnumColumn",
+          "notNull": true,
+          "hasDefault": true,
+          "default": "active",
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "disclaimer_accepted_at",
+          "dataType": "date",
+          "columnType": "PgTimestamp",
+          "notNull": true,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "created_at",
+          "dataType": "date",
+          "columnType": "PgTimestamp",
+          "notNull": true,
+          "hasDefault": true,
+          "default": "now()",
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "updated_at",
+          "dataType": "date",
+          "columnType": "PgTimestamp",
+          "notNull": true,
+          "hasDefault": true,
+          "default": "now()",
+          "primary": false,
+          "isUnique": false
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "item_id"
+          ],
+          "foreignTable": "items",
+          "foreignColumns": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        {
+          "columns": [
+            "owner_id"
+          ],
+          "foreignTable": "users",
+          "foreignColumns": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "listings_item_active_uniq",
+          "unique": true,
+          "columns": [
+            "item_id"
+          ],
+          "where": "[object Object] = 'active'"
+        },
+        {
+          "name": "listings_owner_status_idx",
+          "unique": false,
+          "columns": [
+            "owner_id",
+            "status",
+            "created_at"
+          ],
+          "where": null
+        },
+        {
+          "name": "listings_active_updated_idx",
+          "unique": false,
+          "columns": [
+            "updated_at"
+          ],
+          "where": "[object Object] = 'active'"
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ]
+    },
+    {
+      "name": "message_attachments",
+      "schema": null,
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "string",
+          "columnType": "PgUUID",
+          "notNull": true,
+          "hasDefault": true,
+          "default": "gen_random_uuid()",
+          "primary": true,
+          "isUnique": false
+        },
+        {
+          "name": "message_id",
+          "dataType": "string",
+          "columnType": "PgUUID",
+          "notNull": false,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "uploaded_by",
+          "dataType": "string",
+          "columnType": "PgUUID",
+          "notNull": true,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "url",
+          "dataType": "string",
+          "columnType": "PgText",
+          "notNull": true,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "filename",
+          "dataType": "string",
+          "columnType": "PgText",
+          "notNull": true,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "mime_type",
+          "dataType": "string",
+          "columnType": "PgText",
+          "notNull": true,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "size_bytes",
+          "dataType": "number",
+          "columnType": "PgInteger",
+          "notNull": true,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "display_order",
+          "dataType": "number",
+          "columnType": "PgInteger",
+          "notNull": true,
+          "hasDefault": true,
+          "default": 0,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "duration_ms",
+          "dataType": "number",
+          "columnType": "PgInteger",
+          "notNull": false,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "waveform_peaks",
+          "dataType": "json",
+          "columnType": "PgJsonb",
+          "notNull": false,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "thumbnail_url",
+          "dataType": "string",
+          "columnType": "PgText",
+          "notNull": false,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "message_id"
+          ],
+          "foreignTable": "messages",
+          "foreignColumns": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        {
+          "columns": [
+            "uploaded_by"
+          ],
+          "foreignTable": "users",
+          "foreignColumns": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      ],
+      "indexes": [],
+      "primaryKey": [
+        "id"
+      ]
+    },
+    {
+      "name": "message_reactions",
+      "schema": null,
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "string",
+          "columnType": "PgUUID",
+          "notNull": true,
+          "hasDefault": true,
+          "default": "gen_random_uuid()",
+          "primary": true,
+          "isUnique": false
+        },
+        {
+          "name": "message_id",
+          "dataType": "string",
+          "columnType": "PgUUID",
+          "notNull": true,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "user_id",
+          "dataType": "string",
+          "columnType": "PgUUID",
+          "notNull": true,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "emoji",
+          "dataType": "string",
+          "columnType": "PgVarchar",
+          "notNull": true,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "created_at",
+          "dataType": "date",
+          "columnType": "PgTimestamp",
+          "notNull": true,
+          "hasDefault": true,
+          "default": "now()",
+          "primary": false,
+          "isUnique": false
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "message_id"
+          ],
+          "foreignTable": "messages",
+          "foreignColumns": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        {
+          "columns": [
+            "user_id"
+          ],
+          "foreignTable": "users",
+          "foreignColumns": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "message_reactions_unique",
+          "unique": true,
+          "columns": [
+            "message_id",
+            "user_id",
+            "emoji"
+          ],
+          "where": null
+        },
+        {
+          "name": "message_reactions_message_idx",
+          "unique": false,
+          "columns": [
+            "message_id"
+          ],
+          "where": null
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ]
+    },
+    {
+      "name": "messages",
+      "schema": null,
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "string",
+          "columnType": "PgUUID",
+          "notNull": true,
+          "hasDefault": true,
+          "default": "gen_random_uuid()",
+          "primary": true,
+          "isUnique": false
+        },
+        {
+          "name": "conversation_id",
+          "dataType": "string",
+          "columnType": "PgUUID",
+          "notNull": true,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "user_id",
+          "dataType": "string",
+          "columnType": "PgUUID",
+          "notNull": true,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "content",
+          "dataType": "string",
+          "columnType": "PgText",
+          "notNull": false,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "reply_to_id",
+          "dataType": "string",
+          "columnType": "PgUUID",
+          "notNull": false,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "call_metadata",
+          "dataType": "json",
+          "columnType": "PgJsonb",
+          "notNull": false,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "is_temporary",
+          "dataType": "boolean",
+          "columnType": "PgBoolean",
+          "notNull": true,
+          "hasDefault": true,
+          "default": false,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "temporary_event",
+          "dataType": "json",
+          "columnType": "PgJsonb",
+          "notNull": false,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "hidden_for_user_ids",
+          "dataType": "json",
+          "columnType": "PgJsonb",
+          "notNull": true,
+          "hasDefault": true,
+          "default": "[]",
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "deleted_at",
+          "dataType": "date",
+          "columnType": "PgTimestamp",
+          "notNull": false,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "created_at",
+          "dataType": "date",
+          "columnType": "PgTimestamp",
+          "notNull": true,
+          "hasDefault": true,
+          "default": "now()",
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "updated_at",
+          "dataType": "date",
+          "columnType": "PgTimestamp",
+          "notNull": true,
+          "hasDefault": true,
+          "default": "now()",
+          "primary": false,
+          "isUnique": false
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "conversation_id"
+          ],
+          "foreignTable": "conversations",
+          "foreignColumns": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        {
+          "columns": [
+            "user_id"
+          ],
+          "foreignTable": "users",
+          "foreignColumns": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "messages_conversation_created_at_idx",
+          "unique": false,
+          "columns": [
+            "conversation_id",
+            "created_at"
+          ],
+          "where": null
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ]
+    },
+    {
+      "name": "notifications",
+      "schema": null,
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "string",
+          "columnType": "PgUUID",
+          "notNull": true,
+          "hasDefault": true,
+          "default": "gen_random_uuid()",
+          "primary": true,
+          "isUnique": false
+        },
+        {
+          "name": "recipient_id",
+          "dataType": "string",
+          "columnType": "PgUUID",
+          "notNull": true,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "actor_id",
+          "dataType": "string",
+          "columnType": "PgUUID",
+          "notNull": true,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "type",
+          "dataType": "string",
+          "columnType": "PgEnumColumn",
+          "notNull": true,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "entity_id",
+          "dataType": "string",
+          "columnType": "PgUUID",
+          "notNull": false,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "read",
+          "dataType": "boolean",
+          "columnType": "PgBoolean",
+          "notNull": true,
+          "hasDefault": true,
+          "default": false,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "created_at",
+          "dataType": "date",
+          "columnType": "PgTimestamp",
+          "notNull": true,
+          "hasDefault": true,
+          "default": "now()",
+          "primary": false,
+          "isUnique": false
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "recipient_id"
+          ],
+          "foreignTable": "users",
+          "foreignColumns": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        {
+          "columns": [
+            "actor_id"
+          ],
+          "foreignTable": "users",
+          "foreignColumns": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "notifications_recipient_created_at_idx",
+          "unique": false,
+          "columns": [
+            "recipient_id",
+            "created_at"
+          ],
+          "where": null
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ]
+    },
+    {
+      "name": "offer_proposals",
+      "schema": null,
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "string",
+          "columnType": "PgUUID",
+          "notNull": true,
+          "hasDefault": true,
+          "default": "gen_random_uuid()",
+          "primary": true,
+          "isUnique": false
+        },
+        {
+          "name": "offer_id",
+          "dataType": "string",
+          "columnType": "PgUUID",
+          "notNull": true,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "proposer_id",
+          "dataType": "string",
+          "columnType": "PgUUID",
+          "notNull": true,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "offered_price",
+          "dataType": "string",
+          "columnType": "PgNumeric",
+          "notNull": false,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "offered_item_id",
+          "dataType": "string",
+          "columnType": "PgUUID",
+          "notNull": false,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "message",
+          "dataType": "string",
+          "columnType": "PgText",
+          "notNull": false,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "status",
+          "dataType": "string",
+          "columnType": "PgEnumColumn",
+          "notNull": true,
+          "hasDefault": true,
+          "default": "pending",
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "created_at",
+          "dataType": "date",
+          "columnType": "PgTimestamp",
+          "notNull": true,
+          "hasDefault": true,
+          "default": "now()",
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "updated_at",
+          "dataType": "date",
+          "columnType": "PgTimestamp",
+          "notNull": true,
+          "hasDefault": true,
+          "default": "now()",
+          "primary": false,
+          "isUnique": false
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "offer_id"
+          ],
+          "foreignTable": "item_offers",
+          "foreignColumns": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        {
+          "columns": [
+            "proposer_id"
+          ],
+          "foreignTable": "users",
+          "foreignColumns": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        {
+          "columns": [
+            "offered_item_id"
+          ],
+          "foreignTable": "items",
+          "foreignColumns": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "offer_proposals_offer_idx",
+          "unique": false,
+          "columns": [
+            "offer_id",
+            "created_at"
+          ],
+          "where": null
+        },
+        {
+          "name": "offer_proposals_one_pending_uniq",
+          "unique": true,
+          "columns": [
+            "offer_id"
+          ],
+          "where": "[object Object] = 'pending'"
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ]
+    },
+    {
+      "name": "password_reset_tokens",
+      "schema": null,
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "string",
+          "columnType": "PgUUID",
+          "notNull": true,
+          "hasDefault": true,
+          "default": "gen_random_uuid()",
+          "primary": true,
+          "isUnique": false
+        },
+        {
+          "name": "user_id",
+          "dataType": "string",
+          "columnType": "PgUUID",
+          "notNull": true,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "token_hash",
+          "dataType": "string",
+          "columnType": "PgVarchar",
+          "notNull": true,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "expires_at",
+          "dataType": "date",
+          "columnType": "PgTimestamp",
+          "notNull": true,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "used_at",
+          "dataType": "date",
+          "columnType": "PgTimestamp",
+          "notNull": false,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "user_id"
+          ],
+          "foreignTable": "users",
+          "foreignColumns": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      ],
+      "indexes": [],
+      "primaryKey": [
+        "id"
+      ]
+    },
+    {
+      "name": "post_comments",
+      "schema": null,
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "string",
+          "columnType": "PgUUID",
+          "notNull": true,
+          "hasDefault": true,
+          "default": "gen_random_uuid()",
+          "primary": true,
+          "isUnique": false
+        },
+        {
+          "name": "post_id",
+          "dataType": "string",
+          "columnType": "PgUUID",
+          "notNull": true,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "user_id",
+          "dataType": "string",
+          "columnType": "PgUUID",
+          "notNull": true,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "content",
+          "dataType": "string",
+          "columnType": "PgText",
+          "notNull": true,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "created_at",
+          "dataType": "date",
+          "columnType": "PgTimestamp",
+          "notNull": true,
+          "hasDefault": true,
+          "default": "now()",
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "updated_at",
+          "dataType": "date",
+          "columnType": "PgTimestamp",
+          "notNull": true,
+          "hasDefault": true,
+          "default": "now()",
+          "primary": false,
+          "isUnique": false
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "post_id"
+          ],
+          "foreignTable": "posts",
+          "foreignColumns": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        {
+          "columns": [
+            "user_id"
+          ],
+          "foreignTable": "users",
+          "foreignColumns": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "post_comments_post_created_at_idx",
+          "unique": false,
+          "columns": [
+            "post_id",
+            "created_at"
+          ],
+          "where": null
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ]
+    },
+    {
+      "name": "post_media",
+      "schema": null,
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "string",
+          "columnType": "PgUUID",
+          "notNull": true,
+          "hasDefault": true,
+          "default": "gen_random_uuid()",
+          "primary": true,
+          "isUnique": false
+        },
+        {
+          "name": "post_id",
+          "dataType": "string",
+          "columnType": "PgUUID",
+          "notNull": true,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "url",
+          "dataType": "string",
+          "columnType": "PgText",
+          "notNull": true,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "thumbnail_url",
+          "dataType": "string",
+          "columnType": "PgText",
+          "notNull": false,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "display_order",
+          "dataType": "number",
+          "columnType": "PgInteger",
+          "notNull": true,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "post_id"
+          ],
+          "foreignTable": "posts",
+          "foreignColumns": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "post_media_post_id_idx",
+          "unique": false,
+          "columns": [
+            "post_id"
+          ],
+          "where": null
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ]
+    },
+    {
+      "name": "post_reactions",
+      "schema": null,
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "string",
+          "columnType": "PgUUID",
+          "notNull": true,
+          "hasDefault": true,
+          "default": "gen_random_uuid()",
+          "primary": true,
+          "isUnique": false
+        },
+        {
+          "name": "post_id",
+          "dataType": "string",
+          "columnType": "PgUUID",
+          "notNull": true,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "user_id",
+          "dataType": "string",
+          "columnType": "PgUUID",
+          "notNull": true,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "type",
+          "dataType": "string",
+          "columnType": "PgEnumColumn",
+          "notNull": true,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "created_at",
+          "dataType": "date",
+          "columnType": "PgTimestamp",
+          "notNull": true,
+          "hasDefault": true,
+          "default": "now()",
+          "primary": false,
+          "isUnique": false
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "post_id"
+          ],
+          "foreignTable": "posts",
+          "foreignColumns": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        {
+          "columns": [
+            "user_id"
+          ],
+          "foreignTable": "users",
+          "foreignColumns": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "post_reactions_post_user_unique",
+          "unique": true,
+          "columns": [
+            "post_id",
+            "user_id"
+          ],
+          "where": null
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ]
+    },
+    {
+      "name": "posts",
+      "schema": null,
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "string",
+          "columnType": "PgUUID",
+          "notNull": true,
+          "hasDefault": true,
+          "default": "gen_random_uuid()",
+          "primary": true,
+          "isUnique": false
+        },
+        {
+          "name": "user_id",
+          "dataType": "string",
+          "columnType": "PgUUID",
+          "notNull": true,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "type",
+          "dataType": "string",
+          "columnType": "PgEnumColumn",
+          "notNull": true,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "content",
+          "dataType": "string",
+          "columnType": "PgText",
+          "notNull": false,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "visibility",
+          "dataType": "string",
+          "columnType": "PgEnumColumn",
+          "notNull": true,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "item_id",
+          "dataType": "string",
+          "columnType": "PgUUID",
+          "notNull": false,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "collection_id",
+          "dataType": "string",
+          "columnType": "PgUUID",
+          "notNull": false,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "created_at",
+          "dataType": "date",
+          "columnType": "PgTimestamp",
+          "notNull": true,
+          "hasDefault": true,
+          "default": "now()",
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "updated_at",
+          "dataType": "date",
+          "columnType": "PgTimestamp",
+          "notNull": true,
+          "hasDefault": true,
+          "default": "now()",
+          "primary": false,
+          "isUnique": false
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "user_id"
+          ],
+          "foreignTable": "users",
+          "foreignColumns": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        {
+          "columns": [
+            "item_id"
+          ],
+          "foreignTable": "items",
+          "foreignColumns": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        {
+          "columns": [
+            "collection_id"
+          ],
+          "foreignTable": "collections",
+          "foreignColumns": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "posts_user_created_at_idx",
+          "unique": false,
+          "columns": [
+            "user_id",
+            "created_at"
+          ],
+          "where": null
+        },
+        {
+          "name": "posts_visibility_created_at_idx",
+          "unique": false,
+          "columns": [
+            "visibility",
+            "created_at"
+          ],
+          "where": null
+        },
+        {
+          "name": "posts_item_id_idx",
+          "unique": false,
+          "columns": [
+            "item_id"
+          ],
+          "where": null
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ]
+    },
+    {
+      "name": "push_subscriptions",
+      "schema": null,
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "string",
+          "columnType": "PgUUID",
+          "notNull": true,
+          "hasDefault": true,
+          "default": "gen_random_uuid()",
+          "primary": true,
+          "isUnique": false
+        },
+        {
+          "name": "user_id",
+          "dataType": "string",
+          "columnType": "PgUUID",
+          "notNull": true,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "endpoint",
+          "dataType": "string",
+          "columnType": "PgText",
+          "notNull": true,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "p256dh",
+          "dataType": "string",
+          "columnType": "PgText",
+          "notNull": true,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "auth",
+          "dataType": "string",
+          "columnType": "PgText",
+          "notNull": true,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "created_at",
+          "dataType": "date",
+          "columnType": "PgTimestamp",
+          "notNull": true,
+          "hasDefault": true,
+          "default": "now()",
+          "primary": false,
+          "isUnique": false
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "user_id"
+          ],
+          "foreignTable": "users",
+          "foreignColumns": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "push_subscriptions_endpoint_unique",
+          "unique": true,
+          "columns": [
+            "endpoint"
+          ],
+          "where": null
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ]
+    },
+    {
+      "name": "refresh_tokens",
+      "schema": null,
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "string",
+          "columnType": "PgUUID",
+          "notNull": true,
+          "hasDefault": true,
+          "default": "gen_random_uuid()",
+          "primary": true,
+          "isUnique": false
+        },
+        {
+          "name": "user_id",
+          "dataType": "string",
+          "columnType": "PgUUID",
+          "notNull": true,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "token_hash",
+          "dataType": "string",
+          "columnType": "PgVarchar",
+          "notNull": true,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "expires_at",
+          "dataType": "date",
+          "columnType": "PgTimestamp",
+          "notNull": true,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "created_at",
+          "dataType": "date",
+          "columnType": "PgTimestamp",
+          "notNull": true,
+          "hasDefault": true,
+          "default": "now()",
+          "primary": false,
+          "isUnique": false
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "user_id"
+          ],
+          "foreignTable": "users",
+          "foreignColumns": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      ],
+      "indexes": [],
+      "primaryKey": [
+        "id"
+      ]
+    },
+    {
+      "name": "reports",
+      "schema": null,
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "string",
+          "columnType": "PgUUID",
+          "notNull": true,
+          "hasDefault": true,
+          "default": "gen_random_uuid()",
+          "primary": true,
+          "isUnique": false
+        },
+        {
+          "name": "reporter_id",
+          "dataType": "string",
+          "columnType": "PgUUID",
+          "notNull": true,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "target_type",
+          "dataType": "string",
+          "columnType": "PgEnumColumn",
+          "notNull": true,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "target_id",
+          "dataType": "string",
+          "columnType": "PgUUID",
+          "notNull": true,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "reason",
+          "dataType": "string",
+          "columnType": "PgEnumColumn",
+          "notNull": true,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "description",
+          "dataType": "string",
+          "columnType": "PgText",
+          "notNull": false,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "status",
+          "dataType": "string",
+          "columnType": "PgEnumColumn",
+          "notNull": true,
+          "hasDefault": true,
+          "default": "pending",
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "created_at",
+          "dataType": "date",
+          "columnType": "PgTimestamp",
+          "notNull": true,
+          "hasDefault": true,
+          "default": "now()",
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "updated_at",
+          "dataType": "date",
+          "columnType": "PgTimestamp",
+          "notNull": true,
+          "hasDefault": true,
+          "default": "now()",
+          "primary": false,
+          "isUnique": false
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "reporter_id"
+          ],
+          "foreignTable": "users",
+          "foreignColumns": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "reports_reporter_target_unique",
+          "unique": true,
+          "columns": [
+            "reporter_id",
+            "target_type",
+            "target_id"
+          ],
+          "where": null
+        },
+        {
+          "name": "reports_status_created_at_idx",
+          "unique": false,
+          "columns": [
+            "status",
+            "created_at"
+          ],
+          "where": null
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ]
+    },
+    {
+      "name": "user_blocks",
+      "schema": null,
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "string",
+          "columnType": "PgUUID",
+          "notNull": true,
+          "hasDefault": true,
+          "default": "gen_random_uuid()",
+          "primary": true,
+          "isUnique": false
+        },
+        {
+          "name": "blocker_id",
+          "dataType": "string",
+          "columnType": "PgUUID",
+          "notNull": true,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "blocked_id",
+          "dataType": "string",
+          "columnType": "PgUUID",
+          "notNull": true,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "created_at",
+          "dataType": "date",
+          "columnType": "PgTimestamp",
+          "notNull": true,
+          "hasDefault": true,
+          "default": "now()",
+          "primary": false,
+          "isUnique": false
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "blocker_id"
+          ],
+          "foreignTable": "users",
+          "foreignColumns": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        {
+          "columns": [
+            "blocked_id"
+          ],
+          "foreignTable": "users",
+          "foreignColumns": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "user_blocks_blocker_blocked_unique",
+          "unique": true,
+          "columns": [
+            "blocker_id",
+            "blocked_id"
+          ],
+          "where": null
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ]
+    },
+    {
+      "name": "user_presence",
+      "schema": null,
+      "columns": [
+        {
+          "name": "user_id",
+          "dataType": "string",
+          "columnType": "PgUUID",
+          "notNull": true,
+          "hasDefault": false,
+          "default": null,
+          "primary": true,
+          "isUnique": false
+        },
+        {
+          "name": "last_seen_at",
+          "dataType": "date",
+          "columnType": "PgTimestamp",
+          "notNull": true,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "updated_at",
+          "dataType": "date",
+          "columnType": "PgTimestamp",
+          "notNull": true,
+          "hasDefault": true,
+          "default": "now()",
+          "primary": false,
+          "isUnique": false
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "user_id"
+          ],
+          "foreignTable": "users",
+          "foreignColumns": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      ],
+      "indexes": [],
+      "primaryKey": [
+        "user_id"
+      ]
+    },
+    {
+      "name": "users",
+      "schema": null,
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "string",
+          "columnType": "PgUUID",
+          "notNull": true,
+          "hasDefault": true,
+          "default": "gen_random_uuid()",
+          "primary": true,
+          "isUnique": false
+        },
+        {
+          "name": "email",
+          "dataType": "string",
+          "columnType": "PgVarchar",
+          "notNull": true,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": true
+        },
+        {
+          "name": "password_hash",
+          "dataType": "string",
+          "columnType": "PgVarchar",
+          "notNull": false,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "display_name",
+          "dataType": "string",
+          "columnType": "PgVarchar",
+          "notNull": true,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "bio",
+          "dataType": "string",
+          "columnType": "PgText",
+          "notNull": false,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "avatar_url",
+          "dataType": "string",
+          "columnType": "PgVarchar",
+          "notNull": false,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "cover_url",
+          "dataType": "string",
+          "columnType": "PgVarchar",
+          "notNull": false,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "cover_color",
+          "dataType": "string",
+          "columnType": "PgVarchar",
+          "notNull": false,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "profile_background_url",
+          "dataType": "string",
+          "columnType": "PgVarchar",
+          "notNull": false,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "profile_background_color",
+          "dataType": "string",
+          "columnType": "PgVarchar",
+          "notNull": false,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "privacy",
+          "dataType": "string",
+          "columnType": "PgEnumColumn",
+          "notNull": true,
+          "hasDefault": true,
+          "default": "public",
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "email_verified",
+          "dataType": "boolean",
+          "columnType": "PgBoolean",
+          "notNull": true,
+          "hasDefault": true,
+          "default": false,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "show_presence",
+          "dataType": "boolean",
+          "columnType": "PgBoolean",
+          "notNull": true,
+          "hasDefault": true,
+          "default": true,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "show_read_receipts",
+          "dataType": "boolean",
+          "columnType": "PgBoolean",
+          "notNull": true,
+          "hasDefault": true,
+          "default": true,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "steam_id",
+          "dataType": "string",
+          "columnType": "PgVarchar",
+          "notNull": false,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": true
+        },
+        {
+          "name": "steam_linked_at",
+          "dataType": "date",
+          "columnType": "PgTimestamp",
+          "notNull": false,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "steam_api_key",
+          "dataType": "string",
+          "columnType": "PgVarchar",
+          "notNull": false,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "google_id",
+          "dataType": "string",
+          "columnType": "PgVarchar",
+          "notNull": false,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": true
+        },
+        {
+          "name": "google_linked_at",
+          "dataType": "date",
+          "columnType": "PgTimestamp",
+          "notNull": false,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "birthday",
+          "dataType": "string",
+          "columnType": "PgDateString",
+          "notNull": false,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "interests",
+          "dataType": "json",
+          "columnType": "PgJsonb",
+          "notNull": true,
+          "hasDefault": true,
+          "default": "[]",
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "pronouns",
+          "dataType": "string",
+          "columnType": "PgVarchar",
+          "notNull": false,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "location",
+          "dataType": "string",
+          "columnType": "PgVarchar",
+          "notNull": false,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "website",
+          "dataType": "string",
+          "columnType": "PgVarchar",
+          "notNull": false,
+          "hasDefault": false,
+          "default": null,
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "created_at",
+          "dataType": "date",
+          "columnType": "PgTimestamp",
+          "notNull": true,
+          "hasDefault": true,
+          "default": "now()",
+          "primary": false,
+          "isUnique": false
+        },
+        {
+          "name": "updated_at",
+          "dataType": "date",
+          "columnType": "PgTimestamp",
+          "notNull": true,
+          "hasDefault": true,
+          "default": "now()",
+          "primary": false,
+          "isUnique": false
+        }
+      ],
+      "foreignKeys": [],
+      "indexes": [],
+      "primaryKey": [
+        "id"
+      ]
+    }
+  ]
+}

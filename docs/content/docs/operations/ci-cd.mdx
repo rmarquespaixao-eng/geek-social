@@ -1,0 +1,276 @@
+---
+title: CI/CD
+description: Pipeline com Gitea Actions — build, push imagem, deploy via SSH.
+---
+
+Gitea Actions é compatível com sintaxe GitHub Actions. Pipeline padrão:
+
+1. Push commit em `main` ou tag de release
+2. CI roda testes + lint
+3. Build Docker image
+4. Push pro registry privado
+5. SSH no VPS, atualiza versão no `.env`, `docker compose up -d`
+
+## Estrutura de workflows
+
+```
+.gitea/workflows/         (ou .github/workflows/)
+├── ci.yml                ← roda em cada PR/push
+├── release.yml           ← roda em tag v*
+└── deploy.yml            ← roda manual ou em release
+```
+
+## ci.yml — testes + lint
+
+```yaml
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: dev
+          POSTGRES_PASSWORD: dev
+          POSTGRES_DB: geek_social_test
+        ports: [5432:5432]
+        options: --health-cmd pg_isready --health-interval 10s
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22', cache: 'npm' }
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npm run test
+      - run: npm run test:e2e
+        env:
+          DATABASE_URL: postgresql://dev:dev@localhost:5432/geek_social_test
+          # ... outros env vars de test
+
+  build:
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: register.homelab-cloud.com
+          username: ${{ secrets.REGISTRY_USER }}
+          password: ${{ secrets.REGISTRY_PASS }}
+      - uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            register.homelab-cloud.com/geek-social-api:latest
+            register.homelab-cloud.com/geek-social-api:${{ github.sha }}
+```
+
+## release.yml — em tag
+
+Quando criar tag `v1.8.14`:
+
+```yaml
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: register.homelab-cloud.com
+          username: ${{ secrets.REGISTRY_USER }}
+          password: ${{ secrets.REGISTRY_PASS }}
+
+      - name: Extract version from tag
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_ENV
+
+      - uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            register.homelab-cloud.com/geek-social-api:${{ env.VERSION }}
+            register.homelab-cloud.com/geek-social-api:latest
+
+      - name: Trigger deploy
+        run: |
+          curl -X POST \
+            -H "Authorization: Bearer ${{ secrets.GITEA_TOKEN }}" \
+            "${{ vars.GITEA_API }}/repos/admin/geek-social-api/actions/workflows/deploy.yml/dispatches" \
+            -d '{"ref":"main", "inputs": {"version":"${{ env.VERSION }}"}}'
+```
+
+## deploy.yml — atualiza VPS
+
+```yaml
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Versão a deployar (ex: 1.8.14)'
+        required: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H ${{ secrets.VPS_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Update .env on VPS
+        run: |
+          ssh deploy@${{ secrets.VPS_HOST }} "
+            cd /apps/geek-social &&
+            sed -i 's/^GEEK_SOCIAL_API_VERSION=.*/GEEK_SOCIAL_API_VERSION=${{ inputs.version }}/' .env
+          "
+
+      - name: Pull + recreate
+        run: |
+          ssh deploy@${{ secrets.VPS_HOST }} "
+            cd /apps/geek-social &&
+            docker compose pull &&
+            docker compose up -d --remove-orphans
+          "
+
+      - name: Verify health
+        run: |
+          sleep 15
+          curl -fsS https://api.geek-social.com.br/health || exit 1
+
+      - name: Notify Slack/Discord (opcional)
+        if: always()
+        run: |
+          curl -X POST -H "Content-Type: application/json" \
+            -d "{\"text\": \"Deploy ${{ inputs.version }}: ${{ job.status }}\"}" \
+            ${{ secrets.WEBHOOK_URL }}
+```
+
+## Secrets necessários
+
+No Gitea repo settings → Secrets:
+
+| Secret | Conteúdo |
+|---|---|
+| `REGISTRY_USER` | Login do registry privado |
+| `REGISTRY_PASS` | Senha do registry |
+| `DEPLOY_SSH_KEY` | Private key SSH pra VPS |
+| `VPS_HOST` | IP ou hostname da VPS |
+| `GITEA_TOKEN` | Token pra trigger workflows cross-repo |
+| `WEBHOOK_URL` | (opcional) Discord/Slack notif |
+
+## Variáveis (não-secret)
+
+| Variável | Conteúdo |
+|---|---|
+| `GITEA_API` | URL base da API Gitea (ex: `https://gitea.homelab-cloud.com/api/v1`) |
+
+## Multi-repo deploy
+
+Se cada serviço (api, frontend, docs) tem seu próprio repo:
+
+- Cada repo: `ci.yml` + `release.yml` próprios
+- Repo de **infra** (`geek-social-deploy`): só com `docker-compose.yml` + scripts deploy + `deploy.yml`
+- Trigger cross-repo via `repository_dispatch` ou `workflow_dispatch`
+
+## Versionamento
+
+Padrão semver: `vMAJOR.MINOR.PATCH`.
+
+- **MAJOR**: breaking change (API quebra clients antigos)
+- **MINOR**: feature nova compatível
+- **PATCH**: bugfix
+
+Tag commit:
+
+```bash
+git tag v1.8.14
+GIT_SSH_COMMAND="ssh -i ~/.ssh/id_ed25519 -p 2222" git push --follow-tags
+```
+
+CI detecta a tag, builda, deploya.
+
+## Rollback via CI
+
+```yaml
+# rollback.yml
+name: Rollback
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Versão anterior (deve existir no registry)'
+        required: true
+jobs:
+  rollback:
+    # ... mesmo que deploy.yml mas com versão anterior
+```
+
+Ou simplesmente re-trigger `deploy.yml` com input de versão anterior.
+
+## Database migrations em CI
+
+Migrations rodam **no boot do API** atualmente. Em prod com múltiplos containers, isso pode causar race condition.
+
+Solução robusta:
+- Container "migrator" no compose roda **antes** dos outros
+- CI aplica migrations via SSH antes de subir os apps:
+
+```yaml
+- name: Run migrations
+  run: |
+    ssh deploy@${{ secrets.VPS_HOST }} "
+      docker run --rm --network geek-social_geek-social \
+        --env-file /apps/geek-social/.env \
+        register.homelab-cloud.com/geek-social-api:${{ inputs.version }} \
+        npm run db:migrate
+    "
+```
+
+## Performance da pipeline
+
+Otimizações:
+- Cache de `node_modules` (uses `actions/cache` ou `cache: 'npm'` em setup-node)
+- Cache de Docker layers (Buildx + GitHub registry cache)
+- Skip jobs em PRs com `paths-filter` (só rebuild se relevante mudou)
+
+## Checklist de pipeline
+
+- [ ] CI roda em cada PR (testes + tsc)
+- [ ] Build Docker image em push pra main
+- [ ] Tag de release dispara build + push de imagem versioned
+- [ ] Deploy manual ou auto na release
+- [ ] Health check no final do deploy
+- [ ] Notificação em sucesso/falha
+- [ ] Rollback testado
+- [ ] Secrets configurados
+- [ ] Cache de deps + layers ativo
+
+## Referências
+
+- [Deploy passo a passo](/docs/operations/deploy)
+- [Arquitetura](/docs/operations/arquitetura)
+- [Migrations](/docs/data-model/migrations)

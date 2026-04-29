@@ -1,0 +1,56 @@
+---
+title: post_media
+description: Mídia (imagem/vídeo) anexada a posts.
+---
+
+import Columns from '@/generated/data-model/tables/post_media/columns'
+import Fks from '@/generated/data-model/tables/post_media/fks'
+import Indexes from '@/generated/data-model/tables/post_media/indexes'
+import Constraints from '@/generated/data-model/tables/post_media/constraints'
+
+Tabela de mídia anexada a um post. Um post pode ter múltiplas mídias em ordem (imagens em galeria, etc.). Os arquivos vivem no MinIO/S3; aqui só guardamos as URLs.
+
+## Colunas
+
+<Columns />
+
+## Funcionalidade dos campos
+
+- **`id`** — UUID, PK
+- **`post_id`** — FK pra `posts`. Cascade delete (apaga post → apaga mídia metadata, mas **não os arquivos no S3**).
+- **`url`** — URL do arquivo (S3/MinIO path-style, ex: `http://localhost:9000/geek-social-media/posts/abc/img.jpg`)
+- **`thumbnail_url`** — versão reduzida (gerada via `sharp` ou `ffmpeg`). Opcional para imagens; útil pra vídeos.
+- **`display_order`** — inteiro (0-based) pra ordenar carrosséis. Sem unique constraint — empate possível mas não esperado.
+
+## Foreign keys
+
+<Fks />
+
+## Índices
+
+<Indexes />
+
+`post_media_post_id_idx` permite buscar todas as mídias de um post rapidamente.
+
+## Constraints
+
+<Constraints />
+
+## Limpeza de S3 órfão
+
+Ao deletar um post, o registro `post_media` cascateia mas o **arquivo no S3 não é deletado automaticamente**. Pendência: hook em delete de post pra deletar via `S3Adapter.delete()`. Hoje vira "lixo" com cost mínimo no MinIO local mas pode acumular em prod.
+
+Soluções possíveis:
+- App-level: deletar arquivos antes do DELETE do post (atomicidade fraca)
+- Background job: scan periódico de S3 vs registros DB
+- S3 lifecycle policy: deletar objetos não-referenciados após X dias
+
+## Padrões de uso
+
+- **Insert** — durante `POST /posts` ou `PUT /posts/:id` com upload via multipart
+- **Reorder** — UPDATE `display_order` em transação
+- **Delete único** — `DELETE /posts/:id/media/:mediaId`
+
+## Tabelas relacionadas
+
+- [`posts`](/docs/data-model/tables/posts) — pai (cascade)

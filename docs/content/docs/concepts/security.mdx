@@ -1,0 +1,248 @@
+---
+title: Security
+description: Modelo de ameaças e medidas de segurança implementadas + checklist OWASP.
+---
+
+Resumo defensivo do Geek Social. Lista o que está coberto, o que não está, e o que está no roadmap.
+
+## Modelo de ameaças
+
+Atores considerados:
+- **User regular** — pode tentar acessar/manipular dados de outros users via API
+- **User malicioso autenticado** — tem JWT válido mas tenta exploits
+- **Atacante externo (não autenticado)** — força bruta, enumeration, scans
+- **Atacante com acesso físico ao DB** — vazamento de secrets em rest
+- **Compromise de credencial** — JWT/cookie roubado
+
+NÃO considerados (out of scope hoje):
+- Atacante com root no servidor (compromise infra) — fora do escopo da app
+- Análise sofisticada de side-channels (timing, cache)
+
+## Autenticação e sessão
+
+| Vetor | Mitigação |
+|---|---|
+| **Sessão hijack via XSS** | Refresh token em cookie HttpOnly — JS não lê |
+| **CSRF em refresh** | `SameSite=strict` em prod, `lax` em dev |
+| **Replay de refresh** | Rotação obrigatória — usar 2x falha |
+| **Roubo de DB → forjar sessões** | `token_hash = sha256(rawToken)` — DB nunca tem raw |
+| **Brute force de senha** | bcrypt cost 12 (~250ms) + (TODO) rate limit em /login |
+| **Enumeration de e-mails** | `/forgot-password` sempre retorna 200 |
+| **Reset com token roubado** | Single-use (`used_at`) + TTL 1h |
+| **Múltiplas sessões abertas** | Reset password apaga TODOS refresh_tokens |
+| **JWT roubado dentro de 15min** | Aceito risco residual; reset password é rota de recuperação |
+
+Detalhes em [Conceito de Autenticação](/docs/concepts/autenticacao).
+
+## Autorização (vertical)
+
+Cada endpoint que mexe com recurso valida ownership/membership:
+
+```ts
+// Padrão em services
+async update(userId: string, listingId: string, input: ...) {
+  const listing = await this.repo.findById(listingId)
+  if (!listing) throw new ListingsError('NOT_FOUND')
+  if (listing.ownerId !== userId) throw new ListingsError('NOT_AUTHORIZED')
+  // ... prossegue
+}
+```
+
+**Princípio:** validação centrada no service (não no controller). Controllers podem ser ignorados pra debugging mas service nunca abre brecha.
+
+| Recurso | Ownership/access check |
+|---|---|
+| User profile (edit) | `userId === request.user.userId` |
+| Collection (CRUD) | `collection.userId === userId` |
+| Item (CRUD) | via collection ownership |
+| Listing (CRUD) | `listing.ownerId === userId` |
+| Offer (accept/reject) | turno via `latestProposal.proposerId !== userId` |
+| Group chat (admin actions) | `member.role IN ('owner', 'admin')` |
+| Notification (mark read) | `notification.recipientId === userId` |
+
+## Validação de input
+
+Todas as rotas têm Zod schema:
+- Body: `body: registerSchema` no `app.post(...)`
+- Query: `querystring: ...`
+- Params: `params: ...`
+
+`fastify-type-provider-zod` valida **antes** do handler rodar. Schema inválido → 400 sem chegar no service.
+
+Tipos com validação extra:
+- UUIDs: `z.string().uuid()` rejeita strings malformadas
+- Emails: `z.string().email()` rejeita formato inválido
+- URLs: `z.string().url()` rejeita protocolos suspeitos
+- Hex colors: regex `^#[0-9a-fA-F]{6}$`
+- Paths/filenames de upload: `multipart` valida via mime + size limit
+
+## SQL injection
+
+Não há SQL string concatenation no código de domínio.
+
+Drizzle parameteriza:
+- `db.select().from(users).where(eq(users.email, userInput))` → bind parameter
+- `` sql`SELECT ... ${userInput}` `` → bind parameter (não inline)
+
+**Cuidado**: `sql.raw(userInput)` injeta direto. **Nunca usado** no código atual. Ponto de atenção em PRs.
+
+## XSS
+
+**Frontend (Vue 3)**: escape automático via interpolação `{{ value }}`. `v-html` proibido em conteúdo de usuário.
+
+**Backend**: APIs retornam JSON. Sem renderização server-side. Markdown não é renderizado em bio/posts (texto plano).
+
+**Vetores possíveis (quando renderizar markdown no futuro)**:
+- Sanitizar HTML antes de renderizar (DOMPurify)
+- Whitelist de tags permitidas
+- Atributos de URL com `target="_blank" rel="noopener noreferrer"`
+
+## Path traversal em uploads
+
+S3Adapter recebe `key` montado pelo backend:
+
+```ts
+const key = `posts/${postId}/${randomUUID()}.${ext}`
+await s3.put(key, buffer, mimeType)
+```
+
+`postId` é UUID validado. `randomUUID()` é seguro. `ext` extraído do filename é **único ponto sensível**:
+
+```ts
+const ext = path.extname(filename).toLowerCase()
+if (!['.jpg', '.png', '.webp', '.mp4', '.m4a', '.pdf'].includes(ext)) {
+  throw new Error('UNSUPPORTED_EXT')
+}
+```
+
+Whitelist evita extensões executáveis (`.html`, `.js`, `.svg` que pode ter JS).
+
+## Storage público
+
+Arquivos no MinIO/S3 são **publicamente acessíveis via URL**. Implicação:
+
+| Cenário | Risco |
+|---|---|
+| Post `private` | Quem souber a URL acessa o arquivo |
+| Message attachment em conversa privada | Idem |
+| Avatar de user com perfil private | Idem |
+
+**Mitigação atual**: URLs incluem UUID random, então não é enumerável. Mas leak de URL = leak de mídia.
+
+**Mitigação futura (signed URLs)**: backend gera URL temporária (TTL minutos) por request. Custo: complexidade adicional, URLs não-cacheáveis.
+
+## Rate limiting
+
+**Estado atual:** sem rate limit no app. Apenas o que Nginx/Cloudflare pode prover na frente em prod.
+
+**Roadmap**: `@fastify/rate-limit` plugin com regras por endpoint:
+
+```ts
+await app.register(import('@fastify/rate-limit'), {
+  max: 5,            // 5 reqs
+  timeWindow: '1m',  // por minuto
+  keyGenerator: req => req.ip,
+})
+```
+
+Endpoints prioritários:
+- `/auth/login` — 5/min/IP (anti brute force)
+- `/auth/register` — 3/hora/IP (anti spam)
+- `/auth/forgot-password` — 3/hora/email (anti enumeration via spam de e-mails)
+- `/reports` — 10/dia/user (anti abuse)
+
+## Secrets handling
+
+| Secret | Onde fica | Cuidado |
+|---|---|---|
+| `JWT_SECRET` | env var | Random ≥32 chars; rotação requer re-login de todos |
+| `GOOGLE_CLIENT_SECRET` | env var | — |
+| `AWS_SECRET_ACCESS_KEY` | env var | — |
+| `VAPID_PRIVATE_KEY` | env var | Trocar invalida todas push subscriptions |
+| `users.steam_api_key` | DB | At-rest sem criptografia (pendência) |
+| `password_hash` | DB | bcrypt cost 12 |
+| `refresh_tokens.token_hash` | DB | sha256 |
+| `password_reset_tokens.token_hash` | DB | sha256 |
+
+`.env` no `.gitignore`. Em prod: secrets via env do container (não no Dockerfile).
+
+## CORS
+
+```ts
+await app.register(fastifyCors, {
+  origin: env.FRONTEND_URL,
+  credentials: true,
+})
+```
+
+Single origin (frontend específico). Cookies `credentials: true` exige origem exata, não wildcard.
+
+## CSRF
+
+**Token Bearer** + cookie HttpOnly:
+- Bearer JWT em request normal — não vai automaticamente, atacante precisa do JS pra forjar
+- Cookie refresh — `SameSite=strict` impede cross-site
+
+Atacante que consegue XSS no nosso domínio passa por tudo. Defesa profundidade contra XSS é prioridade.
+
+## Headers de segurança
+
+Não configurados hoje. Pra adicionar (sub-projeto E):
+
+```ts
+await app.register(import('@fastify/helmet'), {
+  contentSecurityPolicy: { ... },
+  hsts: { maxAge: 31536000, includeSubDomains: true },
+})
+```
+
+| Header | Default Helmet |
+|---|---|
+| `Strict-Transport-Security` | HSTS |
+| `X-Content-Type-Options` | nosniff |
+| `X-Frame-Options` | DENY |
+| `Content-Security-Policy` | restrictive (precisa ajuste pra Scalar/Mermaid funcionarem) |
+| `Referrer-Policy` | no-referrer |
+
+## Logging vs privacidade
+
+Logs **não devem** conter:
+- Senhas (em qualquer forma)
+- JWTs completos (apenas claims relevantes: userId)
+- Cookies inteiros
+- E-mails personalizados em mass logs (LGPD)
+
+Pino sanitiza por default; mas hooks customizados podem vazar — auditar antes de centralizar logs.
+
+## Compliance LGPD (princípios)
+
+- **Direito ao esquecimento**: `DELETE /users/me` apaga conta + cascade — implementado
+- **Portabilidade**: endpoint pra exportar dados próprios (`GET /users/me/export`) — pendência
+- **Consentimento explícito**: termos no signup — UI implementada
+- **Dados sensíveis** (CPF, geo precisa, etc.) — não coletados hoje
+
+## OWASP Top 10 — checklist
+
+| # | Categoria | Status |
+|---|---|---|
+| A01 | Broken Access Control | ✅ Validação por service em todos recursos |
+| A02 | Cryptographic Failures | ✅ bcrypt, sha256, HTTPS em prod |
+| A03 | Injection (SQLi/CMD) | ✅ Drizzle parametriza; Zod valida |
+| A04 | Insecure Design | ⚠️ Storage público é decisão consciente; rate limit pendente |
+| A05 | Security Misconfiguration | ⚠️ Helmet ainda não configurado |
+| A06 | Vulnerable Components | ⚠️ `npm audit` periódico; sem Dependabot ainda |
+| A07 | Identification & Auth Failures | ✅ JWT + rotation, mas brute force depende de rate limit |
+| A08 | Software & Data Integrity | ⚠️ Sem signed builds / SBOM |
+| A09 | Security Logging & Monitoring | ❌ Audit log pendente; alerts pendente |
+| A10 | SSRF | ✅ Sem requests outbound a URLs controladas pelo user |
+
+Itens em ⚠️ ou ❌ são parte do roadmap.
+
+## Pendências priorizadas
+
+1. **Rate limit em endpoints sensíveis** (login/register/forgot-password)
+2. **Helmet headers** em produção
+3. **Audit log** dedicado
+4. **Signed URLs** pra storage privado
+5. **Criptografia at-rest** de `steam_api_key` em DB
+6. **`npm audit` em CI** pra alertar de CVE em deps

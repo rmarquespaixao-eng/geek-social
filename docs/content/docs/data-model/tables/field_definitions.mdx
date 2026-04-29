@@ -1,0 +1,83 @@
+---
+title: field_definitions
+description: Definições de campos customizados disponíveis para itens de coleção.
+---
+
+import Columns from '@/generated/data-model/tables/field_definitions/columns'
+import Fks from '@/generated/data-model/tables/field_definitions/fks'
+import Indexes from '@/generated/data-model/tables/field_definitions/indexes'
+import Constraints from '@/generated/data-model/tables/field_definitions/constraints'
+
+Catálogo de campos customizados (atributos) que podem ser anexados a items de uma coleção. Há dois tipos:
+
+- **De sistema** (`is_system = true`, `user_id = NULL`) — vem com seeds, compartilhado entre todos os usuários (ex: "Plataforma" pra games, "Autor" pra books). Não editáveis pelo usuário.
+- **Custom do usuário** (`is_system = false`, `user_id != NULL`) — criados pelo próprio usuário pra coleções `custom` ou pra estender outras.
+
+Cada definição tem um **tipo** (`text`, `number`, `date`, `boolean`, `select`, `money`) que controla a UI de input e o formato persistido em `items.fields` (JSONB).
+
+## Colunas
+
+<Columns />
+
+## Funcionalidade dos campos
+
+- **`id`** — UUID, PK
+- **`user_id`** — dono. `NULL` para definições de sistema. Custom: o user; cascade delete remove definições orfãs.
+- **`name`** — label visível na UI (ex: "Plataforma", "Ano de lançamento").
+- **`field_key`** — chave usada em `items.fields[key]`. Snake_case curto (ex: `platform`, `release_year`). Imutável após criação.
+- **`field_type`** — enum: `text` | `number` | `date` | `boolean` | `select` | `money`.
+- **`collection_type`** — restringe a definição a coleções daquele tipo. `NULL` = aplicável a qualquer tipo. Sistema usa isso pra ofertar "Plataforma" só em `games`, etc.
+- **`select_options`** — JSONB array de strings, apenas para `field_type='select'`. Ex: `["Steam", "Epic", "GOG"]`.
+- **`is_system`** — flag distintiva. `true` para definições do seed; `false` para customizadas.
+- **`is_hidden`** — esconde da UI (legacy support para campos descontinuados; preserva dados nos itens existentes).
+- **`created_at`** — momento da criação.
+
+## Foreign keys
+
+<Fks />
+
+## Índices
+
+<Indexes />
+
+## Constraints
+
+<Constraints />
+
+## Seed de definições do sistema
+
+Aplicado no boot via `seedFieldDefinitions(repository)`. Cobre os tipos comuns:
+- `games`: Plataforma (select), Status (select: jogando/zerei/quero), Horas jogadas (number), Nota (number 0-10)
+- `books`: Autor (text), Páginas (number), Status (select: lendo/lido/quero), Edição (text)
+- `cardgames`/`boardgames`: campos análogos
+
+Detalhes em `src/shared/infra/database/seeds/field-definitions.seed.ts`.
+
+## Como aparece em items
+
+Items da coleção guardam valores num JSONB `fields` indexado pelo `field_key`:
+
+```json
+{
+  "platform": "Steam",
+  "status": "jogando",
+  "hours_played": 42,
+  "rating": 9
+}
+```
+
+A UI lê o schema da coleção (`collection_field_schema`), busca cada `field_definition` referenciado pra montar o form, e popula com os valores de `items.fields`.
+
+## Padrões de uso
+
+- **Insert pelo seed** — uma vez, no boot
+- **Insert custom** — `POST /field-definitions` autenticado
+- **Adicionar a uma coleção** — INSERT em `collection_field_schema`
+- **Hidden** — `UPDATE field_definitions SET is_hidden = true` quando descontinuamos um campo
+
+## Tabelas relacionadas
+
+- [`users`](/docs/data-model/tables/users) — dono (custom apenas)
+- [`collection_field_schema`](/docs/data-model/tables/collection_field_schema) — onde é referenciado
+- [`items`](/docs/data-model/tables/items) — onde os valores ficam (em JSONB `fields`)
+- [`collections`](/docs/data-model/tables/collections) — restrição por tipo

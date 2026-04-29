@@ -1,0 +1,207 @@
+---
+title: Códigos de erro
+description: Catálogo completo dos códigos tipados retornados pela API, por módulo.
+---
+
+A API retorna erros como `{ "error": "CODIGO_TIPADO" }` em todos os 4xx. Esta página é o **catálogo canônico** — clientes devem comparar pelo código, nunca pela mensagem.
+
+Convenção e padrão completo em [Convenções de erro](/docs/concepts/convencoes-erro). Cada controller mapeia código → status HTTP via `STATUS_BY_CODE`.
+
+## Auth
+
+| Código | Status | Onde acontece | Causa | Como resolver |
+|---|---|---|---|---|
+| `EMAIL_ALREADY_EXISTS` | 409 | `POST /auth/register` | E-mail já cadastrado | Use login ou recovery |
+| `INVALID_CREDENTIALS` | 401 | `POST /auth/login`, `PUT /auth/change-password` | Email/senha não bateu, ou senha atual incorreta | Verificar credenciais; se persistir, usar reset |
+| `INVALID_RESET_TOKEN` | 400 | `POST /auth/reset-password` | Token expirado/usado/inexistente | Solicitar novo via `/forgot-password` |
+| `PASSWORD_ALREADY_SET` | 409 | `POST /auth/set-password` | User já tem senha local | Use `change-password` |
+| `USER_NOT_FOUND` | 404 | Várias | User do JWT não existe (conta deletada com sessão viva) | Logout + re-login |
+| `GOOGLE_ALREADY_LINKED_TO_OTHER_USER` | 400 | `GET /auth/google/link` | Google account já é vínculo de outra conta | Desvincule da outra conta primeiro |
+| `GOOGLE_NOT_LINKED` | 404 | `DELETE /auth/google/link` | Conta atual não tem Google | — |
+| `PASSWORD_REQUIRED_BEFORE_UNLINK` | 409 | `DELETE /auth/google/link` | Sem senha local; desvincular deixaria orfã | Use `set-password` antes |
+| `INVALID_STATE` (redirect) | — | `GET /auth/google/callback` | State JWT inválido/expirado | Refazer fluxo |
+| `OAUTH_FAILED` (redirect) | — | `GET /auth/google/callback` | Token exchange/userInfo falhou | Tentar de novo |
+| `EMAIL_MISSING` (redirect) | — | `GET /auth/google/callback` | Conta Google sem e-mail | Re-autorizar com escopo `email` |
+| `LOGIN_FAILED` / `LINK_FAILED` (redirect) | — | `GET /auth/google/callback` | Erro inesperado | Logs do backend |
+
+## Users
+
+| Código | Status | Causa | Como resolver |
+|---|---|---|---|
+| `USER_NOT_FOUND` | 404 | User não existe | — |
+| `FORBIDDEN` | 403 | Tentativa de editar perfil/recurso de outro user | — |
+| `STORAGE_NOT_CONFIGURED` | 500 | S3Adapter sem credenciais válidas | Configurar `.env` |
+
+Validação Zod (`updateProfileSchema`, etc.) retorna 400 com detalhes em `.flatten()`.
+
+## Friends
+
+| Código | Status | Causa | Como resolver |
+|---|---|---|---|
+| `SELF_REQUEST` | 400 | Tentou pedir amizade pra si mesmo | — |
+| `SELF_BLOCK` | 400 | Tentou se bloquear | — |
+| `ALREADY_EXISTS` | 409 | Pedido pendente já existe nessa direção | — |
+| `NOT_FOUND` | 404 | Friendship/block não existe | — |
+| `NOT_PENDING` | 409 | Tentou aceitar/rejeitar pedido que já foi processado | Re-fetch a lista |
+| `FORBIDDEN` | 403 | Tentou aceitar/cancelar pedido de outro user | — |
+
+## Collections
+
+| Código | Status | Causa | Como resolver |
+|---|---|---|---|
+| `NOT_FOUND` | 404 | Coleção não existe | — |
+| `FORBIDDEN` | 403 | Não é dono da coleção | — |
+| `INVALID_NAME` | 400 | Nome vazio/excede 100 chars | — |
+| `FIELD_IN_USE` | 409 | Tentou remover do schema field que items já usam | Considerar `is_hidden` em vez |
+| `FIELD_NOT_FOUND` | 404 | field_definition_id inválido no schema | — |
+
+## Items
+
+| Código | Status | Causa | Como resolver |
+|---|---|---|---|
+| `NOT_FOUND` | 404 | Item não existe | — |
+| `FORBIDDEN` | 403 | Não é dono | — |
+| `REQUIRED_FIELD_MISSING` | 422 | Field marcado `isRequired` no schema não foi preenchido | Preencher campo |
+| `INVALID_FIELD_TYPE` | 422 | Tipo do valor não bate com fieldType (ex: string em number) | Coercion no client |
+| `INVALID_FIELD_VALUE` | 422 | Valor não está em selectOptions (para tipo select) | Use uma das opções |
+| `INVALID_RATING` | 422 | Rating fora de 1-5 | — |
+| `CANNOT_EDIT_ITEM_SHARE` | 403 | Tentou editar post auto-criado de tipo item_share | Edita o item; post é auto-derived |
+
+## Field Definitions
+
+| Código | Status | Causa | Como resolver |
+|---|---|---|---|
+| `FIELD_KEY_ALREADY_EXISTS` | 409 | Tentou criar definition custom com `field_key` que já existe | Use outro nome |
+| `FIELD_KEY_DUPLICATE` | 409 | Mesmo conflito (variante em outro path) | — |
+| `SYSTEM_FIELD_LOCKED` | 403 | Tentou deletar/editar definition de sistema | Não permitido; use `is_hidden` |
+| `NOT_FOUND` | 404 | — | — |
+
+## Listings (Vitrine)
+
+| Código | Status | Causa | Como resolver |
+|---|---|---|---|
+| `ITEM_NOT_FOUND` | 404 | Item alvo não existe | — |
+| `NOT_FOUND` | 404 | Listing não existe | — |
+| `NOT_AUTHORIZED` | 403 | Não é dono do listing | — |
+| `ALREADY_LISTED` | 409 | Item já tem listing active | Encerrar o existente OU editar |
+| `INVALID_TRANSITION` | 422 | Tentou pause/resume em estado errado (ex: pause de closed) | Verifique estado |
+| `LISTING_CLOSED` | 422 | Tentou editar/pausar/reativar listing closed | Listing terminou ciclo |
+| `LISTING_NOT_CLOSED` | 422 | Tentou hard delete sem ter encerrado antes | DELETE encerra; com `?hard=true` em closed faz hard delete |
+
+## Offers
+
+| Código | Status | Causa | Como resolver |
+|---|---|---|---|
+| `LISTING_NOT_FOUND` | 404 | listingId no body inválido | — |
+| `LISTING_NOT_ACTIVE` | 409 | Listing pausado/closed | Não aceita ofertas |
+| `ITEM_NOT_FOUND` | 404 | Item alvo desapareceu | — |
+| `OFFER_NOT_FOUND` | 404 | offerId inexistente | — |
+| `OFFERED_ITEM_NOT_FOUND` | 404 | offered_item_id em trade não existe | — |
+| `OFFERED_ITEM_NOT_OWNED` | 403 | Tentou oferecer item que não é seu | — |
+| `OFFERED_COLLECTION_PRIVATE` | 422 | Item oferecido está em coleção private — owner não consegue verificar | Mudar visibility da coleção |
+| `OFFERED_COLLECTION_REQUIRES_FRIENDSHIP` | 403 | Coleção friends_only entre não-amigos | Adicionar amizade |
+| `ITEM_NOT_AVAILABLE` | 404 | Item já transferido | — |
+| `ITEM_NOT_FOR_SALE` / `ITEM_NOT_FOR_TRADE` | 422 | Listing não suporta tipo da oferta | — |
+| `CANNOT_OFFER_OWN_ITEM` | 403 | Owner tentou ofertar pro próprio listing | — |
+| `DUPLICATE_PENDING_OFFER` | 409 | Já tem oferta pending nesse item | Cancelar a antiga primeiro |
+| `NO_PENDING_PROPOSAL` | 409 | Tentou accept/reject sem proposal pending | Re-fetch |
+| `CANNOT_ACCEPT_OWN_PROPOSAL` / `CANNOT_REJECT_OWN_PROPOSAL` | 403 | Tentou agir na própria proposal (precisa ser do oposto) | Esperar oposto |
+| `ALREADY_PROPOSED` | 409 | Já tem proposal pending — não pode criar outra | — |
+| `OFFER_NOT_NEGOTIABLE` | 409 | Oferta em estado final (completed, cancelled, rejected) | — |
+| `INVALID_PROPOSAL` | 422 | Counter-proposta inválida (ex: trade sem offered_item_id) | — |
+| `NO_PROPOSAL_HISTORY` | 404 | Histórico vazio (impossível na prática) | — |
+| `NOT_AUTHORIZED` | 403 | Não é offerer nem owner | — |
+| `INVALID_TRANSITION` | 409 | Tentou ação não permitida no estado atual | — |
+| `ALREADY_CONFIRMED` | 409 | Lado já confirmou | (mas confirm é idempotente) |
+| `ITEM_GONE` / `OFFERED_ITEM_GONE` | 410 | Item foi deletado entre create e confirm | Cancelar oferta |
+| `OFFERER_HAS_NO_COLLECTION` / `OWNER_HAS_NO_COLLECTION` | 422 | Receptor não tem coleção compatível pra acolher transfer | Backend tenta auto-criar; se falhar, criar manualmente |
+
+## Listing Ratings
+
+| Código | Status | Causa | Como resolver |
+|---|---|---|---|
+| `OFFER_NOT_FOUND` / `NOT_FOUND` | 404 | offerId inválido | — |
+| `OFFER_NOT_COMPLETED` | 422 | Tentou avaliar offer não-completed | Esperar transferência confirmar |
+| `NOT_AUTHORIZED` | 403 | Não é participante (offerer/owner) | — |
+| `WINDOW_EXPIRED` | 422 | Mais de 30 dias após completed | Janela fechou |
+| `ALREADY_RATED` | 409 | Já avaliou essa oferta (unique offer×rater) | Imutável — não dá pra refazer |
+
+## Chat
+
+| Código | Status | Causa | Como resolver |
+|---|---|---|---|
+| `NOT_FOUND` | 404 | Conversation/message/dm_request inexistente | — |
+| `FORBIDDEN` | 403 | Não é membro / sem role suficiente | — |
+| `NOT_FRIEND` | 400 | Tentou abrir DM com não-amigo | Use DM request |
+| `BLOCKED` | 403 | Há block em alguma direção | — |
+| `MEDIA_LIMIT_EXCEEDED` | 413 | Attachment excede 5MB ou >10 arquivos | — |
+
+## Reports
+
+| Código | Status | Causa | Como resolver |
+|---|---|---|---|
+| `TARGET_NOT_FOUND` | 404 | targetId não existe pro targetType | — |
+| `ALREADY_REPORTED` | 409 | Já denunciou esse target | — |
+| `CANNOT_REPORT_OWN` | 403 | Tentou denunciar próprio conteúdo | — |
+
+## Steam
+
+| Código | Status | Causa | Como resolver |
+|---|---|---|---|
+| `USER_NOT_FOUND` | 404 | — | — |
+| `STEAM_NOT_LINKED` | 400 | Tentou usar API sem vincular conta | `POST /integrations/steam/login` |
+| `STEAM_API_KEY_MISSING` | 400 | Sem `users.steam_api_key` | `PUT /integrations/steam/api-key` |
+| `STEAM_API_KEY_INVALID_FORMAT` | 422 | Key não tem 32 chars hex | Verifique no Steam dashboard |
+| `STEAM_ALREADY_LINKED_TO_OTHER_USER` | 409 | Conta Steam já é de outro user | — |
+| `STEAM_REPLACE_REQUIRES_UNLINK` | 409 | Tentou vincular outra Steam sem desvincular antes | `DELETE /integrations/steam/link` primeiro |
+| `STEAM_PROFILE_PRIVATE` | 422 | Steam profile não permite GetOwnedGames | Tornar perfil público |
+| `STEAM_AUTH_FAILED` | 502 | Steam API rejeitou (key inválida ou ban temporário) | Verificar key |
+| `IMPORT_NO_GAMES_SELECTED` | 400 | appIds vazio | Selecione pelo menos 1 |
+| `IMPORT_DESTINATION_REQUIRED` | 400 | Nem collectionId nem newCollectionName | Forneça um |
+| `IMPORT_INVALID_COLLECTION_NAME` | 400 | newCollectionName inválido | 1-100 chars |
+| `IMPORT_COLLECTION_NOT_FOUND` | 404 | collectionId inválido | — |
+| `IMPORT_COLLECTION_NOT_OWNED` | 403 | Coleção é de outro user | — |
+| `IMPORT_COLLECTION_NOT_GAMES_TYPE` | 400 | Coleção não é tipo `games` | — |
+| `IMPORT_ALREADY_IN_PROGRESS` | 409 | Há batch ativo do mesmo user | Aguardar concluir ou implementar cancel |
+
+## Notifications, Field Definitions, Posts genéricos
+
+| Código | Status | Onde |
+|---|---|---|
+| `NOT_FOUND` | 404 | Notification/post/comment inexistente |
+| `FORBIDDEN` | 403 | Não é dono da notification (tentou marcar lida de outro user) |
+| `SELF_REACTION` | 400 | Reagir ao próprio post bloqueado em alguns casos |
+
+## Erros de validação Zod (genéricos)
+
+Toda request com body/query/params inválidos retorna **400** com schema padrão:
+
+```json
+{
+  "statusCode": 400,
+  "error": "Bad Request",
+  "message": "querystring.limit must be number",
+  "code": "FST_ERR_VALIDATION"
+}
+```
+
+Frontend pode parsear `message` pra mostrar campo específico, ou tratar genérico.
+
+## Erros de servidor (5xx)
+
+| Status | Quando |
+|---|---|
+| 500 | Bug no código, problema de DB, integração externa fora |
+| 502 | Steam API/Google OAuth falhou downstream |
+| 503 | Manutenção / shutdown gracioso (não implementado hoje) |
+
+5xx **não devem ter código tipado** — são bugs ou indisponibilidades. Logs do backend são fonte da causa raiz.
+
+## Convenções para adicionar novo código
+
+1. Adicione no `*.controller.ts` em `STATUS_BY_CODE`
+2. Throw `ModuleError` com o code no service
+3. Documente aqui (PR no docs)
+4. Frontend trata em UI específico se for caso de UX particular (modal, redirect)
+
+Detalhes em [Convenções de erro](/docs/concepts/convencoes-erro) e [Tutorial: Adicionar novo endpoint](/docs/tutoriais/adicionar-endpoint).

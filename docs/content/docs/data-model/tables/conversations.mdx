@@ -1,0 +1,78 @@
+---
+title: conversations
+description: Conversas de chat — DM 1-1 ou grupo.
+---
+
+import Columns from '@/generated/data-model/tables/conversations/columns'
+import Fks from '@/generated/data-model/tables/conversations/fks'
+import Indexes from '@/generated/data-model/tables/conversations/indexes'
+import Constraints from '@/generated/data-model/tables/conversations/constraints'
+
+Container das mensagens de chat. Tipo determina semântica:
+- **`dm`** — DM 1-1, sempre 2 membros, criada quando amizade é aceita ou DM request é aceito
+- **`group`** — grupo com nome, descrição, capa; múltiplos membros com roles
+
+Conversas têm flag `is_temporary` que liga o modo "Snapchat-style" — mensagens são apagadas após X tempo de leitura por usuário (ver `conversation_members` e `messages`).
+
+## Colunas
+
+<Columns />
+
+## Funcionalidade dos campos
+
+- **`id`** — UUID, PK
+- **`type`** — `dm` ou `group`
+- **`name`** — texto livre. Obrigatório pra `group`; ignorado em `dm` (UI mostra nome do outro user).
+- **`description`** — opcional, livre. Só para grupos.
+- **`cover_url`** — capa do grupo (S3/MinIO).
+- **`created_by`** — quem criou. Set null em delete (preserva grupo se dono apaga conta).
+- **`is_temporary`** — modo ephemeral. Hoje per-conversation (não per-user); a flag per-user vive em `conversation_members.hidden_at`.
+- **`created_at` / `updated_at`** — managed.
+
+## Foreign keys
+
+<Fks />
+
+## Índices
+
+<Indexes />
+
+Sem índices secundários customizados. Lookups são por membership via `conversation_members`.
+
+## Constraints
+
+<Constraints />
+
+## DM 1-1 e amizade
+
+DMs são criadas automaticamente quando:
+- Uma amizade é aceita (`friendsService.acceptRequest` chama `chatGateway.linkFriendship`)
+- Um `dm_request` é aceito por user que não é amigo
+
+DMs entre não-amigos passam por **DM request** primeiro (ver [`dm_requests`](/docs/data-model/tables/dm_requests)).
+
+## Group permissions
+
+`conversation_members.permissions` é JSONB `{ can_send_messages: bool, can_send_files: bool }`. Usado pra moderação leve em grupos. Roles (`owner` | `admin` | `member`) determinam quem pode mudar essas permissions.
+
+## Conversa temporária
+
+Ao criar conversa com `is_temporary=true`:
+- Mensagens novas têm `is_temporary=true`
+- Cron `runTemporaryCleanupRead` deleta msgs lidas após período curto (per-user via `hidden_for_user_ids`)
+- Cron `runTemporaryCleanupTtl` deleta mensagens antigas (TTL absoluto, fallback)
+
+## Padrões de uso
+
+- **Criar DM** — `POST /chat/conversations { type: 'dm', otherUserId }` (ou auto-criada por amizade/dm_request)
+- **Criar grupo** — `POST /chat/groups { name, memberIds }` (criador vira `owner`)
+- **Update grupo** — `PUT /chat/groups/:id`
+- **Sair** — DELETE membro próprio (cascade simples no `conversation_members`)
+- **Apagar grupo** — apenas owner; cascade message + members
+
+## Tabelas relacionadas
+
+- [`conversation_members`](/docs/data-model/tables/conversation_members) — quem participa, com role
+- [`messages`](/docs/data-model/tables/messages) — mensagens
+- [`dm_requests`](/docs/data-model/tables/dm_requests) — pré-conversa entre não-amigos
+- [`users`](/docs/data-model/tables/users) — created_by

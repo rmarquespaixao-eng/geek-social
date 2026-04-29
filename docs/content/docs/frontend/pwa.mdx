@@ -1,0 +1,271 @@
+---
+title: PWA + Web Push
+description: Service worker, instalação como app, e push notifications via VAPID.
+---
+
+O Geek Social frontend é uma PWA — instalável como app nativo, funciona parcialmente offline, e recebe push notifications.
+
+## Setup com vite-plugin-pwa
+
+`vite.config.ts`:
+
+```ts
+import { VitePWA } from 'vite-plugin-pwa'
+
+export default defineConfig({
+  plugins: [
+    vue(),
+    tailwindcss(),
+    VitePWA({
+      registerType: 'autoUpdate',
+      includeAssets: ['favicon.svg', 'icons/*.png'],
+      manifest: {
+        name: 'Geek Social',
+        short_name: 'GeekSocial',
+        description: 'Rede social para gamers e colecionadores',
+        theme_color: '#1f2937',
+        background_color: '#ffffff',
+        display: 'standalone',
+        start_url: '/',
+        icons: [
+          { src: '/icons/icon-192.png', sizes: '192x192', type: 'image/png' },
+          { src: '/icons/icon-512.png', sizes: '512x512', type: 'image/png' },
+          { src: '/icons/icon-512-maskable.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+        ],
+      },
+      workbox: {
+        navigateFallback: '/index.html',
+        runtimeCaching: [
+          {
+            urlPattern: /^https:\/\/api\./,
+            handler: 'NetworkFirst',
+            options: { cacheName: 'api-cache' },
+          },
+        ],
+      },
+      devOptions: {
+        enabled: false,   // desliga PWA em dev pra não cachear build
+      },
+    }),
+  ],
+})
+```
+
+## Manifest
+
+`public/manifest.webmanifest` (gerado pelo plugin):
+
+```json
+{
+  "name": "Geek Social",
+  "short_name": "GeekSocial",
+  "icons": [...],
+  "display": "standalone",
+  "theme_color": "#1f2937"
+}
+```
+
+Browsers compatíveis (Chrome, Edge, Safari iOS, Firefox no mobile) mostram opção "Adicionar à tela inicial".
+
+## Service Worker
+
+Gerado pelo Workbox. Estratégias de cache:
+- **App shell** (HTML, CSS, JS) — `precache` (offline-first)
+- **API responses** — `NetworkFirst` (online primário, cache fallback)
+- **Imagens** — `CacheFirst` (cache primário, válido por X dias)
+
+`registerType: 'autoUpdate'` faz o SW se atualizar quando há nova versão. User vê reload automaticamente após hard refresh.
+
+## Web Push (VAPID)
+
+### 1. Permissão
+
+`shared/pwa/push.ts`:
+
+```ts
+export async function requestPushPermission(): Promise<boolean> {
+  if (!('Notification' in window)) return false
+
+  const permission = await Notification.requestPermission()
+  return permission === 'granted'
+}
+```
+
+Geralmente pedida **após uma ação do user** (ex: clicar "Ativar notificações" em settings) — pedir no boot é UX ruim e Chrome bloqueia.
+
+### 2. Subscribe
+
+```ts
+import { api } from '@/shared/http/api'
+
+export async function subscribeWebPush() {
+  const granted = await requestPushPermission()
+  if (!granted) return
+
+  const registration = await navigator.serviceWorker.ready
+  const subscription = await registration.pushManager.subscribe({
+    userVisibleOnly: true,
+    applicationServerKey: urlBase64ToUint8Array(import.meta.env.VITE_VAPID_PUBLIC_KEY),
+  })
+
+  // Manda subscription pro backend salvar
+  await api.post('/chat/push-subscriptions', {
+    endpoint: subscription.endpoint,
+    p256dh: arrayBufferToBase64(subscription.getKey('p256dh')),
+    auth: arrayBufferToBase64(subscription.getKey('auth')),
+  })
+}
+
+function urlBase64ToUint8Array(base64: string): Uint8Array {
+  const padding = '='.repeat((4 - base64.length % 4) % 4)
+  const b64 = (base64 + padding).replace(/-/g, '+').replace(/_/g, '/')
+  const raw = atob(b64)
+  return new Uint8Array([...raw].map(c => c.charCodeAt(0)))
+}
+```
+
+### 3. Recebimento (Service Worker)
+
+`public/sw.js` (ou parte do workbox config):
+
+```js
+self.addEventListener('push', (event) => {
+  if (!event.data) return
+
+  const payload = event.data.json()
+  const { title, body, icon, data } = payload
+
+  event.waitUntil(
+    self.registration.showNotification(title, {
+      body,
+      icon: icon || '/icons/icon-192.png',
+      badge: '/icons/badge.png',
+      data,
+      tag: data.type,        // dedupe: nova notif do mesmo tipo substitui anterior
+      renotify: false,
+    })
+  )
+})
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close()
+  const url = event.notification.data?.url ?? '/'
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window' }).then((clients) => {
+      // Se já tem aba aberta, foca; senão abre nova
+      const existing = clients.find(c => c.url.includes(self.location.origin))
+      if (existing) {
+        existing.navigate(url)
+        return existing.focus()
+      }
+      return self.clients.openWindow(url)
+    })
+  )
+})
+```
+
+### 4. Unsubscribe
+
+```ts
+export async function unsubscribeWebPush() {
+  const registration = await navigator.serviceWorker.ready
+  const subscription = await registration.pushManager.getSubscription()
+  if (!subscription) return
+
+  await api.delete(`/chat/push-subscriptions/${subscriptionIdLocal}`)
+  await subscription.unsubscribe()
+}
+```
+
+## Variáveis de ambiente
+
+```bash
+# .env
+VITE_VAPID_PUBLIC_KEY=BLD2...   # public key configurada no backend
+```
+
+`VAPID_PRIVATE_KEY` fica só no backend, nunca no frontend.
+
+Gerar par:
+```bash
+npx web-push generate-vapid-keys
+```
+
+## Limitações por plataforma
+
+| Plataforma | Push? | Notas |
+|---|---|---|
+| Chrome/Edge desktop | ✅ | Funciona perfeito |
+| Firefox desktop | ✅ | Funciona |
+| Safari desktop (16+) | ✅ | Suporte recente |
+| Chrome Android | ✅ | Funciona |
+| Safari iOS (16.4+) | ✅ | Apenas após app instalado como PWA |
+| Firefox Android | ✅ | Funciona |
+
+iOS é o mais restrito — exige instalação como PWA antes de aceitar push.
+
+## Detecção de instalação
+
+```ts
+import { ref, onMounted } from 'vue'
+
+const canInstall = ref(false)
+let deferredPrompt: any = null
+
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault()
+  deferredPrompt = e
+  canInstall.value = true
+})
+
+async function promptInstall() {
+  if (!deferredPrompt) return
+  deferredPrompt.prompt()
+  const { outcome } = await deferredPrompt.userChoice
+  if (outcome === 'accepted') canInstall.value = false
+  deferredPrompt = null
+}
+```
+
+Usar pra mostrar botão "Instalar app" custom em vez do prompt nativo do browser.
+
+## Update notification
+
+Quando tem nova versão deploy:
+
+```ts
+import { useRegisterSW } from 'virtual:pwa-register/vue'
+
+const { needRefresh, updateServiceWorker } = useRegisterSW({
+  onNeedRefresh() {
+    // Mostra toast "Nova versão disponível"
+  },
+})
+```
+
+User clica "Atualizar" → `updateServiceWorker()` recarrega com SW novo.
+
+## Offline support
+
+Hoje:
+- ✅ App shell offline (HTML/CSS/JS)
+- ⚠️ API requests offline = falham (NetworkFirst sem cache hit)
+- ❌ Sem queue de "ações offline" (postar mensagem offline → enviar quando voltar)
+
+Roadmap: implementar Background Sync API pra ações offline robustas.
+
+## Pendências
+
+- iOS PWA install prompt customizado
+- Background Sync pra mensagens offline
+- Periodic Sync (notificações fora do app aberto, sem push) — limitado em iOS
+- Custom install banner em desktop
+- Update banner amigável
+- Métricas de adoção (% users com push enabled)
+
+## Referências
+
+- [Conceito: Notificações](/docs/concepts/notificacoes) — fluxo end-to-end
+- [Tabela `push_subscriptions`](/docs/data-model/tables/push_subscriptions)
+- [Módulo Chat — push](/docs/modules/chat) — integração com `PushService`
+- Web Push spec: [RFC 8030](https://datatracker.ietf.org/doc/html/rfc8030)

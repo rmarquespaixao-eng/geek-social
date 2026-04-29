@@ -1,0 +1,56 @@
+---
+title: Migrations
+description: Como adicionar e aplicar migrations no schema do Geek Social.
+---
+
+Migrations são geradas a partir do schema TypeScript (Drizzle) e checked-in. O backend aplica todas as migrations pendentes no boot.
+
+## Estrutura
+
+```
+geek-social-api/
+└── src/shared/infra/database/migrations/
+    ├── 0000_init.sql
+    ├── 0001_friends.sql
+    ├── ...
+    ├── 0033_drop_keycloak.sql
+    ├── 0034_profile_solid_colors.sql
+    └── meta/
+        ├── _journal.json     ← lista ordenada das migrations
+        └── 0034_snapshot.json ← snapshot do schema após cada migration
+```
+
+A tabela `drizzle.__drizzle_migrations` no banco rastreia qual já foi aplicada.
+
+## Adicionar nova migration
+
+1. **Edite `schema.ts`** com a mudança desejada (nova coluna, nova tabela, novo índice, etc.)
+2. **Gere a migration**:
+   ```bash
+   npm run db:generate
+   ```
+   Drizzle compara o `schema.ts` atual com o último snapshot e cria um arquivo numerado novo.
+3. **Revise o SQL gerado** em `src/shared/infra/database/migrations/<NNNN>_<nome>.sql`
+4. **Edite se precisar** — caso comum: backfill de dados após uma `ADD COLUMN NOT NULL`. Drizzle por default faz dois steps (add nullable + default + remove nullable), mas se quiser dado complexo, edite o SQL à mão.
+5. **Comite o `.sql` + o `meta/_journal.json` + o `meta/<NNNN>_snapshot.json`** juntos
+6. **Sobe a app**: `npm run dev` aplica automaticamente
+
+## Aplicar migrations sem subir o app
+
+```bash
+npm run db:migrate
+```
+
+Útil quando você quer só o lado do banco (CI rodando seeds antes de testes, por exemplo).
+
+## Atenção em produção
+
+- **Nunca remova arquivo de migration já aplicado em prod** — o `__drizzle_migrations` quebra
+- **Mudanças destrutivas** (DROP COLUMN, DROP TABLE) precisam revisão extra e backup antes
+- **`ADD COLUMN NOT NULL` em tabela grande** pode bloquear a tabela; preferir 3-step (add nullable → backfill → set NOT NULL)
+- **Renomear coluna** Drizzle gera `DROP/ADD` — perde dados! Renomeie pelo SQL na mão (`ALTER TABLE ... RENAME COLUMN`)
+
+## Migrations marcantes do projeto
+
+- `0017–0020` — coleções com schema dinâmico, perfil expandido, chat temporário (sessão 2026-04-27)
+- `0027–0034` — vitrine completa (listings, offer_proposals, ratings imutáveis), Keycloak removido, cor sólida (sessão 2026-04-28)

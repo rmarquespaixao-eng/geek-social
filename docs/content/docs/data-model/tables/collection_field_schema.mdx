@@ -1,0 +1,54 @@
+---
+title: collection_field_schema
+description: Mapeamento entre coleção e os field_definitions visíveis nos itens.
+---
+
+import Columns from '@/generated/data-model/tables/collection_field_schema/columns'
+import Fks from '@/generated/data-model/tables/collection_field_schema/fks'
+import Indexes from '@/generated/data-model/tables/collection_field_schema/indexes'
+import Constraints from '@/generated/data-model/tables/collection_field_schema/constraints'
+
+Tabela de junção que define **quais campos customizados aparecem em itens de uma coleção específica**, em que **ordem**, e quais são **obrigatórios**.
+
+Cada row vincula uma `collection` a uma `field_definition`. Sem registro aqui, o campo não aparece no form de novo item nem na visualização. O usuário pode reordenar arrastando na UI (atualiza `display_order`).
+
+## Colunas
+
+<Columns />
+
+## Funcionalidade dos campos
+
+- **`id`** — UUID, PK
+- **`collection_id`** — FK pra `collections`, cascade delete (ao apagar coleção, schema some)
+- **`field_definition_id`** — FK pra `field_definitions`. **Sem cascade** — apagar uma definition do sistema quebra schemas que a usam (não fazemos isso; usar `is_hidden` em vez).
+- **`is_required`** — se `true`, item da coleção precisa preencher esse campo no save
+- **`display_order`** — inteiro pra ordenar na UI. Default 0; ordem ascendente. Pode haver empate; tiebreaker é `id` na practice mas não enforced.
+
+## Foreign keys
+
+<Fks />
+
+## Índices
+
+<Indexes />
+
+Não há índices secundários customizados. Lookups são por `collection_id` (poucos rows por coleção, ~5-15).
+
+## Constraints
+
+<Constraints />
+
+Não há unique constraint enforced em `(collection_id, field_definition_id)` — em teoria a app evita duplicação, mas DB não bloqueia. **Pendência**: adicionar `uniqueIndex` para evitar inconsistência.
+
+## Padrões de uso
+
+- **Adicionar campo a uma coleção** — INSERT
+- **Reordenar** — UPDATE display_order de múltiplos rows (transação)
+- **Marcar obrigatório** — UPDATE is_required
+- **Remover** — DELETE. Campos nos itens existentes não são removidos do JSONB `items.fields` (preserva dado), só somem da UI.
+
+## Tabelas relacionadas
+
+- [`collections`](/docs/data-model/tables/collections) — pai (cascade)
+- [`field_definitions`](/docs/data-model/tables/field_definitions) — referência
+- [`items`](/docs/data-model/tables/items) — onde os valores são guardados

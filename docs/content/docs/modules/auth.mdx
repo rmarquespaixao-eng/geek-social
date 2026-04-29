@@ -1,0 +1,219 @@
+---
+title: Auth
+description: Registro, login, OAuth com Google, refresh, recuperação e troca de senha.
+---
+
+## Visão geral
+
+O módulo **Auth** é responsável por toda a autenticação do Geek Social. Ele cobre:
+
+- Registro de conta com e-mail/senha
+- Login com e-mail/senha
+- Login social com Google (OpenID Connect)
+- Vínculo/desvínculo da conta Google em conta já existente
+- Rotação de tokens (access JWT curto + refresh longo via cookie HttpOnly)
+- Recuperação de senha por e-mail (forgot/reset)
+- Troca de senha autenticada e definição inicial de senha (para contas criadas via OAuth)
+
+## Entidades principais
+
+| Tabela | O que guarda |
+|---|---|
+| [`users`](/docs/data-model/tables/users) | Conta do usuário, senha hash, vínculo Google, flags (email_verified, privacy, etc.) |
+| [`refresh_tokens`](/docs/data-model/tables/refresh_tokens) | Tokens de refresh ativos (1 por sessão); rotacionados a cada `/auth/refresh` |
+| [`password_reset_tokens`](/docs/data-model/tables/password_reset_tokens) | Tokens single-use de reset, TTL 1h |
+
+## Endpoints
+
+Ver [API Reference — Auth](/docs/api/auth/login). 12 endpoints no total:
+
+| Endpoint | Auth | Resumo |
+|---|---|---|
+| `POST /auth/register` | público | Cria conta + emite tokens |
+| `POST /auth/login` | público | Email/senha → tokens |
+| `POST /auth/refresh` | cookie | Rotaciona o par de tokens |
+| `POST /auth/logout` | cookie | Revoga refresh e limpa cookie |
+| `POST /auth/forgot-password` | público | Dispara e-mail com token de reset |
+| `POST /auth/reset-password` | público | Consome token + nova senha |
+| `PUT /auth/change-password` | JWT | Senha atual + nova |
+| `POST /auth/set-password` | JWT | Define senha inicial (após OAuth) |
+| `GET /auth/google` | público | Inicia OAuth (redirect) |
+| `GET /auth/google/link` | JWT | Inicia vínculo (retorna URL) |
+| `GET /auth/google/callback` | — | Callback do Google (sempre redireciona) |
+| `DELETE /auth/google/link` | JWT | Desvincula Google |
+
+## Fluxos
+
+### 1. Registro com e-mail/senha
+
+<Mermaid chart={`sequenceDiagram
+  autonumber
+  participant U as Usuário
+  participant FE as Frontend
+  participant API as Backend (Fastify)
+  participant DB as PostgreSQL
+  participant SES as Email service
+
+  U->>FE: Preenche formulário
+  FE->>API: POST /auth/register {email, password, displayName}
+  API->>DB: SELECT * FROM users WHERE email = ?
+  alt Já existe
+    API-->>FE: 409 EMAIL_ALREADY_EXISTS
+  else Não existe
+    API->>API: bcrypt.hash(password, 12)
+    API->>DB: INSERT INTO users (...)
+    API->>DB: INSERT INTO refresh_tokens (hash, expiresAt)
+    API->>SES: sendEmailVerification(token)
+    API-->>FE: 201 {accessToken, user} + Set-Cookie refreshToken
+    FE->>FE: store accessToken in memory
+    FE-->>U: Logado, com aviso "verifique seu e-mail"
+  end`} />
+
+### 2. Login com e-mail/senha
+
+<Mermaid chart={`sequenceDiagram
+  autonumber
+  participant U as Usuário
+  participant FE as Frontend
+  participant API as Backend
+  participant DB as PostgreSQL
+
+  U->>FE: Preenche e-mail + senha
+  FE->>API: POST /auth/login {email, password}
+  API->>DB: SELECT * FROM users WHERE email = ?
+  alt User não existe ou sem passwordHash
+    API-->>FE: 401 INVALID_CREDENTIALS
+  else Existe
+    API->>API: bcrypt.compare(password, user.passwordHash)
+    alt Inválido
+      API-->>FE: 401 INVALID_CREDENTIALS
+    else OK
+      API->>DB: INSERT INTO refresh_tokens (...)
+      API-->>FE: 200 {accessToken, user} + Set-Cookie refreshToken
+    end
+  end`} />
+
+### 3. Login com Google OAuth
+
+<Mermaid chart={`sequenceDiagram
+  autonumber
+  participant U as Usuário
+  participant FE as Frontend
+  participant API as Backend
+  participant G as Google
+  participant DB as PostgreSQL
+
+  U->>FE: Clica "Entrar com Google"
+  FE->>API: redireciona pra GET /auth/google
+  API->>API: jwt.sign({mode:'login'}) (state)
+  API-->>U: 302 Redirect → accounts.google.com (state)
+  U->>G: Autoriza
+  G-->>API: 302 Redirect /auth/google/callback?code&state
+  API->>API: jwt.verify(state)
+  API->>G: authorizationCodeGrant(code)
+  G-->>API: tokens + claims
+  API->>G: fetchUserInfo(access_token)
+  G-->>API: {sub, email, name, picture}
+  API->>DB: SELECT * FROM users WHERE google_id = ?
+  alt Achou pelo google_id
+    Note over API: Já vinculado, login direto
+  else Não achou
+    API->>DB: SELECT * FROM users WHERE email = ?
+    alt Achou pelo email
+      Note over API: Vincula Google ao user existente
+      API->>DB: UPDATE users SET google_id = ?
+    else Não achou nem pelo email
+      Note over API: Cria conta nova com email_verified = true
+      API->>DB: INSERT INTO users (...)
+    end
+  end
+  API->>DB: INSERT INTO refresh_tokens
+  API-->>FE: 302 Redirect /auth/callback?status=...&token=jwt + Set-Cookie refreshToken
+  FE->>FE: extrai token da URL, salva
+  FE-->>U: Dashboard`} />
+
+### 4. Refresh token rotation
+
+<Mermaid chart={`sequenceDiagram
+  autonumber
+  participant FE as Frontend
+  participant API as Backend
+  participant DB as PostgreSQL
+
+  Note over FE: Access token expirou (15min)
+  FE->>API: POST /auth/refresh (cookie refreshToken)
+  API->>API: sha256(rawToken)
+  API->>DB: SELECT * FROM refresh_tokens WHERE token_hash = ?
+  alt Não encontrado ou expirado
+    API-->>FE: 401 (sessão expirada)
+    FE->>FE: limpa accessToken, redireciona /login
+  else Válido
+    API->>DB: DELETE FROM refresh_tokens WHERE token_hash = ?
+    API->>DB: SELECT * FROM users WHERE id = ?
+    API->>DB: INSERT INTO refresh_tokens (newHash, ...)
+    API-->>FE: 200 {accessToken} + Set-Cookie refreshToken (rotacionado)
+    FE->>FE: atualiza accessToken
+  end`} />
+
+### 5. Recuperação de senha (forgot + reset)
+
+<Mermaid chart={`sequenceDiagram
+  autonumber
+  participant U as Usuário
+  participant FE as Frontend
+  participant API as Backend
+  participant DB as PostgreSQL
+  participant SES as Email
+
+  U->>FE: "Esqueci minha senha", informa e-mail
+  FE->>API: POST /auth/forgot-password {email}
+  API->>DB: SELECT * FROM users WHERE email = ?
+  alt Existe
+    API->>API: gera token aleatório, sha256
+    API->>DB: INSERT INTO password_reset_tokens (hash, expiresAt: +1h)
+    API->>SES: sendPasswordResetEmail(rawToken)
+  else Não existe
+    Note over API: NÃO revela; sempre 200
+  end
+  API-->>FE: 200 {message: "Se o e-mail existir..."}
+  U->>U: Recebe e-mail, clica no link
+  U->>FE: Vai pra /auth/reset-password?token=...
+  U->>FE: Digita nova senha
+  FE->>API: POST /auth/reset-password {token, newPassword}
+  API->>API: sha256(token)
+  API->>DB: SELECT * FROM password_reset_tokens WHERE token_hash = ?
+  alt Inválido / expirado / já usado
+    API-->>FE: 400 INVALID_RESET_TOKEN
+  else OK
+    API->>API: bcrypt.hash(newPassword)
+    API->>DB: UPDATE users SET password_hash = ?
+    API->>DB: UPDATE password_reset_tokens SET used_at = now()
+    API->>DB: DELETE FROM refresh_tokens WHERE user_id = ?
+    Note over API: Revoga TODAS as sessões ativas — força re-login
+    API-->>FE: 200 {message}
+  end`} />
+
+## Eventos de socket
+
+O módulo Auth **não emite nem consome** eventos de socket diretamente — autenticação é HTTP. O socket separado (Socket.IO) recebe o JWT no handshake; ver [Realtime](/docs/concepts/realtime) (em breve).
+
+## Edge cases e regras especiais
+
+- **Refresh rotation cega** — todo `/auth/refresh` rotaciona o cookie. Replay de token antigo retorna 401. Se duas tabs disputarem refresh ao mesmo tempo, uma vai falhar com 401 e cair pro login — comportamento aceito como trade-off de segurança.
+- **Reset revoga tudo** — `/auth/reset-password` apaga TODOS os refresh tokens do usuário. Sessões em outros dispositivos caem pro login no próximo refresh. Isso é intencional pra cobrir caso de conta comprometida.
+- **`change-password` NÃO revoga sessões** — diferente do reset. Quem trocar senha continua logado em outros dispositivos. Use reset se quiser invalidar tudo.
+- **`forgot-password` é idempotente e silenciosa** — sempre retorna 200, mesmo com e-mail inexistente, pra não vazar quais contas existem (enumeration attack).
+- **OAuth state token JWT (5min)** — `/auth/google` assina um JWT curto com `mode` e (se `link`) `userId`. Callback verifica antes de aceitar. Inválido → `INVALID_STATE`.
+- **Vínculo automático por e-mail** — se o usuário já tem conta com aquele e-mail e usa Google pela primeira vez, a conta é vinculada automaticamente (modo `linked-login` na resposta).
+- **Avatar do Google** — copiado pra `users.avatar_url` no primeiro vínculo apenas se o usuário ainda não tem avatar próprio.
+- **Unlink Google sem senha bloqueia** — `DELETE /auth/google/link` falha com `PASSWORD_REQUIRED_BEFORE_UNLINK` (409) se o user não tiver `password_hash`. Use `POST /auth/set-password` antes.
+- **`set-password` única vez** — só permite se a conta ainda não tem senha (criada via OAuth). Falha com `PASSWORD_ALREADY_SET` (409) se já houver.
+- **Bcrypt cost 12** — fixo. Hash leva ~250ms; não trocar sem cuidado de migração.
+- **Refresh token armazenado como sha256** — DB nunca tem o token raw. Comparação faz sha256 do cookie e compara. Mesmo um dump de DB não revela tokens válidos.
+
+## Dependências entre módulos
+
+- **Middleware `authenticate`** (em `shared/middleware/`) é consumido por TODOS os outros módulos. Lê `Authorization: Bearer <jwt>`, verifica via `app.jwt.verify`, popula `request.user = { userId, email }`.
+- **`UserRepository`** — `auth.repository.ts` é o dono das tabelas `users`, `refresh_tokens`, `password_reset_tokens`. Outros módulos NÃO devem inserir/atualizar essas tabelas; usam `usersRepository` (read-only views) ou contracts.
+- **`emailService`** — `auth.service.ts` injeta um `IEmailService` (em dev, console adapter; em prod, SES). Mesmo padrão usado por outros módulos que mandam e-mail.
+- **Google OAuth opcional** — só registra rotas se `GOOGLE_OAUTH_ENABLED=true` e credenciais estão setadas. App funciona sem isso.

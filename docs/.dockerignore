@@ -1,0 +1,13 @@
+node_modules
+.next
+.source
+.env
+.env.*
+!.env.example
+.git
+.idea
+.vscode
+.claude
+.superpowers
+*.log
+.DS_Store

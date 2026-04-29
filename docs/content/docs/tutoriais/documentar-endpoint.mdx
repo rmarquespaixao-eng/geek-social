@@ -1,0 +1,297 @@
+---
+title: Como documentar um endpoint (enriquecer stub gerado)
+description: Template completo de prose para uma página de endpoint, indo além do auto-gen.
+---
+
+Stubs são gerados automaticamente por `npm run gen:endpoints`. Eles têm título + descrição + auto-gen de request/response/erros/exemplos. Mas pra ficar **realmente útil** (estilo do módulo Auth), precisa ser enriquecido manualmente.
+
+Esta página é o template a seguir.
+
+## Estrutura completa de uma página de endpoint
+
+```mdx
+---
+title: POST /endpoint
+description: Resumo curto
+---
+
+import Meta from '@/generated/api/<tag>/<slug>/meta'
+import Request from '@/generated/api/<tag>/<slug>/request'
+import Responses from '@/generated/api/<tag>/<slug>/responses'
+import Errors from '@/generated/api/<tag>/<slug>/errors'
+import Examples from '@/generated/api/<tag>/<slug>/examples'
+
+<Meta />
+
+[Descrição em prose — 2-4 parágrafos: pra que serve, contexto, semântica não-óbvia]
+
+## Quando chamar
+
+- [Cenário 1 — onde no fluxo de UI]
+- [Cenário 2]
+- [Quando NÃO chamar]
+
+## Request
+
+<Request />
+
+[Notas adicionais sobre validação, formato, edge cases nos params]
+
+## Response
+
+<Responses />
+
+[Notas sobre o response — significado de campos não-óbvios, headers especiais]
+
+## Erros
+
+<Errors />
+
+**Como resolver cada caso**:
+
+| Status | Código | Causa | Como resolver |
+|---|---|---|---|
+| ... | ... | ... | ... |
+
+## Exemplos
+
+<Examples />
+
+[Exemplos extras realistas — cURL com payload de verdade, resposta de sucesso completa]
+
+## Side effects
+
+- **DB**: [INSERTs/UPDATEs específicos]
+- **Cookies/Headers**: [Set-Cookie, etc.]
+- **E-mail**: [se manda algum]
+- **Notificações**: [tipos disparados, recipients]
+- **Eventos socket**: [emit:nome com payload]
+- **Jobs**: [enfileira no pg-boss]
+- **Cascades**: [efeitos transitivos]
+
+## Relacionados
+
+- [Conceito relacionado](#)
+- [Módulo](#)
+- [Endpoint upstream](#)
+- [Endpoint downstream](#)
+- [Tabela afetada](#)
+```
+
+## Detalhamento de cada seção
+
+### 1. Frontmatter
+
+```yaml
+---
+title: POST /auth/login
+description: Login com e-mail/senha
+---
+```
+
+`title` aparece como `<h1>` da página + na sidebar. **Use o método HTTP + path** pra clareza.
+
+`description` vai no `<meta description>` e na busca. Resumo curto, não markdown.
+
+### 2. Imports + `<Meta />`
+
+Não tocar. São auto-gerados; `<Meta />` renderiza badge HTTP method + path + auth requirement.
+
+### 3. Prose introdutória
+
+Logo após `<Meta />`. **2-4 parágrafos** que respondem:
+
+- O que esse endpoint faz?
+- Por que existe (vs alternativas)?
+- Quando usar (e quando NÃO usar)?
+- Semântica não-óbvia (idempotência, side effects de alto impacto, etc.)
+
+**Bom exemplo** (do `/auth/refresh`):
+
+> Lê o cookie HttpOnly `refreshToken`, valida contra `refresh_tokens.token_hash`, **deleta** o registro corrente, **insere** um novo, e retorna um novo access token + um novo cookie. Isso é a rotação clássica — cada refresh "queima" o token anterior.
+>
+> Use sempre que um request normal voltar `401`. O frontend deve interceptar globalmente: se 401, chamar `/auth/refresh`, e re-executar o request original com o novo access token.
+
+**Mau exemplo** (genérico):
+
+> Esse endpoint faz refresh do token.
+
+### 4. "Quando chamar"
+
+Lista bullets respondendo:
+- Em qual UI/feature do app
+- Com que frequência (1x, recorrente, on-demand)
+- O que NÃO chamar (anti-pattern comum)
+
+**Bom exemplo**:
+
+> - Quando um request retorna `401` por access token expirado
+> - Na inicialização do frontend (mount), pra restaurar sessão silenciosa
+> - Não precisa chamar antes de cada request "preventivamente"
+
+### 5. Request — `<Request />`
+
+Componente auto-gerado renderiza a tabela de body/query/params do schema Zod.
+
+Adicione **notas** abaixo:
+
+> **Validação**:
+> - `email`: Zod `.email()` rejeita formato inválido
+> - `password`: 8-100 chars
+>
+> **Headers obrigatórios**: `Authorization: Bearer <accessToken>` (sem ele middleware retorna 401 antes)
+
+### 6. Response — `<Responses />`
+
+Auto-gerado renderiza schemas por status.
+
+Adicione **notas**:
+
+> **Sobre o `accessToken`**: JWT 15min, claims `{ userId, email }`, bearer header.
+>
+> **Sobre o cookie `refreshToken`**: HttpOnly, Secure (prod), SameSite, etc.
+
+### 7. Erros — `<Errors />`
+
+Auto-gerado lista status + códigos do schema.
+
+**Crítico**: tabela "Como resolver" detalhando cada caso:
+
+```markdown
+| Status | Código | Causa | Como resolver |
+|---|---|---|---|
+| 401 | INVALID_CREDENTIALS | Email não existe OU senha não bate | Verifique. Se persistir, use reset. NÃO revele ao user qual dos casos |
+| 409 | DUPLICATE_PENDING_OFFER | Já tem oferta pendente nesse item | Cancelar a antiga primeiro |
+```
+
+**Inclua dicas anti-enumeration** se for caso (ex: erro genérico pra não revelar info).
+
+### 8. Exemplos — `<Examples />`
+
+Auto-gerado dá um cURL boilerplate.
+
+Adicione exemplo **realista de payload e resposta**:
+
+````markdown
+### Resposta de sucesso (200)
+
+```json
+{
+  "accessToken": "eyJhbGciOi...SIGNATURE",
+  "user": {
+    "id": "5f12abcd-...",
+    "email": "joe@example.com",
+    "displayName": "Joe Gamer"
+  }
+}
+```
+
+E no header `Set-Cookie`:
+
+```
+refreshToken=8a7bf4...64; Path=/; HttpOnly; SameSite=Lax; Expires=Mon, 06 May 2026 12:00:00 GMT
+```
+````
+
+### 9. Side effects
+
+**Lista bullets** dos efeitos colaterais. Quem lê precisa saber sem ler o código:
+
+```markdown
+## Side effects
+
+- **DB**: `INSERT INTO refresh_tokens (user_id, token_hash, expires_at, created_at)` — uma sessão nova
+- **Cookie**: setado no header de resposta
+- **Sem notificações** disparadas
+- **Sem eventos de socket** emitidos
+- **Sem jobs** enfileirados
+```
+
+Sempre liste os 5 tipos (DB, cookies/headers, e-mail, notif, socket, jobs) — mesmo que seja "Sem ...". Confirma ao leitor que não tem comportamento escondido.
+
+### 10. Relacionados
+
+Links pra:
+- **Conceito** que cobre o tema (autenticação, realtime, etc.)
+- **Módulo** correspondente (sequence diagrams, edge cases)
+- **Endpoints** que vêm antes/depois no fluxo
+- **Tabelas** afetadas
+
+```markdown
+## Relacionados
+
+- Conceito: [Autenticação](/docs/concepts/autenticacao) — esquema de tokens
+- Módulo: [Auth](/docs/modules/auth) — fluxo completo
+- Endpoint: [`POST /auth/refresh`](/docs/api/auth/refresh) — renovar sem re-login
+- Tabela: [`refresh_tokens`](/docs/data-model/tables/refresh_tokens)
+```
+
+## Anti-patterns ao documentar
+
+### ❌ Repetir o que o `<Request />` já mostra
+
+```markdown
+## Request
+
+<Request />
+
+O body precisa de `email` e `password`.   ← redundante
+```
+
+✅ Adicione **valor**: validação especial, formato esperado, edge case.
+
+### ❌ Errors sem "como resolver"
+
+```markdown
+## Erros
+
+<Errors />
+```
+
+✅ Sempre tabela com causa + resolução. Auto-gen lista códigos; valor humano é explicar.
+
+### ❌ Side effects vagos
+
+```markdown
+- Insere coisas no banco
+```
+
+✅ Liste especificamente: tabela, operação, condição.
+
+### ❌ Ignorar relacionados
+
+Página de endpoint isolada vira fóssil. Sempre conecte com módulo + tabela + endpoints próximos.
+
+## Como rodar gen sem perder seu trabalho
+
+```bash
+npm run gen:endpoints
+```
+
+Stubs que **já existem** (com seu enriquecimento) são preservados. Apenas `src/generated/...` é re-gerado. Os arquivos `.mdx` em `content/docs/api/` ficam intactos.
+
+## Como verificar antes de comitar
+
+```bash
+npm run dev
+# Abre /docs/api/<tag>/<slug>
+# Verifica visual: badge HTTP, tabelas geradas, prose, links
+```
+
+Build de produção (`npm run build`) detecta MDX inválido e links quebrados a alguns dos casos.
+
+## Priorização
+
+Não dá tempo de enriquecer 143 endpoints uniformemente. Priorize:
+
+1. **Endpoints críticos do flow principal** (login, register, criar item, criar offer, send message)
+2. **Endpoints com erros não-óbvios** (offers — `DUPLICATE_PENDING_OFFER`, etc.)
+3. **Endpoints com side effects altos** (delete-account, reset-password)
+4. **Endpoints comumente debugados** (refresh, dual-confirm)
+
+Os outros podem ficar no nível de auto-gen + descrição enxuta até serem necessários.
+
+## Referências
+
+- Página de exemplo bem documentada: [`POST /auth/login`](/docs/api/auth/login)
+- Filosofia da documentação: [Filosofia do projeto — princípio 15](/docs/intro/filosofia)

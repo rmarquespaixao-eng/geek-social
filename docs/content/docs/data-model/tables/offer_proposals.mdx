@@ -1,0 +1,83 @@
+---
+title: offer_proposals
+description: Rodadas de negociação dentro de uma offer (proposta inicial + counters).
+---
+
+import Columns from '@/generated/data-model/tables/offer_proposals/columns'
+import Fks from '@/generated/data-model/tables/offer_proposals/fks'
+import Indexes from '@/generated/data-model/tables/offer_proposals/indexes'
+import Constraints from '@/generated/data-model/tables/offer_proposals/constraints'
+
+Cada **rodada** de negociação dentro de uma offer é um row aqui. A primeira é criada junto com a offer (`item_offers`); counter-propostas adicionam novos rows. Apenas **uma** está `pending` por offer ao mesmo tempo (unique partial index).
+
+A offer "como um todo" (`item_offers.status`) só evolui pra `accepted` quando uma rodada vira `accepted`. Rejeição de rodada NÃO mata a offer — pode-se contra-propor.
+
+## Colunas
+
+<Columns />
+
+## Funcionalidade dos campos
+
+- **`id`** — UUID, PK
+- **`offer_id`** — FK pra `item_offers`. Cascade delete.
+- **`proposer_id`** — quem fez essa rodada. Identifica de quem é o turno: o LADO OPOSTO precisa responder. Cascade delete.
+- **`offered_price`** — preço proposto nessa rodada (para `buy`)
+- **`offered_item_id`** — item oferecido nessa rodada (para `trade`). Set null em delete.
+- **`message`** — texto livre opcional explicando a contra-proposta
+- **`status`** — enum: `pending` (esperando ação do oposto), `accepted` (aceita — offer evolui), `rejected` (rejeitada — fim da rodada, mas offer pode continuar), `superseded` (substituída por counter-proposta nova)
+- **`created_at` / `updated_at`** — managed.
+
+## Foreign keys
+
+<Fks />
+
+## Índices
+
+<Indexes />
+
+**Detalhes**:
+- **`offer_proposals_offer_idx`** — `(offer_id, created_at)`. Usado pra listar todas as rodadas de uma offer em ordem cronológica
+- **`offer_proposals_one_pending_uniq`** — partial unique em `offer_id WHERE status='pending'`. Garante semântica de "1 rodada ativa por vez"
+
+## Constraints
+
+<Constraints />
+
+## Estados e transições
+
+```
+       pending ──(accept)──→ accepted (offer.status → accepted; transação a confirmar)
+          │
+          ├──(reject)──→ rejected (final desta rodada)
+          │
+          └──(propose contraposta)──→ superseded (e nova proposal pending criada)
+```
+
+## Helpers de turno (frontend)
+
+A DTO `OfferWithDetails` carrega `latestProposal: { id, proposerId, status }`. UI usa pra decidir:
+
+- **`isMyTurn`** — `proposer_id !== currentUser.id` AND `status === 'pending'`
+- **`canAccept`** — `isMyTurn`
+- **`canReject`** — `isMyTurn` (rejeita rodada, não offer)
+- **`canPropose`** — `isMyTurn` (counter-propor)
+
+Se `proposer_id === currentUser.id`, o usuário está esperando — só pode cancelar a oferta inteira.
+
+## Backfill em migration
+
+A migration que adicionou essa tabela criou rows iniciais retroativos pra ofertas existentes — cada offer ganhou um proposal com os mesmos `offered_price`/`offered_item_id` e `proposer_id = offerer_id`, mantendo compatibilidade com o histórico.
+
+## Padrões de uso
+
+- **Insert inicial** — quando offer é criada
+- **Accept** — UPDATE `status='accepted'` — offer evolui
+- **Reject** — UPDATE `status='rejected'` — offer continua
+- **Counter-proposta** — UPDATE atual `status='superseded'` + INSERT novo `status='pending'` (transação)
+
+## Tabelas relacionadas
+
+- [`item_offers`](/docs/data-model/tables/item_offers) — pai (cascade)
+- [`users`](/docs/data-model/tables/users) — proposer (cascade)
+- [`items`](/docs/data-model/tables/items) — `offered_item_id` (set null)
+- [`notifications`](/docs/data-model/tables/notifications) — `counter_proposal_received`, `proposal_rejected`

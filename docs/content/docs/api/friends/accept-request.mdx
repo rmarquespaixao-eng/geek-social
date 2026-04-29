@@ -1,0 +1,41 @@
+---
+title: POST /friends/requests/{id}/accept
+description: Aceitar pedido de amizade
+---
+
+import Meta from '@/generated/api/friends/accept-request/meta'
+import Request from '@/generated/api/friends/accept-request/request'
+import Responses from '@/generated/api/friends/accept-request/responses'
+import Errors from '@/generated/api/friends/accept-request/errors'
+import Examples from '@/generated/api/friends/accept-request/examples'
+
+<Meta />
+
+UPDATE status=accepted. Dispara notificação friend_accepted, vincula chat 1-1 (linkFriendship no socket gateway), e emit conversation:refresh.
+
+## Request
+
+<Request />
+
+## Response
+
+<Responses />
+
+## Erros
+
+<Errors />
+
+{/* TODO: para cada código de erro acima, explique a causa e como resolver. */}
+
+## Exemplos
+
+<Examples />
+
+
+## Side effects
+
+{/* TODO: eventos de socket emitidos, notificações disparadas, jobs enfileirados, cascades. */}
+
+## Relacionados
+
+{/* TODO: links pra módulo, conceitos, endpoints relacionados. */}

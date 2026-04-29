@@ -1,0 +1,243 @@
+---
+title: Como adicionar um novo field type para items
+description: Estender o catálogo de field types além de text/number/date/boolean/select/money.
+---
+
+Field types do Geek Social hoje: `text`, `number`, `date`, `boolean`, `select`, `money`. Adicionar um novo (ex: `multi_select`, `url`, `rating_5stars`, `email`, `markdown`) envolve mudanças em **schema enum + validação + UI**.
+
+## Exemplo
+
+Vamos adicionar `multi_select` — array de valores escolhidos de uma lista (diferente de `select` que é 1 valor único).
+
+## 1. Adicione no enum
+
+`src/shared/infra/database/schema.ts`:
+
+```ts
+export const fieldTypeEnum = pgEnum('field_type', [
+  'text',
+  'number',
+  'date',
+  'boolean',
+  'select',
+  'money',
+  'multi_select',  // NOVO
+])
+```
+
+## 2. Migration
+
+```bash
+npm run db:generate
+```
+
+Gera:
+
+```sql
+ALTER TYPE "field_type" ADD VALUE 'multi_select';
+```
+
+(Mesma ressalva: PG \< 12 fora de transação.)
+
+## 3. Atualize Zod schema
+
+`src/modules/field-definitions/field-definitions.schema.ts`:
+
+```ts
+export const createFieldDefinitionSchema = z.object({
+  name: z.string().min(1).max(100),
+  fieldType: z.enum(['text', 'number', 'date', 'boolean', 'select', 'money', 'multi_select']),  // NOVO
+  selectOptions: z.array(z.string().min(1)).min(1).optional(),
+}).superRefine((data, ctx) => {
+  if (data.fieldType === 'select' || data.fieldType === 'multi_select') {  // NOVO
+    if (!data.selectOptions || data.selectOptions.length === 0) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'selectOptions obrigatório', path: ['selectOptions'] })
+    }
+  }
+  // ... resto
+})
+```
+
+## 4. Atualize validação no item.service
+
+Onde itens validam `fields` contra schema, lidar com novo tipo:
+
+`src/modules/items/items.service.ts`:
+
+```ts
+private validateField(value: unknown, def: FieldDefinition) {
+  switch (def.fieldType) {
+    case 'text':
+      if (typeof value !== 'string') throw new ItemsError('INVALID_FIELD_TYPE')
+      break
+    case 'number':
+      if (typeof value !== 'number') throw new ItemsError('INVALID_FIELD_TYPE')
+      break
+    case 'select':
+      if (typeof value !== 'string') throw new ItemsError('INVALID_FIELD_TYPE')
+      if (!def.selectOptions?.includes(value)) throw new ItemsError('INVALID_FIELD_VALUE')
+      break
+    case 'multi_select':  // NOVO
+      if (!Array.isArray(value)) throw new ItemsError('INVALID_FIELD_TYPE')
+      if (value.some(v => typeof v !== 'string')) throw new ItemsError('INVALID_FIELD_TYPE')
+      const opts = def.selectOptions ?? []
+      if (value.some(v => !opts.includes(v))) throw new ItemsError('INVALID_FIELD_VALUE')
+      break
+    // ... outros
+  }
+}
+```
+
+## 5. Atualize seed de campos do sistema (opcional)
+
+Se quiser oferecer um default (ex: "Tags" multi_select genérico):
+
+`src/shared/infra/database/seeds/field-definitions.seed.ts`:
+
+```ts
+{
+  name: 'Tags',
+  fieldKey: 'tags',
+  fieldType: 'multi_select' as const,
+  collectionType: null,  // disponível em todas as coleções
+  selectOptions: ['Favorito', 'Quero zerar', 'Multiplayer', 'Co-op', 'Single-player'],
+  isSystem: true,
+  userId: null,
+},
+```
+
+## 6. Frontend — input component
+
+`src/components/fields/MultiSelectInput.vue` (novo):
+
+```vue
+<template>
+  <div class="multi-select">
+    <label>{{ definition.name }}</label>
+    <div class="checkboxes">
+      <label v-for="opt in definition.selectOptions" :key="opt">
+        <input type="checkbox"
+               :value="opt"
+               :checked="modelValue?.includes(opt)"
+               @change="toggle(opt)" />
+        {{ opt }}
+      </label>
+    </div>
+  </div>
+</template>
+
+<script setup>
+const props = defineProps<{ definition: FieldDefinition; modelValue?: string[] }>()
+const emit = defineEmits<{ 'update:modelValue': [string[]] }>()
+
+function toggle(opt: string) {
+  const current = props.modelValue ?? []
+  emit('update:modelValue', current.includes(opt) ? current.filter(v => v !== opt) : [...current, opt])
+}
+</script>
+```
+
+E no roteador de field types:
+
+```vue
+<!-- ItemFieldsForm.vue -->
+<TextInput v-if="def.fieldType === 'text'" ... />
+<NumberInput v-else-if="def.fieldType === 'number'" ... />
+<SelectInput v-else-if="def.fieldType === 'select'" ... />
+<MultiSelectInput v-else-if="def.fieldType === 'multi_select'" ... />
+<!-- etc -->
+```
+
+## 7. Frontend — display component
+
+Mostrar um array de chips em vez de string única:
+
+```vue
+<MultiSelectDisplay v-else-if="def.fieldType === 'multi_select'"
+                    :value="item.fields[def.fieldKey] ?? []"
+                    :definition="def" />
+```
+
+## 8. Filtros na listagem
+
+`POST /collections/:id/items?field_<key>=Favorito` hoje filtra exact match. Para multi_select, pode querer:
+
+- **Contains (qualquer)**: `field_tags=Favorito` retorna items com Favorito (entre outros)
+- **Contains all**: `field_tags=Favorito,Multiplayer` retorna items que têm AMBOS
+
+No `items.service.list`, ao construir WHERE:
+
+```ts
+if (def.fieldType === 'multi_select') {
+  const values = filterValue.split(',')
+  // Contains any:
+  conditions.push(sql`fields->'${def.fieldKey}' ?| array[${values.map(v => sql`${v}`)}]`)
+  // OU contains all:
+  // conditions.push(sql`fields->'${def.fieldKey}' ?& array[...]`)
+}
+```
+
+`?|` e `?&` são operadores de containment do JSONB do PG.
+
+## 9. Atualize a doc
+
+- [Tabela `field_definitions`](/docs/data-model/tables/field_definitions) — adiciona `multi_select` na lista de tipos
+- [Módulo Field Definitions](/docs/modules/field-definitions) — adiciona explicação do novo tipo
+- [Seeds](/docs/data-model/seeds) — se adicionou seed novo
+
+## 10. Test
+
+```ts
+describe('multi_select validation', () => {
+  it('aceita array de valores válidos', () => {
+    expect(() => validateField(['Favorito', 'Multiplayer'], def)).not.toThrow()
+  })
+  it('rejeita valor não-array', () => {
+    expect(() => validateField('Favorito', def)).toThrow('INVALID_FIELD_TYPE')
+  })
+  it('rejeita valor fora das opções', () => {
+    expect(() => validateField(['Inexistente'], def)).toThrow('INVALID_FIELD_VALUE')
+  })
+})
+```
+
+## Outros tipos potenciais
+
+Receita semelhante:
+
+| Tipo | Validação no backend | Input no frontend |
+|---|---|---|
+| `url` | `z.string().url()` | input com mask + preview |
+| `email` | `z.string().email()` | input com validação inline |
+| `markdown` | `z.string().max(N)` | textarea + preview com `marked` |
+| `rating_5stars` | `z.number().int().min(1).max(5)` | clicáveis ⭐ |
+| `color` | regex `#RRGGBB` | input type=color |
+| `image_url` | URL S3 da app + thumbnail | uploader específico |
+| `geo_point` | `{ lat, lng }` JSONB | mapa com pin |
+
+Cada um:
+- Adicione no `fieldTypeEnum`
+- Migration ALTER TYPE
+- Validação Zod + service
+- Componente input + display
+- Documentação
+
+## Checklist
+
+- [ ] Enum atualizado em `schema.ts`
+- [ ] Migration `ADD VALUE` aplicada
+- [ ] Zod schema aceita o novo tipo
+- [ ] `validateField` no items.service trata o tipo
+- [ ] Seed (se aplicável)
+- [ ] Componente Input no frontend
+- [ ] Componente Display no frontend
+- [ ] Roteamento por type nos forms/views
+- [ ] Filtros na listagem suportam o tipo
+- [ ] Test no items.service
+- [ ] Doc: `field_definitions.mdx`, `modules/field-definitions.mdx`
+
+## Referências
+
+- [Módulo Field Definitions](/docs/modules/field-definitions)
+- [Tabela `field_definitions`](/docs/data-model/tables/field_definitions)
+- [Como adicionar field type](/docs/tutoriais/adicionar-field-type) (você está aqui)

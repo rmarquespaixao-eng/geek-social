@@ -1,0 +1,77 @@
+---
+title: Setup local
+description: Subir o stack completo para desenvolvimento.
+---
+
+## Pré-requisitos
+
+- Node.js 20+ e npm
+- Docker e Docker Compose
+- Git com chave SSH (configurada para `gitea.homelab-cloud.com:2222`)
+
+## 1. Infraestrutura compartilhada (`local-env-dev`)
+
+Sobe Postgres, MinIO e Keycloak — usados por vários projetos.
+
+```bash
+cd ~/workspace_ssh/local-env-dev
+docker compose up -d
+```
+
+| Serviço | Porta | Credenciais |
+|---|---|---|
+| PostgreSQL | 5432 | `dev` / `dev` |
+| MinIO API | 9000 | (anônimo no dev) |
+| MinIO Console | 9001 | `minioadmin` / `minioadmin` |
+| Keycloak | 8080 | `admin` / `admin` |
+
+Crie o database do Geek Social uma vez:
+
+```bash
+docker exec -it dev-postgres psql -U dev -c "CREATE DATABASE geek_social;"
+```
+
+## 2. Backend (`geek-social-api`)
+
+```bash
+cd ~/workspace_ssh/geek-social-api
+cp .env.example .env  # ajuste se precisar
+npm install
+npm run db:migrate    # aplica migrations
+npm run dev           # sobe em http://localhost:3003
+```
+
+A primeira execução roda automaticamente as migrations e seeds. Logs aparecem no console.
+
+## 3. Frontend (`geek-social-frontend`)
+
+```bash
+cd ~/workspace_ssh/geek-social-frontend
+cp .env.example .env  # aponta pra http://localhost:3003
+npm install
+npm run dev           # sobe em http://localhost:5173
+```
+
+## 4. Documentação (`geek-social-docs`) — este portal
+
+```bash
+cd ~/workspace_ssh/geek-social-docs
+npm install
+npm run dev           # sobe em http://localhost:3000
+```
+
+Para gerar/atualizar as páginas auto-geradas (API ref e tabelas do banco):
+
+```bash
+# 1. No backend, exporta os artifacts:
+cd ~/workspace_ssh/geek-social-api && npm run export:all
+
+# 2. No docs, sincroniza e re-gera:
+cd ~/workspace_ssh/geek-social-docs && npm run sync && npm run gen
+```
+
+## Troubleshooting
+
+- **`ECONNREFUSED` no Postgres** — confirme que `dev-postgres` está saudável: `docker ps | grep postgres`. Se não, `docker compose up -d` no `local-env-dev`.
+- **403 em URLs do MinIO** — `STORAGE_PUBLIC_URL` no `.env` do backend precisa incluir o bucket: `http://localhost:9000/geek-social-media`.
+- **Variáveis de ambiente inválidas** — o backend valida com Zod e lista os campos com problema. Veja `src/config/env.ts` para o schema.

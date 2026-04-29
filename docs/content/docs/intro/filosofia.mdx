@@ -1,0 +1,211 @@
+---
+title: Filosofia do projeto
+description: Princípios que guiam decisões de código e arquitetura no Geek Social.
+---
+
+Estes são os princípios não-negociáveis do projeto. Cada feature, refator ou decisão de arquitetura passa por eles. Documentar a filosofia explicitamente é tão importante quanto documentar a API — quem entende os "porquês" toma decisões coerentes sem precisar consultar a cada commit.
+
+## 1. Zero débito técnico
+
+**Regra:** fazer certo agora, sem "v1 simples + melhora depois".
+
+**Por quê:** "depois nunca é retomado." Atalhos viram permanentes. O custo de fazer certo da primeira vez é quase sempre menor que o custo composto de manter o atalho + fazer certo depois.
+
+**Como aplicar:**
+- Estender contratos quando necessário em vez de criar campos hacky
+- Refatorar nomes/estruturas durante o trabalho, não em ticket separado
+- Se o spec original tinha um buraco, fechar antes de implementar — não depois
+- Migrations completas (incluindo backfills) em vez de "depois o cron limpa"
+
+**Exemplos no código:**
+- Sessão 2026-04-28: `items.availability` foi MOVIDO pra `listings` em uma migration única (0027), com backfill — não viramos "items continua tendo availability mas listings também". Refator completo.
+- `errorResponseSchema` tipado em vez de mensagens em PT — quem precisa traduzir traduz no client.
+- `offer_proposals` tabela nova com unique partial index ao invés de "campos extras em item_offers" — modelagem correta da semântica de rodadas.
+
+## 2. DRY ruthlessly — reaproveitar tudo
+
+**Regra:** antes de criar QUALQUER coisa (componente, service, endpoint, schema, query, utilitário), buscar similar primeiro. Vale frontend E backend.
+
+**Por quê:** duplicação é a fonte primária de bug. Mudança em um lugar não propaga, divergência se acumula, comportamento fica inconsistente.
+
+**Como aplicar:**
+- Variantes via prop/slot/parâmetro, **nunca** copy-paste
+- Se "quase igual a X mas com diferença Y", refatorar X pra aceitar Y como prop
+- Service compartilhado em vez de "cada module tem o seu storage helper"
+- Hooks/composables genéricos antes de duplicar lógica em components
+
+**Exemplos no código:**
+- `HttpClient` shared no frontend — injeção automática de Bearer + tratamento de 401 → logout. Todos os módulos usam.
+- `S3Adapter` único, injetado em quem precisa (users, posts, chat, collections).
+- `STATUS_BY_CODE` pattern compartilhado entre offers/listings/listing-ratings — mesmo formato de mapeamento error → HTTP.
+- `ItemDetail` refatorado em Content/Modal/View pra reusar a renderização entre 3 contextos diferentes.
+
+## 3. Self-hosted, open-source, sem custo recorrente
+
+**Regra:** zero dependências de SaaS pago. Tudo que rodamos roda no nosso VPS.
+
+**Por quê:** controle total + sem surpresas de billing + privacidade real + projeto pessoal sem fluxo de receita pra justificar custos mensais.
+
+**Como aplicar:**
+- Banco: PostgreSQL (não Supabase / Firebase)
+- Storage: MinIO em dev, S3 ou MinIO em prod (não Cloudinary / Uploadcare)
+- Email: SES OU Console adapter local (não SendGrid / Postmark)
+- OAuth: Google direto via `openid-client` (não Auth0 / Clerk)
+- Push: Web Push VAPID self-managed (não OneSignal)
+- Search nas docs: Orama embedado (não Algolia)
+- Documentação: Fumadocs self-host (não Mintlify SaaS)
+
+**Tradeoffs aceitos:**
+- Mais código de infra por nossa conta — mas o stack é todo standard
+- Sem CDN global premium — Cloudflare grátis na frente resolve
+
+## 4. Tipagem forte, validação no boundary
+
+**Regra:** Zod nas portas (entrada de API, env, contratos repository), TypeScript em todo o resto. Nunca `any` sem comentário justificando.
+
+**Por quê:** o custo de tipos certos é amortizado em refactors confiáveis. `any` apaga garantias propagadas.
+
+**Como aplicar:**
+- `*.schema.ts` por módulo com Zod schemas que viram inputs + types
+- `fastify-type-provider-zod` valida body/query/params automaticamente
+- `env.ts` valida `process.env` no boot (`safeParse + exit 1` se inválido)
+- Repository contracts em `shared/contracts/` antes da implementação concreta — testáveis e injetáveis
+
+**Exemplos:**
+- `auth.schema.ts` — registerSchema, loginSchema, etc., reutilizados no controller via `z.infer`
+- `errorResponseSchema` compartilhado entre rotas
+- `getTableConfig` do Drizzle pra extrair metadata sem string magic
+
+## 5. Erros tipados com `SCREAMING_SNAKE_CASE`
+
+**Regra:** API retorna `{ "error": "CODIGO_TIPADO" }` em todos os 4xx. Cliente compara códigos, nunca strings de mensagem.
+
+**Por quê:** mensagens mudam (i18n, refator de copy). Códigos são contratos estáveis.
+
+**Como aplicar:**
+- Service throws `XXXError extends Error` com `code` como propriedade
+- Controller mapeia via `STATUS_BY_CODE` → status HTTP + envia `{ error: e.code }`
+- Frontend usa switch case nos códigos pra reagir (modal específico, redirect, retry)
+
+Detalhes em [Convenções de erro](/docs/concepts/convencoes-erro). Catálogo em [Códigos de erro](/docs/reference/codigos-erro).
+
+## 6. Privacidade granular
+
+**Regra:** privacy não é flag única no user; é granular por feature.
+
+**Como aplicar:**
+- `users.privacy` (default do perfil)
+- `collections.visibility` (independente)
+- `posts.visibility` (por post)
+- `users.show_presence` / `show_read_receipts` (chat)
+- DM requests entre não-amigos
+- Bloqueio assimétrico cascateado
+- Reports anônimos pro target
+
+**Por quê:** usuários têm contexto diferente por área. Quem quer perfil público pode querer postar `friends_only` esporadicamente; quem aceita ver presence em geral pode mutar amigos específicos. Privacy é UX, não toggle binário.
+
+## 7. Imutabilidade onde aplicável
+
+**Regra:** dados que afetam reputação ou histórico não têm UPDATE/DELETE.
+
+**Como aplicar:**
+- `listing_ratings` — sem PATCH/DELETE no backend
+- `messages.deleted_at` é soft delete (preserva pra auditoria interna se for o caso, hide pra UX)
+- `password_reset_tokens.used_at` em vez de DELETE — preserva auditoria
+
+**Por quê:** sem isso, hostage situations ("ou apaga sua review ou não te respondo nas próximas") tornam a feature inútil. Imutabilidade tira a alavanca de pressão.
+
+## 8. Quebra de circular deps via setters
+
+**Regra:** quando A depende de B e B depende de A, NÃO faça import circular. Injete via setter explícito após instanciação.
+
+**Como aplicar:**
+- `notificationsService.setEmitter((userId, notif) => chatGateway.emitNotification(userId, notif))`
+- `listingsService.setOffersIntegration(offersRepository, notificationsService)`
+
+**Por quê:** import circular quebra silenciosamente em runtime (ordem de carregamento), e impossibilita refator/teste isolado.
+
+## 9. `notifySafe` — efeitos colaterais não derrubam fluxo principal
+
+**Regra:** disparos de notificação, push, socket emit usam `.catch(() => {})` quando são side effects.
+
+**Como aplicar:**
+```ts
+notificationsService.notify({...}).catch(() => {})
+```
+
+**Por quê:** o usuário conseguiu postar — falha de notif não pode jogar 500 e desfazer o post. A notificação é "best-effort"; o estado de DB persistido é a fonte de verdade.
+
+## 10. Realtime + persistência: dual-channel
+
+**Regra:** todo evento socket também persiste em DB. Cliente offline não perde nada.
+
+**Como aplicar:**
+- Notification: INSERT em `notifications` + emit `notification:new`. User offline pega na próxima `GET /notifications`
+- Mensagem: INSERT em `messages` + emit `message:new`. User offline pega via `GET /chat/conversations/:id/messages`
+- Push (Web Push) é canal extra além do socket
+
+**Por quê:** socket é entrega; DB é fonte de verdade. Confiar só em socket = bugs sutis "às vezes não chega".
+
+## 11. Migrations completas, sempre forward
+
+**Regra:** schema.ts → drizzle-kit generate → migration .sql checkin. Nunca editar migration já merged.
+
+**Como aplicar:**
+- Geradas + revisadas + commitadas com snapshot.json + journal.json
+- Backfill incluído na própria migration quando ADD COLUMN NOT NULL com default não basta
+- `drizzle.__drizzle_migrations` no banco rastreia o que já rodou
+- Mudanças destrutivas (DROP) revisadas com extra-cuidado
+
+Detalhes em [Migrations](/docs/data-model/migrations).
+
+## 12. Convenções de naming consistentes
+
+**Regra:** `snake_case` no DB, `camelCase` em TypeScript, mapeamento Drizzle no meio.
+
+**Como aplicar:**
+- `users.password_hash` (DB) ↔ `users.passwordHash` (TS)
+- Identificadores Zod `*Schema`, types via `z.infer<typeof xxxSchema>`
+- Operations IDs `module_action` (snake) → file slug `action` (kebab)
+
+**Por quê:** SQL é case-insensitive; convenções consistentes evitam bugs silenciosos em queries com `sql\`...\``.
+
+## 13. Feature flags — princípio futuro (planejado)
+
+**Plano:** features novas atrás de flags pra rollout gradual + killswitch.
+
+**Status atual:** ainda não implementado. Anotar `TODO: feature flag` em features novas até a infra existir. Escolha futura: GrowthBook, Unleash, ou rollar próprio em `feature_flags` table.
+
+**Por quê:** experimentar / rollback sem deploy. Crítico em produção.
+
+## 14. Rust Token Killer (RTK) no fluxo de dev
+
+**Ferramenta:** wrapper de CLI que reduz tokens em ~60-90% de operações dev (git, npm, etc.).
+
+**Status:** instalado e ativo via hook do Claude Code — transparente.
+
+**Por quê:** sessões longas em projetos com muitos arquivos consomem tokens linearmente em comandos repetitivos. RTK comprime sem perder informação útil.
+
+## 15. Documentação como código
+
+**Regra:** este portal é parte do projeto. Mudanças relevantes geram update.
+
+**Como aplicar:**
+- API Reference auto-gerada do OpenAPI + enriquecimento manual
+- Schema do banco auto-gerado + prose manual
+- Páginas de módulo manual (sequence diagrams Mermaid + edge cases + deps)
+- Stubs gerados preservam edits manuais entre regenerações
+- Pipeline: backend exporta artifacts → docs sincroniza → npm run gen
+
+Sem isso, a documentação vira fóssil. Com isso, o ciclo "mudei API → docs já tá errada" dura ~5 minutos.
+
+---
+
+## Os "anti-princípios" — coisas que NÃO fazemos
+
+- **Soft delete universal** — só onde faz sentido (messages, password_reset_tokens). Em users, é hard delete cascateado.
+- **Microsserviços prematuros** — monolito modular Fastify. Se um módulo precisar escalar isolado, refatora pra serviço naquele momento.
+- **GraphQL** — REST + tipagem forte resolve. Custo cognitivo do GraphQL não justifica em projeto desse tamanho.
+- **ORM mágica** — Drizzle é "SQL builder com tipos", não Active Record. Queries explícitas, performance previsível.
+- **Auto-refactor de mensagens em PT** — algumas rotas Auth ainda retornam `"E-mail já cadastrado"` em vez de código tipado. É débito conhecido, não atalho. Roadmap pra refator.
+- **Frameworks de UI design system de SaaS pago** — frontend usa Tailwind + componentes próprios. Docs usa Fumadocs (open-source).

@@ -1,0 +1,82 @@
+---
+title: message_attachments
+description: Anexos de mensagens (imagem, áudio, vídeo, arquivo) com metadata.
+---
+
+import Columns from '@/generated/data-model/tables/message_attachments/columns'
+import Fks from '@/generated/data-model/tables/message_attachments/fks'
+import Indexes from '@/generated/data-model/tables/message_attachments/indexes'
+import Constraints from '@/generated/data-model/tables/message_attachments/constraints'
+
+Mídia anexada a mensagens de chat. Suporta:
+- **Imagens** — `mime_type: image/*`, `thumbnail_url` gerado por sharp
+- **Áudio** — `mime_type: audio/*`, `duration_ms` + `waveform_peaks` (array de amplitudes pra desenhar onda)
+- **Vídeo** — `mime_type: video/*`, `thumbnail_url` (frame extraído via ffmpeg) + `duration_ms`
+- **Arquivo** — qualquer `mime_type`, `filename` preserva nome original
+
+`message_id` é **opcional** (nullable). Permite cenários onde o upload acontece antes da mensagem (ex: tela de envio com preview); a mensagem é criada depois e o attachment vinculado.
+
+## Colunas
+
+<Columns />
+
+## Funcionalidade dos campos
+
+- **`id`** — UUID, PK
+- **`message_id`** — FK pra `messages`. **Nullable** + cascade delete.
+- **`uploaded_by`** — quem uploadou. Cascade delete.
+- **`url`** — URL S3/MinIO (path-style)
+- **`filename`** — nome original do arquivo (informativo, sem normalização)
+- **`mime_type`** — Content-Type detectado
+- **`size_bytes`** — tamanho em bytes
+- **`display_order`** — pra galerias com múltiplos anexos
+- **`duration_ms`** — pra áudio/vídeo. NULL pra imagem/arquivo.
+- **`waveform_peaks`** — JSONB array de números 0-100. Apenas pra áudio. Frontend desenha onda visual.
+- **`thumbnail_url`** — versão reduzida pra grid (imagem/vídeo)
+
+## Foreign keys
+
+<Fks />
+
+## Índices
+
+<Indexes />
+
+Sem índice secundário; lookups são por `message_id` (poucos anexos por msg) ou `uploaded_by` (admin/auditoria, raro).
+
+## Constraints
+
+<Constraints />
+
+## Pipeline de upload
+
+```
+[Cliente envia multipart]
+         ↓
+multer/fastify-multipart parser
+         ↓
+Validate mime + size (limite 5MB por file no env atual)
+         ↓
+Se imagem: sharp gera thumbnail
+Se áudio: ffmpeg extrai duração + computa peaks
+Se vídeo: ffmpeg extrai duração + frame thumbnail
+         ↓
+S3Adapter.put(file) + S3Adapter.put(thumbnail)
+         ↓
+INSERT message_attachments com URLs e metadata
+```
+
+## Limpeza de S3
+
+Mesmo problema dos `post_media`: cascade delete remove DB row, mas **arquivos S3 ficam órfãos**. Pendência: deletar via `S3Adapter` no service de delete.
+
+## Padrões de uso
+
+- **Upload + send** — multipart `POST /chat/messages` cria msg + attachments numa transação
+- **Upload preview** — multipart `POST /chat/attachments` (sem message_id ainda) e mensagem criada depois com `attachmentIds`
+- **Download** — endpoint signed URL `GET /chat/messages/:id/download`
+
+## Tabelas relacionadas
+
+- [`messages`](/docs/data-model/tables/messages) — pai (cascade quando deleta message)
+- [`users`](/docs/data-model/tables/users) — uploader (cascade)

@@ -1,0 +1,201 @@
+---
+title: Auth store (Pinia)
+description: Como o frontend mantém o access token + user em memória.
+---
+
+`shared/auth/authStore.ts` é a **fonte de verdade** do estado de auth no frontend.
+
+## Estado guardado
+
+| Campo | Tipo | Onde vive |
+|---|---|---|
+| `token` | `string \| null` | Memória do JS (não localStorage) |
+| `user` | `User \| null` | Memória |
+
+## Por que NÃO localStorage
+
+Localstorage é acessível por **qualquer script** rodando na página. XSS bem-sucedido lê tudo. Memória do JS é resetada no reload — mais difícil de exfiltrar. Refresh token (no cookie HttpOnly) re-popula o estado no boot.
+
+## Implementação típica
+
+```ts
+import { defineStore } from 'pinia'
+import { ref, computed } from 'vue'
+import type { User } from '@/shared/types/user'
+
+export const useAuthStore = defineStore('auth', () => {
+  const token = ref<string | null>(null)
+  const user = ref<User | null>(null)
+
+  const isLogged = computed(() => Boolean(token.value && user.value))
+  const userId = computed(() => user.value?.id ?? null)
+
+  function setToken(t: string) {
+    token.value = t
+  }
+
+  function setUser(u: User) {
+    user.value = u
+  }
+
+  function clearAuth() {
+    token.value = null
+    user.value = null
+  }
+
+  return { token, user, isLogged, userId, setToken, setUser, clearAuth }
+})
+```
+
+## Boot — restaurar sessão
+
+`App.vue` ou `main.ts` no boot:
+
+```ts
+import { onMounted } from 'vue'
+import { useAuthStore } from '@/shared/auth/authStore'
+import { api } from '@/shared/http/api'
+
+const store = useAuthStore()
+
+onMounted(async () => {
+  if (store.isLogged) return  // já tem (caso reload em SPA é raro)
+
+  try {
+    const { data: refreshData } = await api.post('/auth/refresh')
+    store.setToken(refreshData.accessToken)
+
+    const { data: meData } = await api.get('/users/me')
+    store.setUser(meData)
+  } catch {
+    // refresh falhou — user não está logado
+    // (ou cookie expirou; user precisa logar)
+  }
+})
+```
+
+**Fluxo no reload**:
+1. Página carrega, store vazia
+2. Tenta `/auth/refresh` (cookie HttpOnly automático)
+3. Sucesso → set token + busca `/users/me` → set user
+4. App renderiza dashboard
+5. Falha → app renderiza tela de login
+
+User não percebe — sente como "estou logado, app abriu".
+
+## Login
+
+```ts
+// composables/useLogin.ts
+import { useAuthStore } from '@/shared/auth/authStore'
+import { authService } from '@/modules/auth/services/authService'
+
+export function useLogin() {
+  const store = useAuthStore()
+  const router = useRouter()
+
+  async function login(email: string, password: string) {
+    const { accessToken, user } = await authService.login(email, password)
+    store.setToken(accessToken)
+    store.setUser(user)
+    router.push('/dashboard')
+  }
+
+  return { login }
+}
+```
+
+## Logout
+
+```ts
+async function logout() {
+  try {
+    await api.post('/auth/logout')   // revoga refresh no backend + limpa cookie
+  } finally {
+    store.clearAuth()
+    router.push('/login')
+  }
+}
+```
+
+`finally` garante limpeza local mesmo se backend falhar.
+
+## Acesso em components
+
+```vue
+<script setup lang="ts">
+import { useAuthStore } from '@/shared/auth/authStore'
+
+const auth = useAuthStore()
+</script>
+
+<template>
+  <div v-if="auth.isLogged">
+    Olá, {{ auth.user.displayName }}
+    <button @click="logout">Sair</button>
+  </div>
+  <RouterLink v-else to="/login">Entrar</RouterLink>
+</template>
+```
+
+## Acesso em router guards
+
+```ts
+import { useAuthStore } from '@/shared/auth/authStore'
+
+router.beforeEach((to) => {
+  const auth = useAuthStore()
+  if (to.meta.requiresAuth && !auth.isLogged) {
+    return { path: '/login', query: { redirect: to.fullPath } }
+  }
+})
+```
+
+`requiresAuth: true` em rota → bloqueia se não logado, com redirect pós-login.
+
+## Multi-tab sync (opcional)
+
+Cenário: user abre 2 tabs do app. Faz logout numa → outra continua "logada" até descobrir via 401.
+
+Solução com `BroadcastChannel`:
+
+```ts
+const channel = new BroadcastChannel('auth')
+
+function clearAuth() {
+  token.value = null
+  user.value = null
+  channel.postMessage({ type: 'LOGOUT' })
+}
+
+channel.onmessage = (event) => {
+  if (event.data.type === 'LOGOUT') {
+    token.value = null
+    user.value = null
+  }
+}
+```
+
+Não implementado hoje — aceito que tabs ficam dessincronizadas até interação.
+
+## Roles e permissões
+
+Hoje **não há roles** no schema (admin/moderator/user). Auth check é binário: logado ou não.
+
+Quando precisar (admin dashboard, moderation), adicionar:
+- `users.role enum('admin', 'moderator', 'user')`
+- `auth.user.role` exposto pelo `/users/me`
+- Computed `isAdmin = computed(() => auth.user?.role === 'admin')`
+- Guards e UI conditionals baseado em role
+
+## Pendências
+
+- BroadcastChannel pra multi-tab sync
+- Token refresh proativo (antes do expire) em vez de reativo (em 401)
+- Encryption do token em memória (anti dev tools snooping em prod)
+
+## Referências
+
+- [Conceito: Autenticação](/docs/concepts/autenticacao) — esquema de tokens
+- [Módulo Auth](/docs/modules/auth) — fluxos completos
+- [HttpClient](/docs/frontend/http-client) — interceptor que injeta Bearer

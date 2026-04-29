@@ -1,0 +1,89 @@
+---
+title: listings
+description: Anúncios da Vitrine — itens à venda ou disponíveis para troca.
+---
+
+import Columns from '@/generated/data-model/tables/listings/columns'
+import Fks from '@/generated/data-model/tables/listings/fks'
+import Indexes from '@/generated/data-model/tables/listings/indexes'
+import Constraints from '@/generated/data-model/tables/listings/constraints'
+
+Listings são a **fonte de verdade da disponibilidade** de um item na Vitrine. Antes da sessão 2026-04-28, essa info ficava em `items.availability` + `items.asking_price` — foi extraída pra cá pra modelar corretamente o ciclo "anunciei → pausei → encerrei → excluí".
+
+Cada listing tem **status** (`active`, `paused`, `closed`) e modo (`availability`: `sale`, `trade`, `both`). Apenas `active` é visível no marketplace público; `paused` é invisível mas restaurável; `closed` é histórico (encerrado pelo dono ou após sale).
+
+## Colunas
+
+<Columns />
+
+## Funcionalidade dos campos
+
+- **`id`** — UUID, PK
+- **`item_id`** — FK pro item anunciado. Cascade delete: apagar item apaga listing (geralmente você apaga listing primeiro).
+- **`owner_id`** — FK pro dono. Denormalizado pra otimizar queries de listagem; sempre igual ao `items.collection.user_id`.
+- **`availability`** — enum (`sale`, `trade`, `both`). Não pode ser `none` aqui (esse valor existe no enum por legacy mas listing implica disponibilidade).
+- **`asking_price`** — `numeric(10, 2)`. Nullable; obrigatório pro frontend se `availability ∈ (sale, both)`. Pode ser zero (doação).
+- **`payment_methods`** — array de strings (`pix`, `paypal`, `cash`, etc.). Texto livre acordado entre as partes; backend não valida formato.
+- **`status`** — enum: `active` (visível), `paused` (invisível, retomável), `closed` (encerrado, ficou pra histórico).
+- **`disclaimer_accepted_at`** — timestamp em que o user aceitou o disclaimer da Vitrine ("Geek Social não intermedia a transação"). Required no insert.
+- **`created_at` / `updated_at`** — managed.
+
+## Foreign keys
+
+<Fks />
+
+## Índices
+
+<Indexes />
+
+**Detalhes dos índices**:
+
+- **`listings_item_active_uniq`** — partial unique index garantindo que cada item tem **no máximo 1 listing `active`**. Permite paused/closed múltiplos historicamente.
+  ```sql
+  CREATE UNIQUE INDEX ... ON listings(item_id) WHERE status = 'active';
+  ```
+- **`listings_owner_status_idx`** — `(owner_id, status, created_at)`. Usado em "Meus anúncios" filtrando por status.
+- **`listings_active_updated_idx`** — partial em `updated_at WHERE status = 'active'`. Usado no marketplace pra ordenar "mais recentes primeiro".
+
+## Constraints
+
+<Constraints />
+
+## Ciclo de vida
+
+```
+[criar listing]
+       ↓
+   active ←──── (reativar) ──── paused
+       ↓                          ↑
+   (pausar) ─────────────────────┘
+       ↓
+   close()
+       ↓
+    closed ──── (delete permanente, hard) ──── ✗
+```
+
+Estados possíveis:
+- **`active`** — aparece na vitrine pública, aceita ofertas
+- **`paused`** — invisível, dono pode reativar a qualquer momento
+- **`closed`** — encerrado manualmente ou após confirm de transação. Dono pode deletar permanentemente (`?hard=true`).
+
+## Auto-rejeição em close/delete
+
+Quando um listing é encerrado ou deletado com offers `pending`, todas elas viram `rejected` automaticamente via `OffersService.autoRejectByListing`. Isso é gatilhado pelo `ListingsService` via setter (`setOffersIntegration`) pra quebrar dependência circular. Notificações `offer_rejected` são enviadas aos ofertantes.
+
+## Padrões de uso
+
+- **Criar** — INSERT com `status='active'`, `disclaimer_accepted_at=now()`
+- **Pausar/Reativar** — UPDATE status
+- **Encerrar** — UPDATE status='closed' + auto-reject de pending offers
+- **Hard delete** — DELETE (apenas listings closed). Endpoint: `DELETE /listings/:id?hard=true`
+- **Confirmar transação** — flow envolve item_offers + offer_proposals; após `executeTransfer`, listing fica `closed`
+
+## Tabelas relacionadas
+
+- [`items`](/docs/data-model/tables/items) — anunciado (cascade)
+- [`users`](/docs/data-model/tables/users) — owner (cascade)
+- [`item_offers`](/docs/data-model/tables/item_offers) — ofertas referem `listing_id` (set null em delete pra preservar histórico)
+- [`offer_proposals`](/docs/data-model/tables/offer_proposals) — rodadas de negociação dentro das ofertas
+- [`listing_ratings`](/docs/data-model/tables/listing_ratings) — avaliação após transação

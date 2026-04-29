@@ -1,0 +1,140 @@
+---
+title: Users
+description: Perfis públicos e privados, settings, capa/fundo, exclusão de conta.
+---
+
+## Visão geral
+
+O módulo **Users** cobre todo o ciclo de vida do perfil — desde a leitura "me/perfil próprio" até gerenciamento de mídia (avatar, capa, background) e exclusão permanente de conta. É o complemento social do módulo [Auth](/docs/modules/auth) (que cuida de credenciais).
+
+Operações distintas por intenção:
+- **`/me/...`** — opera no usuário autenticado (perfil próprio, settings, mídia)
+- **`/:id/...`** — opera em perfil alheio (read-only com privacy gating)
+
+## Entidades principais
+
+| Tabela | O que guarda |
+|---|---|
+| [`users`](/docs/data-model/tables/users) | Conta + perfil + privacy + flags + URLs de mídia |
+| [`user_presence`](/docs/data-model/tables/user_presence) | Last seen para perfis offline |
+
+## Endpoints
+
+[API Reference — Users](/docs/api/users/users-get-me). 15 endpoints:
+
+| Endpoint | Auth | Resumo |
+|---|---|---|
+| `GET /users/me` | JWT | Meu perfil completo |
+| `GET /users/search?q=` | JWT | Buscar por nome/e-mail |
+| `GET /users/:id/profile` | opcional | Perfil público |
+| `GET /users/:id/friends` | opcional | Amigos públicos |
+| `PUT /users/me/profile` | JWT | Editar campos de perfil |
+| `PATCH /users/me/settings` | JWT | Privacy/visibility settings |
+| `POST /users/me/avatar` | JWT | Upload avatar |
+| `DELETE /users/me/avatar` | JWT | Remover avatar |
+| `POST /users/me/cover` | JWT | Upload capa |
+| `DELETE /users/me/cover` | JWT | Remover capa |
+| `POST /users/me/background` | JWT | Upload fundo |
+| `DELETE /users/me/background` | JWT | Remover fundo |
+| `PUT /users/me/cover-color` | JWT | Cor sólida de capa |
+| `PUT /users/me/background-color` | JWT | Cor sólida de fundo |
+| `DELETE /users/me` | JWT | Excluir conta permanentemente |
+
+## Fluxos
+
+### Editar perfil
+
+<Mermaid chart={`sequenceDiagram
+  autonumber
+  participant U as Usuário
+  participant FE as Frontend
+  participant API as Backend
+  participant DB as PostgreSQL
+
+  U->>FE: Abre ProfileEditModal
+  FE->>API: PUT /users/me/profile (campos parciais)
+  API->>API: Validar via updateProfileSchema
+  API->>DB: UPDATE users SET ... WHERE id = ?
+  DB-->>API: row atualizado
+  API-->>FE: 200 { user atualizado }
+  FE->>FE: Atualiza store local`} />
+
+### Capa/fundo: imagem ou cor (mutuamente exclusivos)
+
+<Mermaid chart={`sequenceDiagram
+  autonumber
+  participant FE as Frontend
+  participant API as Backend
+  participant S3 as MinIO/S3
+  participant DB as PostgreSQL
+
+  alt Upload de imagem
+    FE->>API: POST /users/me/cover (multipart)
+    API->>S3: PUT covers/<userId>.jpg
+    API->>DB: UPDATE users SET cover_url = ?, cover_color = NULL
+  else Definir cor sólida
+    FE->>API: PUT /users/me/cover-color { color: "#ff0080" }
+    API->>S3: DELETE covers/<userId>.jpg (se houver)
+    API->>DB: UPDATE users SET cover_color = ?, cover_url = NULL
+  else Limpar tudo
+    FE->>API: PUT /users/me/cover-color { color: null }
+    API->>DB: UPDATE users SET cover_color = NULL
+    Note over FE: Render cai pra gradient default
+  end`} />
+
+### Excluir conta
+
+<Mermaid chart={`sequenceDiagram
+  autonumber
+  participant U as Usuário
+  participant FE as Frontend
+  participant API as Backend
+  participant S3 as MinIO/S3
+  participant DB as PostgreSQL
+
+  U->>FE: Settings → Conta → "Excluir conta" + confirmação
+  FE->>API: DELETE /users/me
+  API->>S3: DELETE avatar/cover/background do user
+  API->>DB: DELETE FROM users WHERE id = ?
+  Note over DB: Cascade derruba: collections, items, listings,<br/>offers, friendships, refresh_tokens, etc.
+  API-->>FE: 204 No Content
+  FE->>FE: Limpa store + redirect /goodbye`} />
+
+### Privacy gating em perfis públicos
+
+<Mermaid chart={`sequenceDiagram
+  participant FE as Frontend
+  participant API as Backend
+  participant DB as PostgreSQL
+
+  FE->>API: GET /users/:id/profile (com ou sem JWT)
+  API->>DB: SELECT * FROM users WHERE id = ?
+  DB-->>API: target user
+  API->>API: Avalia privacy + relação:<br/>public → tudo<br/>friends_only + amigo → tudo<br/>friends_only + não-amigo → pré-visualização<br/>private → só nome/avatar
+  API->>DB: SELECT presence + counts (collections, posts, etc.)
+  API-->>FE: { user, isFriend, canMessage, etc. }`} />
+
+## Eventos de socket
+
+`Users` não emite eventos diretamente. Mas:
+- `PATCH /me/settings` muda `show_presence` → backend dispara `presence:update` se mudou
+- `PATCH /me/settings` muda `show_read_receipts` → backend chama `chatGateway.refreshConversationsForUserAndPeers` pra propagar pros pares
+
+## Edge cases e regras especiais
+
+- **Validação de website**: aceita string vazia (transforma em null) ou URL válida via Zod. Permite "limpar campo" no PATCH.
+- **interests cap em 20** — frontend mostra erro se exceder.
+- **bio até 10000 chars** — texto livre, sem markdown renderizado.
+- **birthday é DATE** — sem hora; idade calculada client-side.
+- **Capa+cor mutuamente exclusivos** — setar imagem zera cor e vice-versa. Ambos null = gradient default.
+- **Excluir conta é irreversível** — sem soft-delete por design ("zero débito técnico"). Cascade implacável.
+- **Search não revela usuários private** — apenas public e friends_only (se há amizade).
+- **`/me` traz info SENSÍVEL** que `/:id/profile` esconde — email, settings, presence flags.
+
+## Dependências entre módulos
+
+- **Friends** — privacy gating depende de friendsRepository.areFriends()
+- **Presence (Chat)** — emit de `presence:update` em mudança de show_presence
+- **Storage (S3)** — uploads via S3Adapter
+- **Posts/Feed** — perfil expõe contador de posts e timeline via FeedService
+- **Collections** — perfil expõe lista de coleções públicas

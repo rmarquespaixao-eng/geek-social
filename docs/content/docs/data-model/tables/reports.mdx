@@ -1,0 +1,76 @@
+---
+title: reports
+description: Denúncias de conteúdo abusivo (user, post, comment, message, collection).
+---
+
+import Columns from '@/generated/data-model/tables/reports/columns'
+import Fks from '@/generated/data-model/tables/reports/fks'
+import Indexes from '@/generated/data-model/tables/reports/indexes'
+import Constraints from '@/generated/data-model/tables/reports/constraints'
+
+Sistema de denúncias do Geek Social. Implementado em **5 superfícies**: usuários, posts, mensagens, coleções, conversas. O reporter informa o tipo (`target_type`) + ID do alvo + razão (enum) + descrição opcional.
+
+Sem flow de moderação automatizado — admin vê dashboard de pendentes e marca como `reviewed`/`dismissed` manualmente. Pendência: integração com Linear/issue tracker.
+
+## Colunas
+
+<Columns />
+
+## Funcionalidade dos campos
+
+- **`id`** — UUID, PK
+- **`reporter_id`** — quem denunciou (cascade)
+- **`target_type`** — enum: `user | message | post | collection | conversation`
+- **`target_id`** — UUID **polimórfico** (não é FK — referencia por type)
+- **`reason`** — enum: `spam | harassment | nsfw | hate | other`
+- **`description`** — texto livre opcional, contexto do denunciante
+- **`status`** — `pending | reviewed | dismissed`. Updated quando admin processa.
+- **`created_at` / `updated_at`** — managed.
+
+## Foreign keys
+
+<Fks />
+
+`target_id` é polimórfico — sem FK explícita pra qualquer tabela. Backend valida na criação que o target existe.
+
+## Índices
+
+<Indexes />
+
+**Detalhes**:
+- **`reports_reporter_target_unique`** em `(reporter_id, target_type, target_id)` — impede o mesmo user denunciar o mesmo alvo 2x
+- **`reports_status_created_at_idx`** — query de admin "pending mais antigos primeiro"
+
+## Constraints
+
+<Constraints />
+
+## Polimorfismo do target
+
+Dependendo de `target_type`, `target_id` aponta pra:
+- `user` → `users.id`
+- `message` → `messages.id`
+- `post` → `posts.id`
+- `collection` → `collections.id`
+- `conversation` → `conversations.id`
+
+Se o alvo é deletado depois (cascade ou hard delete), a denúncia continua existindo com `target_id` apontando pra registro inexistente — admin precisa lidar com isso na UI ("conteúdo já removido").
+
+## Razões — semântica
+
+- **`spam`** — promoção indesejada, divulgação fora de contexto
+- **`harassment`** — perseguição, ameaças, mensagens insistentes não-bem-vindas
+- **`nsfw`** — conteúdo adulto/explícito sem flag adequada
+- **`hate`** — discurso de ódio, discriminação
+- **`other`** — qualquer outra coisa; descrição obrigatória nesse caso? (Não enforced no schema; dependeria de validação no service.)
+
+## Padrões de uso
+
+- **Reportar** — `POST /reports { targetType, targetId, reason, description? }`
+- **Listar pendentes (admin)** — `GET /admin/reports?status=pending` (endpoint admin não documentado aqui ainda)
+- **Marcar reviewed** — `PUT /admin/reports/:id { status: 'reviewed' }`
+
+## Tabelas relacionadas
+
+- [`users`](/docs/data-model/tables/users) — reporter (cascade)
+- Polimorfismo via `target_type`/`target_id`: [`users`](/docs/data-model/tables/users), [`messages`](/docs/data-model/tables/messages), [`posts`](/docs/data-model/tables/posts), [`collections`](/docs/data-model/tables/collections), [`conversations`](/docs/data-model/tables/conversations)

@@ -1,0 +1,41 @@
+---
+title: POST /chat/conversations/{id}/mute
+description: Silenciar conversa
+---
+
+import Meta from '@/generated/api/chat/mute/meta'
+import Request from '@/generated/api/chat/mute/request'
+import Responses from '@/generated/api/chat/mute/responses'
+import Errors from '@/generated/api/chat/mute/errors'
+import Examples from '@/generated/api/chat/mute/examples'
+
+<Meta />
+
+UPDATE is_muted=true. Mensagens chegam mas sem push notification.
+
+## Request
+
+<Request />
+
+## Response
+
+<Responses />
+
+## Erros
+
+<Errors />
+
+{/* TODO: para cada código de erro acima, explique a causa e como resolver. */}
+
+## Exemplos
+
+<Examples />
+
+
+## Side effects
+
+{/* TODO: eventos de socket emitidos, notificações disparadas, jobs enfileirados, cascades. */}
+
+## Relacionados
+
+{/* TODO: links pra módulo, conceitos, endpoints relacionados. */}

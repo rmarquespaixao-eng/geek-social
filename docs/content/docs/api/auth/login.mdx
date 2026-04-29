@@ -1,0 +1,95 @@
+---
+title: POST /auth/login
+description: Login com e-mail/senha
+---
+
+import Meta from '@/generated/api/auth/login/meta'
+import Request from '@/generated/api/auth/login/request'
+import Responses from '@/generated/api/auth/login/responses'
+import Errors from '@/generated/api/auth/login/errors'
+import Examples from '@/generated/api/auth/login/examples'
+
+<Meta />
+
+Autentica um usuário com **e-mail + senha**, retorna um access JWT (curto, em memória do frontend) e seta um cookie HttpOnly com o refresh token (longo, rotacionável).
+
+Use este endpoint apenas para o fluxo de login local. Se a conta foi criada via Google e ainda não tem senha, use OAuth ou primeiro `POST /auth/set-password`.
+
+## Quando chamar
+
+- No formulário de login do app, após o usuário preencher e-mail e senha
+- Não chamar em loop após `401` — o backend NÃO bloqueia tentativas e o usuário pode causar bloqueio do próprio IP por rate limiting de borda
+
+## Request
+
+<Request />
+
+**Notas**:
+- `email` é case-sensitive no nível de DB; normalização em lower-case fica a cargo do frontend
+- `password` é enviado em plain text via HTTPS — o hash bcrypt acontece no servidor
+
+## Response
+
+<Responses />
+
+**Sobre o `accessToken`**: JWT assinado com `JWT_SECRET`, claims `{ userId, email }`, validade 15 minutos. Use no header `Authorization: Bearer <token>` em requests subsequentes. Guarde **em memória**, não em `localStorage`.
+
+**Sobre o cookie `refreshToken`**:
+- `HttpOnly` — JavaScript não consegue ler (proteção contra XSS)
+- `Secure` em produção — só vai por HTTPS
+- `SameSite=strict` em produção, `lax` em dev — proteção contra CSRF
+- `Path=/` — mandado em todas as requests pro backend
+- `Expires` = `now() + REFRESH_TOKEN_EXPIRES_DAYS` (default 7)
+
+## Erros
+
+<Errors />
+
+**Como resolver cada caso**:
+
+| Código (no campo `error`) | Causa | Como resolver |
+|---|---|---|
+| `INVALID_CREDENTIALS` ou mensagem `"Credenciais inválidas"` | E-mail não existe **OU** existe mas a senha não bate **OU** a conta foi criada via Google e não tem `password_hash` ainda | Verifique a senha. Se a conta foi criada via Google, faça login social ou peça `set-password`. **Não revele ao usuário qual dos casos** — o backend retorna o mesmo erro pra evitar enumeration de e-mails. |
+
+⚠️ **Mensagem retornada hoje em PT** (legacy) — o frontend deve tratar `error === 'Credenciais inválidas'` como o código tipado equivalente. Refator pra `INVALID_CREDENTIALS` planejado.
+
+## Exemplos
+
+<Examples />
+
+
+### Resposta de sucesso (200)
+
+```json
+{
+  "accessToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiI1ZjEyLi4uIiwiZW1haWwiOiJqb2VAZXhhbXBsZS5jb20iLCJpYXQiOjE3MTQzMjAwMDAsImV4cCI6MTcxNDMyMDkwMH0.SIGNATURE",
+  "user": {
+    "id": "5f12abcd-1234-5678-9abc-def012345678",
+    "email": "joe@example.com",
+    "displayName": "Joe Gamer"
+  }
+}
+```
+
+E no header `Set-Cookie`:
+
+```
+refreshToken=8a7bf4...64; Path=/; HttpOnly; SameSite=Lax; Expires=Mon, 06 May 2026 12:00:00 GMT
+```
+
+## Side effects
+
+- **DB**: `INSERT INTO refresh_tokens (user_id, token_hash, expires_at, created_at)` — uma sessão nova
+- **Cookie**: setado no header de resposta
+- **Sem notificações** disparadas
+- **Sem eventos de socket** emitidos
+- **Sem jobs** enfileirados
+
+## Relacionados
+
+- Conceito: [Autenticação](/docs/concepts/autenticacao) — entenda o esquema de tokens
+- Módulo: [Auth](/docs/modules/auth) — visão completa do fluxo de login com e-mail/senha
+- Endpoint: [`POST /auth/refresh`](/docs/api/auth/refresh) — renovar o access token sem re-login
+- Endpoint: [`POST /auth/logout`](/docs/api/auth/logout) — encerrar a sessão atual
+- Tabela: [`refresh_tokens`](/docs/data-model/tables/refresh_tokens) — onde a sessão é guardada
+- Tabela: [`users`](/docs/data-model/tables/users) — onde a senha é validada

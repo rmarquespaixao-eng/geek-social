@@ -1,0 +1,158 @@
+---
+title: Posts & Feed
+description: Posts manuais + item_share automáticos, comentários, reações temáticas, feed cronológico.
+---
+
+## Visão geral
+
+Posts são unidades de feed do Geek Social. Há dois tipos:
+- **`manual`** — criado pelo usuário com texto + mídia opcional
+- **`item_share`** — criado automaticamente quando o user adiciona item numa coleção com `auto_share_to_feed=true`
+
+O feed mostra posts dos amigos + próprios + públicos, respeitando `posts.visibility` e filtrando `user_blocks` em ambas as direções.
+
+Posts têm comentários (planos, sem aninhamento), reactions temáticas (gamer-themed: ⚡epic, 💥critical, 💎loot, 🎯gg, ⚡power_up), e múltiplas mídias em galeria.
+
+## Entidades principais
+
+| Tabela | Papel |
+|---|---|
+| [`posts`](/docs/data-model/tables/posts) | Container do post |
+| [`post_media`](/docs/data-model/tables/post_media) | Mídia anexada |
+| [`post_comments`](/docs/data-model/tables/post_comments) | Comentários |
+| [`post_reactions`](/docs/data-model/tables/post_reactions) | Reações com tipos fixos |
+
+## Endpoints
+
+15 endpoints distribuídos em 4 sub-módulos:
+
+**Posts** (em `/posts`): create, get, update, delete, add media, remove media (6).
+
+**Comments** (em `/posts/:postId`): add, list, update, delete (4).
+
+**Reactions** (em `/posts/:postId`): react, remove, list (3).
+
+**Feed** (em `/feed` e `/users/:userId/posts`): get feed do user, posts no perfil de outro (2).
+
+## Fluxos
+
+### Criar post manual com mídia
+
+<Mermaid chart={`sequenceDiagram
+  autonumber
+  participant U as Usuário
+  participant FE as Frontend
+  participant API as Backend
+  participant S3 as MinIO/S3
+  participant DB as PostgreSQL
+
+  U->>FE: Composer → escreve texto + adiciona 3 fotos
+  FE->>API: POST /posts (multipart) {<br/>content, visibility, files: [...]<br/>}
+  API->>API: Valida content (≤5000 chars)
+  API->>S3: Upload cada foto + thumbnail (sharp)
+  API->>DB: BEGIN
+  API->>DB: INSERT posts (type=manual)
+  API->>DB: INSERT post_media (1 row por foto, com display_order)
+  API->>DB: COMMIT
+  API-->>FE: 201 { post com media embebida }
+  FE->>FE: Adiciona ao topo do feed local`} />
+
+### Item_share automático
+
+<Mermaid chart={`sequenceDiagram
+  autonumber
+  participant U as Usuário
+  participant ItemsService as ItemsService
+  participant FeedRepo as FeedRepository
+  participant DB as PostgreSQL
+
+  U->>ItemsService: createItem(collectionId, ...)
+  ItemsService->>DB: INSERT items
+  ItemsService->>DB: SELECT collection.auto_share_to_feed
+  alt auto_share_to_feed=true OR shareToFeed=true no input
+    ItemsService->>DB: INSERT posts (type='item_share', item_id, collection_id)
+    Note over DB: Frontend renderiza card especial:<br/>"Joe adicionou Hollow Knight em Jogos PC"
+  end
+  ItemsService-->>U: { item }`} />
+
+### Feed com privacy + blocks
+
+<Mermaid chart={`sequenceDiagram
+  participant FE as Frontend
+  participant API as Backend
+  participant DB as PostgreSQL
+
+  FE->>API: GET /feed?cursor=...&limit=20
+  API->>DB: SELECT posts.*, ...<br/>FROM posts<br/>LEFT JOIN friendships ON ...<br/>WHERE NOT EXISTS (block entre poster e me)<br/>AND (visibility = 'public'<br/>     OR visibility='friends_only' AND friendship='accepted'<br/>     OR user_id = $me)<br/>ORDER BY created_at DESC<br/>LIMIT 20
+  DB-->>API: posts
+  API->>DB: SELECT post_media para esses posts
+  API->>DB: SELECT reaction_counts agregado
+  API->>DB: SELECT comments_count
+  API->>DB: SELECT my_reaction (single)
+  API-->>FE: { items, nextCursor }`} />
+
+### Reagir / trocar reação
+
+<Mermaid chart={`sequenceDiagram
+  autonumber
+  participant U as Usuário
+  participant FE as Frontend
+  participant API as Backend
+  participant DB as PostgreSQL
+  participant N as NotificationsService
+
+  U->>FE: Clica 💎 no post
+  FE->>API: POST /posts/:id/reactions { type:'loot' }
+  API->>DB: INSERT post_reactions (post_id, user_id, type='loot')<br/>ON CONFLICT (post_id, user_id) DO UPDATE
+  alt Trocar tipo
+    Note over DB: UPDATE type='loot' (era 'epic' antes, por exemplo)
+  else Primeira vez
+    API->>N: notify({ recipient: postOwner, type:'post_reaction' })
+  end
+  API-->>FE: { counts: { loot:5, epic:3, ... }, mine:'loot' }`} />
+
+### Comentar (sem threads)
+
+<Mermaid chart={`sequenceDiagram
+  autonumber
+  participant U as Usuário
+  participant API as Backend
+  participant DB as PostgreSQL
+  participant N as NotificationsService
+
+  U->>API: POST /posts/:id/comments { content }
+  API->>API: Valida content (1-2000 chars)
+  API->>DB: INSERT post_comments
+  alt autor != dono do post
+    API->>N: notify({ recipient: postOwner, type:'post_comment' })
+  end
+  API-->>U: { comment com author embebido }`} />
+
+## Eventos de socket
+
+| Evento | Quando |
+|---|---|
+| `notification:new (post_comment)` | Comentário novo no seu post |
+| `notification:new (post_reaction)` | Reação nova no seu post |
+
+Posts em si não geram eventos próprios — feed é poll-based via REST. Considerar futuramente: emit `feed:new-post` pra friends online.
+
+## Edge cases e regras especiais
+
+- **Post sem content nem mídia** — proibido pelo controller (mas `content` é opcional no schema)
+- **Item_share preserva mesmo se item deletado** — não. Cascade delete derruba (item_id é FK com cascade)
+- **Editar post**: apenas autor; updated_at é setado, UI mostra "editado"
+- **Editar comentário**: apenas autor edita; mas **dono do post pode deletar** (moderação leve)
+- **Post `private`**: só o autor vê. Strange use case mas suportado (talvez "rascunho público no futuro")
+- **Reaction de tipo único por user/post** — trocar tipo é UPDATE; remover é DELETE
+- **Soft delete de post**: não há. DELETE é hard, cascateia comments/reactions/media. Arquivos S3 ficam órfãos (pendência geral)
+- **Feed performance**: índice `posts_visibility_created_at_idx` favorece queries de feed; mas feed cresce — paginação é mandatória
+- **`visibility=friends_only`** vs `users.privacy=friends_only` — granulares e independentes; user pode ter perfil público e post friends_only
+
+## Dependências entre módulos
+
+- **Friends** — visibility gating
+- **Items / Collections** — origem dos item_share posts
+- **Notifications** — post_comment, post_reaction
+- **Storage** — uploads de mídia
+- **Reports** — posts e comments podem ser denunciados (target_type=post|comment)

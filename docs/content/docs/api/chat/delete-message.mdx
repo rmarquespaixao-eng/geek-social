@@ -1,0 +1,41 @@
+---
+title: DELETE /chat/messages/{id}
+description: Apagar mensagem
+---
+
+import Meta from '@/generated/api/chat/delete-message/meta'
+import Request from '@/generated/api/chat/delete-message/request'
+import Responses from '@/generated/api/chat/delete-message/responses'
+import Errors from '@/generated/api/chat/delete-message/errors'
+import Examples from '@/generated/api/chat/delete-message/examples'
+
+<Meta />
+
+Soft delete (UPDATE deleted_at). Pode passar ?forAll=true se autor; senão esconde só pra mim.
+
+## Request
+
+<Request />
+
+## Response
+
+<Responses />
+
+## Erros
+
+<Errors />
+
+{/* TODO: para cada código de erro acima, explique a causa e como resolver. */}
+
+## Exemplos
+
+<Examples />
+
+
+## Side effects
+
+{/* TODO: eventos de socket emitidos, notificações disparadas, jobs enfileirados, cascades. */}
+
+## Relacionados
+
+{/* TODO: links pra módulo, conceitos, endpoints relacionados. */}

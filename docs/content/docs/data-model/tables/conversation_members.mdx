@@ -1,0 +1,81 @@
+---
+title: conversation_members
+description: Membros de uma conversa, com role e estado per-user (lido, mutado, oculto).
+---
+
+import Columns from '@/generated/data-model/tables/conversation_members/columns'
+import Fks from '@/generated/data-model/tables/conversation_members/fks'
+import Indexes from '@/generated/data-model/tables/conversation_members/indexes'
+import Constraints from '@/generated/data-model/tables/conversation_members/constraints'
+
+Tabela de junção `users` ↔ `conversations`. Cada row é a "presença" de um user numa conversa, com **estado per-user**:
+
+- Role (em grupos): `owner | admin | member`
+- Permissions (em grupos): `{ can_send_messages, can_send_files }`
+- Read state: `last_read_at` (timestamp da última msg lida)
+- Mute: `is_muted` (não recebe notif/push)
+- Archive: `is_archived` (some da lista mas mensagens preservadas)
+- Hide ephemeral: `hidden_at` (modo Snapchat per-user)
+
+## Colunas
+
+<Columns />
+
+## Funcionalidade dos campos
+
+- **`id`** — UUID, PK
+- **`conversation_id`** — FK pra `conversations`. Cascade delete.
+- **`user_id`** — FK pra `users`. Cascade delete.
+- **`role`** — `owner | admin | member` (significa em grupos; em DM, membros são sempre `member`).
+- **`permissions`** — JSONB `{ can_send_messages: bool, can_send_files: bool }`. Default `{ true, true }`. Útil em grupos pra restringir.
+- **`joined_at`** — entrou na conversa.
+- **`last_read_at`** — timestamp da última mensagem que ele leu. Use em `WHERE created_at > last_read_at` pra contar não-lidas.
+- **`is_archived`** — esconde da lista principal sem deletar.
+- **`hidden_at`** — modo Snapchat per-user — após este momento, mensagens novas ficam invisíveis pro user (são apagadas pelo cron de cleanup quando todos os destinatários tiverem `hidden_at`).
+- **`is_muted`** — silencia notificações/push. Mensagens chegam normal, só não tocam.
+
+## Foreign keys
+
+<Fks />
+
+## Índices
+
+<Indexes />
+
+`conversation_members_unique` em `(conversation_id, user_id)` impede duplicação. Tentar adicionar membro existente deve ser tratado como no-op no service.
+
+## Constraints
+
+<Constraints />
+
+## Read receipts
+
+Ao receber notificação de "mensagem lida":
+- Cliente do user A chama `POST /chat/conversations/:id/read`
+- Backend atualiza `last_read_at = now()` no row do A
+- Backend emite socket pro outro lado: "user A leu até agora"
+- Frontend marca os check duplos como "lido"
+
+**Mas se A tem `users.show_read_receipts = false`**: o backend NÃO emite o evento — privacy do user respeitada.
+
+## Modo ephemeral per-user
+
+Implementação:
+1. User A liga modo no chat — `POST /chat/conversations/:id/temporary` → `conversation_members[A].hidden_at = now()`
+2. Mensagens novas após esse momento são marcadas `is_temporary=true` em [`messages`](/docs/data-model/tables/messages)
+3. Cleanup cron deleta mensagens onde TODOS os destinatários têm `hidden_for_user_ids` cobrindo o user
+
+## Padrões de uso
+
+- **Adicionar a grupo** — INSERT (apenas `admin`/`owner` podem)
+- **Mudar role** — UPDATE `role` (apenas `owner`/`admin`)
+- **Marcar lido** — UPDATE `last_read_at`
+- **Mute** — UPDATE `is_muted`
+- **Arquivar** — UPDATE `is_archived`
+- **Sair** — DELETE row (cascade simples)
+
+## Tabelas relacionadas
+
+- [`conversations`](/docs/data-model/tables/conversations) — pai (cascade)
+- [`users`](/docs/data-model/tables/users) — membro (cascade)
+- [`messages`](/docs/data-model/tables/messages) — `last_read_at` é checado contra `messages.created_at`

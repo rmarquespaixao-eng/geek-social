@@ -1,0 +1,91 @@
+---
+title: GET /auth/google/link
+description: Iniciar vínculo de conta Google (autenticado)
+---
+
+import Meta from '@/generated/api/auth/google-link-start/meta'
+import Request from '@/generated/api/auth/google-link-start/request'
+import Responses from '@/generated/api/auth/google-link-start/responses'
+import Errors from '@/generated/api/auth/google-link-start/errors'
+import Examples from '@/generated/api/auth/google-link-start/examples'
+
+<Meta />
+
+Para usuários **já autenticados** que querem vincular uma conta Google à sua conta existente. Diferente de `GET /auth/google` (que redireciona o navegador), este endpoint retorna a URL em **JSON** — o frontend é responsável por levar o usuário até ela (geralmente abrindo numa popup ou redirecionando).
+
+O state JWT carrega `{ mode: 'link', userId }`, garantindo que o callback saiba qual conta vincular ao Google identificado.
+
+## Quando chamar
+
+- Tela "Configurações → Conexões" → botão "Vincular Google"
+- Frontend chama via fetch (com Bearer JWT), recebe `{ url }`, e abre via `window.location.href = url` ou popup
+
+## Request
+
+<Request />
+
+**Sem body**. **Header obrigatório**: `Authorization: Bearer <accessToken>`.
+
+## Response
+
+<Responses />
+
+```json
+{
+  "url": "https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id=...&scope=openid+email+profile&state=eyJhbGc...&prompt=select_account&redirect_uri=..."
+}
+```
+
+Frontend então faz:
+```ts
+window.location.href = url
+```
+
+## Erros
+
+<Errors />
+
+| Status | Causa | Como resolver |
+|---|---|---|
+| 401 | JWT ausente/inválido | Refresh ou login |
+
+## Exemplos
+
+<Examples />
+
+
+### Fluxo completo no frontend
+
+```ts
+const r = await fetch('/auth/google/link', {
+  headers: { Authorization: `Bearer ${accessToken}` },
+})
+const { url } = await r.json()
+window.location.href = url
+// User vai pro Google, autoriza, é redirecionado pro callback,
+// que redireciona pro frontend com ?status=linked
+```
+
+## Side effects
+
+- **JWT signing** — `state` com `{ mode: 'link', userId, exp: +5min }`
+- **Sem DB** ainda
+- **Sem cookies, notificações ou socket**
+
+## Diferença vs `GET /auth/google`
+
+| | `GET /auth/google` | `GET /auth/google/link` |
+|---|---|---|
+| Auth | público | obrigatório (JWT) |
+| Resposta | 302 Redirect | 200 JSON `{ url }` |
+| State | `{ mode: 'login' }` | `{ mode: 'link', userId }` |
+| Caso de uso | Login/registro inicial | Vincular Google a conta existente |
+
+Por que diferente: pra **link**, o frontend já sabe que está autenticado e pode abrir popup controlada. Pra **login**, o user nem está logado ainda — redirect direto é mais simples.
+
+## Relacionados
+
+- Endpoint: [`GET /auth/google/callback`](/docs/api/auth/google-callback) — recebe o callback (status `linked`)
+- Endpoint: [`DELETE /auth/google/link`](/docs/api/auth/google-unlink) — desvincular
+- Endpoint: [`GET /auth/google`](/docs/api/auth/google-start) — login inicial via Google
+- Tabela: [`users`](/docs/data-model/tables/users) — campos `google_id`, `google_linked_at`

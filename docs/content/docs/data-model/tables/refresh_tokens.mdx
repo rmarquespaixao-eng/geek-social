@@ -1,0 +1,58 @@
+---
+title: refresh_tokens
+description: Tokens de sessão ativos por usuário, rotacionados a cada refresh.
+---
+
+import Columns from '@/generated/data-model/tables/refresh_tokens/columns'
+import Fks from '@/generated/data-model/tables/refresh_tokens/fks'
+import Indexes from '@/generated/data-model/tables/refresh_tokens/indexes'
+import Constraints from '@/generated/data-model/tables/refresh_tokens/constraints'
+
+Tabela de tokens de refresh ativos. Cada login (email/senha ou Google) cria um row aqui, e cada `/auth/refresh` rotaciona — o row anterior é deletado e um novo é inserido. Logout deleta o row do token corrente. Reset de senha deleta TODOS os rows do usuário (invalidação total de sessões).
+
+A coluna `token_hash` guarda **sha256(rawToken)**, nunca o token em texto plano. O token raw vive apenas no cookie HttpOnly do cliente; o backend só vê o hash.
+
+## Colunas
+
+<Columns />
+
+## Funcionalidade dos campos
+
+- **`id`** — UUID, PK. Não usado externamente; serve só pra logging/debugging quando necessário.
+- **`user_id`** — FK pra `users.id` com `ON DELETE CASCADE`. Apagar o usuário derruba todas as sessões dele automaticamente.
+- **`token_hash`** — sha256 hex (64 chars) do raw token. NÃO tem unique constraint declarada porque colisão de sha256 é estatisticamente impossível e o app trata como tal. Se precisar buscar por token, faz por hash exato.
+- **`expires_at`** — TTL absoluto. Calculado no momento do insert como `now() + REFRESH_TOKEN_EXPIRES_DAYS dias` (default 7). `/auth/refresh` checa se já expirou antes de aceitar.
+- **`created_at`** — momento da emissão. Útil pra auditoria (quando começou essa sessão).
+
+## Foreign keys
+
+<Fks />
+
+`ON DELETE CASCADE` é importante: ao excluir uma conta (`DELETE /users/me`), todos os refresh tokens evaporam junto.
+
+## Índices
+
+<Indexes />
+
+Não há índice explícito em `token_hash`, mas o lookup é sempre por hash exato — Postgres usa o índice da PK pra descartar a maioria das linhas, e dado que tokens válidos são poucos por usuário (1 ativo na maioria dos casos), o full scan acaba sendo barato. Se a tabela crescer (ex: usuários com muitos dispositivos), considerar adicionar `INDEX ON refresh_tokens(token_hash)`.
+
+## Constraints
+
+<Constraints />
+
+## Limpeza de tokens expirados
+
+**Hoje:** não há job de limpeza. Tokens expirados ficam até serem consumidos numa tentativa de refresh (que falha e os deleta) ou até o user ser excluído.
+
+**Considerar futuramente:** cron `DELETE FROM refresh_tokens WHERE expires_at < now()` rodando diariamente. Volume baixo no curto prazo torna isso opcional.
+
+## Padrões de uso
+
+- **Insert** — em `/auth/login`, `/auth/register`, `/auth/refresh`, `/auth/google/callback` (sucesso)
+- **Delete por hash** — em `/auth/refresh` (consome o antigo) e `/auth/logout`
+- **Delete por user_id** — em `/auth/reset-password` (revoga tudo) e `DELETE /users/me` (cascade automático)
+
+## Tabelas relacionadas
+
+- [`users`](/docs/data-model/tables/users) — pai (cascade)
+- [`password_reset_tokens`](/docs/data-model/tables/password_reset_tokens) — tabela irmã com semântica parecida (tokens curtos + hash sha256 + TTL), mas single-use

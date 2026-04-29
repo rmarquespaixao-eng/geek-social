@@ -1,0 +1,96 @@
+---
+title: Autenticação
+description: Como funciona o esquema de tokens (JWT + cookies HttpOnly) e quando usar cada um.
+---
+
+A autenticação no Geek Social usa **dois tokens** com papéis e tempos de vida bem distintos. Entender essa separação é essencial pra integrar com a API.
+
+## Os dois tokens
+
+| Token | Onde vive | TTL | Como vai pra API |
+|---|---|---|---|
+| **Access JWT** | Memória do frontend (não localStorage) | 15 minutos | Header `Authorization: Bearer <jwt>` |
+| **Refresh token** | Cookie HttpOnly + Secure (em prod) | 7 dias (configurável via `REFRESH_TOKEN_EXPIRES_DAYS`) | Cookie automático no `/auth/refresh` |
+
+**Por que dois tokens?**
+
+- O **access JWT** carrega claims (`userId`, `email`) e é checado em todo request autenticado. Por ser curto, vazá-lo limita o estrago temporal.
+- O **refresh token** é maior em duração mas vive em cookie HttpOnly — JavaScript do site **não tem como lê-lo**, blindando contra XSS. Ele só é usado no endpoint específico `/auth/refresh`.
+
+## Fluxo completo
+
+<Mermaid chart={`sequenceDiagram
+  participant FE as Frontend
+  participant API as Backend
+  Note over FE,API: Login inicial
+  FE->>API: POST /auth/login
+  API-->>FE: 200 {accessToken} + Set-Cookie refreshToken
+  Note over FE: Salva accessToken em memória<br/>(NÃO em localStorage)
+
+  Note over FE,API: Requests normais
+  FE->>API: GET /users/me\nAuthorization: Bearer accessToken
+  API-->>FE: 200 {...}
+
+  Note over FE,API: Após 15min...
+  FE->>API: GET /something\nAuthorization: Bearer (expirado)
+  API-->>FE: 401
+  FE->>API: POST /auth/refresh\n(cookie refreshToken)
+  API-->>FE: 200 {accessToken (novo)} + Set-Cookie refreshToken (rotacionado)
+  FE->>API: GET /something (retry com novo accessToken)
+  API-->>FE: 200`} />
+
+## Refresh token rotation
+
+A cada chamada de `/auth/refresh`, **o refresh token antigo é invalidado** e um novo é emitido. Isso significa:
+
+- Se um atacante roubar um refresh token e o usuário continuar usando o app, na próxima rotação o token roubado fica inválido (porque já foi consumido)
+- Se o atacante usar primeiro, o user real pega 401 — sinal de detecção precoce de roubo
+
+A tabela `refresh_tokens` guarda apenas o **sha256 do raw token** — o backend nunca persiste o token em texto plano. Mesmo um dump completo de DB não permite forjar sessões.
+
+## Headers e cookies em cada situação
+
+| Endpoint | Bearer JWT? | Cookie refreshToken? |
+|---|---|---|
+| `POST /auth/register` | — | — |
+| `POST /auth/login` | — | — |
+| `POST /auth/refresh` | — | obrigatório |
+| `POST /auth/logout` | — | usado se presente |
+| `POST /auth/forgot-password` | — | — |
+| `POST /auth/reset-password` | — | — |
+| `PUT /auth/change-password` | obrigatório | — |
+| `POST /auth/set-password` | obrigatório | — |
+| `GET /auth/google` | — | — |
+| `GET /auth/google/link` | obrigatório | — |
+| `DELETE /auth/google/link` | obrigatório | — |
+| Qualquer outro endpoint | obrigatório (na maioria) | — |
+
+## Storage do access token no frontend
+
+**Recomendado: variável em memória (Pinia store, React state, etc.).**
+
+NÃO use:
+- `localStorage` — vulnerável a XSS, qualquer script da página lê
+- `sessionStorage` — idem
+- Cookie comum (não-HttpOnly) — idem
+
+Quando o usuário recarrega a página, o access token em memória se perde. O frontend deve então chamar `/auth/refresh` na inicialização — se o cookie HttpOnly ainda for válido, o user é re-logado silenciosamente.
+
+## Login social (Google OAuth)
+
+Suportado via OpenID Connect. Após autorização, o usuário é redirecionado pro frontend com `?token=<jwt>` na URL — o frontend extrai e armazena, depois remove da URL pra não vazar em logs/referer.
+
+Detalhes do fluxo no [módulo Auth](/docs/modules/auth#3-login-com-google-oauth).
+
+## Mudança de senha vs reset
+
+Aparentam similares, mas têm semânticas diferentes:
+
+| | `change-password` | `reset-password` |
+|---|---|---|
+| Requer sessão | Sim | Não |
+| Pede senha atual | Sim | Não (token do e-mail substitui) |
+| Revoga sessões existentes | **Não** | **Sim, todas** |
+| Caso de uso | Manutenção rotineira | Recuperação após perda/comprometimento |
+
+Se o usuário acha que a conta foi comprometida, mande ele usar reset (que também invalida sessões em outros dispositivos), não change.

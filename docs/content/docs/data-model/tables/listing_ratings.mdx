@@ -1,0 +1,69 @@
+---
+title: listing_ratings
+description: Avaliações imutáveis pós-transação na Vitrine; alimentam reputação.
+---
+
+import Columns from '@/generated/data-model/tables/listing_ratings/columns'
+import Fks from '@/generated/data-model/tables/listing_ratings/fks'
+import Indexes from '@/generated/data-model/tables/listing_ratings/indexes'
+import Constraints from '@/generated/data-model/tables/listing_ratings/constraints'
+
+Avaliações dadas após uma transação confirmada na Vitrine. Cada lado pode dar 1 rating ao outro (unique por `(offer_id, rater_id)`). **Imutável**: não há PATCH nem DELETE no backend pra evitar coação ou retaliação após arrependimento.
+
+A reputação de um usuário é **agregação visual** dessas avaliações. Aparece no perfil via `<ReputationBadge>` apenas se ele atingir `MIN_RATINGS = 3` ratings recebidos (threshold pra evitar exibir "1 estrela" baseado em 1 review hostil).
+
+## Colunas
+
+<Columns />
+
+## Funcionalidade dos campos
+
+- **`id`** — UUID, PK
+- **`offer_id`** — FK pra `item_offers`. Cascade delete (raro — offers concluídas tipicamente não são apagadas).
+- **`rater_id`** — quem deu a nota. **Sem cascade** — pra preservar histórico se o avaliador apaga conta. Default `NO ACTION` no PG.
+- **`ratee_id`** — quem recebeu. Mesmo tratamento.
+- **`score`** — smallint. 1 ou 2 (binário positive/negative na UI atual; pode escalar pra 1-5 estrelas no futuro).
+- **`created_at` / `updated_at`** — `updated_at` existe mas nunca é atualizado (tabela imutável). Mantido por consistência com outras tabelas.
+
+## Foreign keys
+
+<Fks />
+
+`rater_id` e `ratee_id` apontam pra `users.id` **sem cascade** explícito. Ao deletar conta, a [endpoint de delete user](/docs/api/auth/google-unlink) precisa decidir o que fazer — atualmente, a delete via `DELETE /users/me` falha por FK constraint se houver ratings. Pendência: cascateir manualmente, ou deixar ratings com `rater_id = NULL` (anônimo).
+
+## Índices
+
+<Indexes />
+
+**Detalhes**:
+- **`listing_ratings_offer_rater_uniq`** — unique em `(offer_id, rater_id)`. Garante que cada lado só pode dar 1 rating por offer.
+- **`listing_ratings_ratee_idx`** — query "qual a reputação do user X" busca por ratee
+- **`listing_ratings_offer_idx`** — query "essa offer já foi avaliada?" via offer
+
+## Constraints
+
+<Constraints />
+
+## Janela de avaliação (rating window)
+
+Apenas offers com `status='completed'` permitem rating. A janela é de **30 dias** após confirm — após isso, submeter retorna `RATING_WINDOW_CLOSED`. Implementado no service.
+
+## listMyRatings — evita N+1
+
+Endpoint `GET /ratings/me` retorna a lista de ratings que o usuário deu. Quando o frontend lista ofertas, em vez de fazer N queries por offer pra checar "já avaliei?", usa esse map em memória — evita N+1.
+
+## Reputação visível
+
+Frontend pega `ratings_received_count` + `avg_score` via `GET /users/:id/reputation`. Renderiza `<ReputationBadge>` apenas se `count >= 3`. Abaixo disso, mostra "Sem reputação ainda" (não vaza dado parcial que poderia injustiçar usuário novo).
+
+## Padrões de uso
+
+- **Submit** — `POST /ratings` com `offer_id`, `score`. Backend valida ownership + window.
+- **Listar minhas** — `GET /ratings/me` (pra UI de "já avaliei?")
+- **Reputação de alguém** — `GET /users/:id/reputation` (count + avg, sem detalhes individuais)
+
+## Tabelas relacionadas
+
+- [`item_offers`](/docs/data-model/tables/item_offers) — offer avaliada (cascade)
+- [`users`](/docs/data-model/tables/users) — rater + ratee (sem cascade)
+- [`notifications`](/docs/data-model/tables/notifications) — `rating_received`

@@ -1,0 +1,117 @@
+---
+title: local-env-dev (infra compartilhada)
+description: Postgres, MinIO, Keycloak rodando em containers para todos os projetos do workspace.
+---
+
+`local-env-dev` (em `~/workspace_ssh/envs/Local-dev/`) é o stack de **infraestrutura compartilhada** entre todos os projetos do homelab. Sobe uma vez, vários backends consomem.
+
+## Serviços e portas
+
+| Serviço | Container | Porta host | Porta interna | Credenciais default |
+|---|---|---|---|---|
+| **PostgreSQL 17** | `dev-postgres` | `5432` | 5432 | `dev` / `dev` |
+| **Keycloak 24** | `dev-keycloak` | `8080` | 8080 | `admin` / `admin` |
+| **MinIO** | `dev-minio` | `9000` (S3 API) + `9001` (console) | iguais | `minioadmin` / `minioadmin` |
+
+> Geek Social **não usa Keycloak** (foi removido na sessão 2026-04-28). O serviço continua no compose por compatibilidade com outros projetos do workspace (sistema-financeiro, sistema-livros).
+
+## Subir e parar
+
+```bash
+cd ~/workspace_ssh/envs/Local-dev
+docker compose up -d           # sobe os 3 serviços
+docker compose ps              # checa health
+docker compose down            # para sem destruir volumes
+docker compose down -v         # para E destrói volumes (perde dados)
+```
+
+Volumes externos (`env_postgres_data`, `local-env-dev_minio_data`) são preservados entre `up`/`down` desde que você não passe `-v`.
+
+## Setup inicial (uma vez)
+
+### 1. Criar database `geek_social` no Postgres
+
+```bash
+docker exec -it dev-postgres psql -U dev -c "CREATE DATABASE geek_social;"
+```
+
+> Os databases `keycloak`, `sistema_financeiro` e `sistema_livros` já são criados automaticamente pelo script `postgres/init/01-create-databases.sql` no primeiro boot. O `geek_social` foi adicionado depois — precisa ser criado à mão.
+
+### 2. Criar bucket MinIO `geek-social-media`
+
+Via console web (`http://localhost:9001`) → login com `minioadmin`/`minioadmin` → "Create Bucket" → nome `geek-social-media` → opcionalmente, em "Access Policy" coloque "public" (pra dev as URLs serem acessíveis sem signed URL).
+
+Ou via CLI:
+
+```bash
+docker exec dev-minio mc alias set local http://localhost:9000 minioadmin minioadmin
+docker exec dev-minio mc mb local/geek-social-media
+docker exec dev-minio mc anonymous set download local/geek-social-media
+```
+
+### 3. Variáveis de ambiente do backend
+
+No `.env` do `geek-social-api`:
+
+```bash
+DATABASE_URL=postgresql://dev:dev@localhost:5432/geek_social
+STORAGE_ENDPOINT=http://localhost:9000
+STORAGE_PUBLIC_URL=http://localhost:9000/geek-social-media   # path-style com bucket
+S3_BUCKET_NAME=geek-social-media
+AWS_ACCESS_KEY_ID=minioadmin
+AWS_SECRET_ACCESS_KEY=minioadmin
+```
+
+## Healthchecks
+
+`docker compose ps` mostra status:
+
+```
+NAME            STATUS
+dev-postgres    Up 2 hours (healthy)
+dev-minio       Up 2 hours (healthy)
+dev-keycloak    Up 2 hours
+```
+
+`postgres` e `minio` têm healthcheck nativo. `keycloak` não — sobe e fica rodando.
+
+## Logs
+
+```bash
+docker compose logs -f postgres
+docker compose logs -f minio
+docker compose logs -f keycloak
+```
+
+## Backup rápido (dev)
+
+```bash
+# Postgres dump
+docker exec dev-postgres pg_dump -U dev geek_social > backup-$(date +%Y%m%d).sql
+
+# Restaurar em DB limpo
+docker exec -i dev-postgres psql -U dev geek_social < backup-20260429.sql
+
+# MinIO mirror
+docker exec dev-minio mc mirror local/geek-social-media /tmp/minio-backup
+```
+
+## Troubleshooting
+
+**`port is already allocated`** — outro processo ocupa 5432/8080/9000. Mate ou mude a porta no compose.
+
+**`role "dev" does not exist`** — primeiro boot falhou no setup. `docker compose down -v` + `up` recria.
+
+**Geek Social retorna 403 em URLs do MinIO** — `STORAGE_PUBLIC_URL` precisa incluir `/geek-social-media` no path. Sem isso, URLs ficam `http://localhost:9000/posts/abc.jpg` (errado) em vez de `http://localhost:9000/geek-social-media/posts/abc.jpg` (correto).
+
+**Migration falha com "database does not exist"** — esqueceu o passo 1 (criar `geek_social` à mão).
+
+## Outros projetos do workspace
+
+`docker-compose.apps.yml` (irmão do compose principal) sobe os apps backends/frontends já buildados como containers — útil pra testar integrações cross-project sem rodar tudo via `npm run dev`.
+
+```bash
+docker compose -f docker-compose.apps.yml up -d sistema-financeiro-api
+```
+
+Geek Social **não está nesse compose** ainda — roda só via `npm run dev`. Adicionar é parte do sub-projeto E (Deploy).

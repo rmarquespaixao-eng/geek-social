@@ -1,0 +1,41 @@
+---
+title: POST /collections/{collectionId}/items
+description: Criar item na coleção
+---
+
+import Meta from '@/generated/api/items/create/meta'
+import Request from '@/generated/api/items/create/request'
+import Responses from '@/generated/api/items/create/responses'
+import Errors from '@/generated/api/items/create/errors'
+import Examples from '@/generated/api/items/create/examples'
+
+<Meta />
+
+INSERT com fields validados contra schema dinâmico da coleção. Se collection.auto_share_to_feed=true OU shareToFeed=true, dispara post item_share automaticamente.
+
+## Request
+
+<Request />
+
+## Response
+
+<Responses />
+
+## Erros
+
+<Errors />
+
+{/* TODO: para cada código de erro acima, explique a causa e como resolver. */}
+
+## Exemplos
+
+<Examples />
+
+
+## Side effects
+
+{/* TODO: eventos de socket emitidos, notificações disparadas, jobs enfileirados, cascades. */}
+
+## Relacionados
+
+{/* TODO: links pra módulo, conceitos, endpoints relacionados. */}

@@ -1,0 +1,156 @@
+---
+title: Frontend — Visão geral
+description: Vue 3 + Vite + Pinia + Vue Router; modular por área de negócio espelhando o backend.
+---
+
+O `geek-social-frontend` é uma SPA Vue 3 que consome a [API REST](/docs/api/visao-geral) + sockets do backend.
+
+## Stack
+
+| Camada | Tecnologia |
+|---|---|
+| Framework | Vue 3.5 (Composition API) |
+| Build | Vite 8 |
+| TypeScript | 6.0 |
+| Estado | Pinia 3 |
+| Roteamento | vue-router 4 |
+| HTTP | Axios 1.15 com interceptors |
+| Realtime | socket.io-client 4 |
+| CSS | Tailwind 4 (via @tailwindcss/vite) |
+| PWA | vite-plugin-pwa 1.2 |
+| Ícones | lucide-vue-next |
+| Browser support | Modernos (ES2022+) |
+
+## Princípios de design
+
+Aplicação dos princípios da [Filosofia](/docs/intro/filosofia) no frontend:
+
+- **Espelha o backend** — `src/modules/<area>/` mapeia 1:1 com `src/modules/<area>/` da API
+- **HttpClient único** — auto-Bearer + auto-refresh em 401 + redirect login (DRY)
+- **Token em memória, não localStorage** — proteção contra XSS
+- **Pinia stores por área** — estado compartilhado entre componentes
+- **Socket singleton** — uma conexão pra app inteira, escopo global
+- **Service workers via PWA** — instalável + offline básico + push notifications
+
+## Estrutura
+
+```
+geek-social-frontend/src/
+├── App.vue                    ← root com router-view + global modals
+├── main.ts                    ← bootstrap (Pinia, router, mount)
+├── style.css                  ← Tailwind imports + custom CSS vars
+├── assets/                    ← imgs estáticas
+├── components/                ← componentes UI globais (ItemCard, ProfileBadge, etc.)
+├── modules/                   ← features por área de negócio
+│   ├── auth/
+│   ├── chat/
+│   ├── collections/
+│   ├── feed/
+│   ├── friends/
+│   ├── integrations/          ← Steam, etc.
+│   ├── notifications/
+│   ├── offers/
+│   └── reports/
+├── router/
+│   └── index.ts               ← rotas + guards
+└── shared/                    ← infra cross-module
+    ├── auth/                  ← Pinia store de auth
+    ├── http/                  ← Axios singleton + interceptors
+    ├── pwa/                   ← service worker + push registration
+    ├── socket/                ← Socket.IO singleton + listeners
+    ├── types/                 ← tipos compartilhados (Notification, User, etc.)
+    ├── ui/                    ← componentes UI base (Button, Input, Modal)
+    └── utils/                 ← funções utilitárias
+```
+
+## Estrutura de um módulo
+
+Padrão dentro de `src/modules/<area>/`:
+
+```
+modules/auth/
+├── views/                     ← páginas (rotas)
+│   ├── LoginView.vue
+│   ├── RegisterView.vue
+│   └── ForgotPasswordView.vue
+├── components/                ← componentes específicos do módulo
+│   ├── LoginForm.vue
+│   └── PasswordResetForm.vue
+├── composables/               ← lógica reativa reutilizável
+│   ├── useLogin.ts
+│   └── usePasswordReset.ts
+├── services/                  ← chamadas HTTP do módulo
+│   └── authService.ts
+└── index.ts                   ← rotas exportadas (registradas em router/index.ts)
+```
+
+**Convenção**:
+- **Views** = entrada de rota (`/login`, `/perfil/:id`)
+- **Components** = blocos reutilizáveis dentro do módulo
+- **Composables** = lógica reativa (`useX()` hooks)
+- **Services** = chamadas HTTP isoladas
+
+## Fluxo de dados (resumo)
+
+```
+[User clica em UI]
+   ↓
+View (LoginView.vue)
+   ↓
+Composable (useLogin())
+   ↓
+Service (authService.login())
+   ↓
+HttpClient (api.post('/auth/login'))
+   ↓
+Backend
+   ↓
+Response → Service → Composable → View → re-render
+```
+
+Estado persistente cross-componente: **Pinia store** (ex: `authStore` mantém token + user; lido por qualquer componente).
+
+Eventos real-time: **Socket** dispara handler que atualiza Pinia store, que reage e re-renderiza views.
+
+## Páginas vs componentes
+
+| Tipo | Quando | Exemplo |
+|---|---|---|
+| **View** (`/views/`) | Entrada de rota; geralmente tem layout próprio | `ProfileView.vue` |
+| **Component** (`/components/`) | Reutilizável; sem responsabilidade de fetch primário | `ProfileHeader.vue`, `CollectionCard.vue` |
+| **Layout** (futuro) | Wrapper compartilhado entre views | `AuthLayout.vue` (login/register) |
+
+## Build & dev
+
+```bash
+cd ~/workspace_ssh/geek-social-frontend
+npm install
+npm run dev          # Vite dev em :5173
+npm run build        # vue-tsc + vite build → dist/
+npm run preview      # preview do build de prod
+```
+
+## Variáveis de ambiente
+
+`.env` (não commitar):
+
+```bash
+VITE_API_URL=http://localhost:3003       # backend
+```
+
+Em prod, esse valor é injetado **runtime** via `entrypoint.sh` no container Nginx (não build-time):
+
+```sh
+# entrypoint.sh
+echo "window.APP_CONFIG = { apiUrl: '${API_URL}' };" > /usr/share/nginx/html/config.js
+```
+
+E `index.html` carrega `<script src="/config.js"></script>` antes do bundle.
+
+## Páginas relacionadas
+
+- [Estrutura detalhada](/docs/frontend/estrutura)
+- [HttpClient — interceptors](/docs/frontend/http-client)
+- [Auth store](/docs/frontend/auth-store)
+- [Socket singleton](/docs/frontend/socket)
+- [PWA + push notifications](/docs/frontend/pwa)

@@ -1,0 +1,41 @@
+---
+title: POST /users/me/avatar
+description: Upload de avatar
+---
+
+import Meta from '@/generated/api/users/upload-avatar/meta'
+import Request from '@/generated/api/users/upload-avatar/request'
+import Responses from '@/generated/api/users/upload-avatar/responses'
+import Errors from '@/generated/api/users/upload-avatar/errors'
+import Examples from '@/generated/api/users/upload-avatar/examples'
+
+<Meta />
+
+Multipart upload. Limite 5MB. Backend gera thumbnail via sharp e deleta avatar anterior se houver.
+
+## Request
+
+<Request />
+
+## Response
+
+<Responses />
+
+## Erros
+
+<Errors />
+
+{/* TODO: para cada código de erro acima, explique a causa e como resolver. */}
+
+## Exemplos
+
+<Examples />
+
+
+## Side effects
+
+{/* TODO: eventos de socket emitidos, notificações disparadas, jobs enfileirados, cascades. */}
+
+## Relacionados
+
+{/* TODO: links pra módulo, conceitos, endpoints relacionados. */}

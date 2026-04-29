@@ -1,0 +1,91 @@
+@import 'tailwindcss';
+@import 'fumadocs-ui/css/neutral.css';
+@import 'fumadocs-ui/css/preset.css';
+
+/* Geek Social — paleta inspirada na Anthropic com tom roxo gamer */
+:root {
+  --color-fd-primary: oklch(0.55 0.22 280);          /* roxo */
+  --color-fd-primary-foreground: oklch(0.99 0 0);
+  --color-fd-accent: oklch(0.62 0.18 165);            /* verde-water */
+  --color-fd-ring: oklch(0.55 0.22 280);
+}
+
+.dark {
+  --color-fd-primary: oklch(0.7 0.18 280);
+  --color-fd-primary-foreground: oklch(0.15 0.05 280);
+  --color-fd-accent: oklch(0.7 0.16 165);
+  --color-fd-ring: oklch(0.7 0.18 280);
+}
+
+html {
+  scrollbar-gutter: stable;
+  font-feature-settings: 'rlig' 1, 'calt' 1, 'ss01' 1;
+}
+
+html > body[data-scroll-locked] {
+  margin-right: 0px !important;
+  --removed-body-scroll-bar-size: 0px !important;
+}
+
+/* Tipografia: melhor leitura de prose técnica */
+.prose {
+  max-width: 72ch;
+}
+
+/* Tabelas: bordas mais sutis + hover */
+.prose table {
+  font-size: 0.9rem;
+  border-collapse: collapse;
+}
+
+.prose tbody tr:hover {
+  background: color-mix(in oklch, var(--color-fd-muted), transparent 50%);
+}
+
+.prose th {
+  font-weight: 600;
+  background: color-mix(in oklch, var(--color-fd-muted), transparent 30%);
+  text-transform: uppercase;
+  font-size: 0.75rem;
+  letter-spacing: 0.04em;
+}
+
+/* Code inline: destaque mais sutil */
+.prose code:not(pre code) {
+  font-size: 0.875em;
+  padding: 0.1em 0.3em;
+  border-radius: 0.25rem;
+  background: color-mix(in oklch, var(--color-fd-primary), transparent 92%);
+  color: var(--color-fd-primary);
+  font-weight: 500;
+}
+
+.dark .prose code:not(pre code) {
+  background: color-mix(in oklch, var(--color-fd-primary), transparent 85%);
+}
+
+/* Mermaid: garantir que SVG escala bem */
+[class*="mermaid"] svg {
+  max-width: 100%;
+  height: auto;
+}
+
+/* Scalar: isolar layout dentro do wrapper pra não vazar pro Fumadocs */
+.scalar-wrapper {
+  isolation: isolate;
+  contain: layout style;
+  min-height: 80vh;
+  position: relative;
+}
+
+.scalar-wrapper .scalar-api-reference,
+.scalar-wrapper .scalar-app {
+  font-family: inherit !important;
+  height: 100% !important;
+  min-height: 80vh;
+}
+
+/* Cards de navegação: hover mais distinto */
+.card:hover, [class*="Card"]:hover {
+  border-color: var(--color-fd-primary);
+}

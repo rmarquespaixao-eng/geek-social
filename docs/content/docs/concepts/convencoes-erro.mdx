@@ -1,0 +1,74 @@
+---
+title: Convenções de erro
+description: Como a API sinaliza erros e por que os códigos são tipados.
+---
+
+A API retorna erros num formato compacto e **tipado** — o cliente decide UI baseado em códigos, nunca em strings de mensagem (que mudam, são localizadas, e quebrariam comparações).
+
+## Formato
+
+Todos os erros 4xx retornam JSON no formato:
+
+```json
+{ "error": "CODIGO_TIPADO" }
+```
+
+Onde `CODIGO_TIPADO` é uma string em `SCREAMING_SNAKE_CASE`. Exemplos: `EMAIL_ALREADY_EXISTS`, `INVALID_CREDENTIALS`, `OFFER_NOT_FOUND`, `LISTING_ALREADY_CLOSED`.
+
+## Status HTTP por categoria
+
+| Status | Quando |
+|---|---|
+| `400` | Erro de validação ou regra de negócio violada |
+| `401` | Não autenticado (sem JWT, JWT inválido, refresh expirado) |
+| `403` | Autenticado mas sem permissão pra esse recurso |
+| `404` | Recurso não encontrado |
+| `409` | Conflito — recurso já existe ou estado incompatível com a operação |
+| `422` | Pré-condição faltando (ex: usuário não tem coleção destino pra receber transferência) |
+
+## Padrão STATUS_BY_CODE
+
+Módulos novos (ex: listings, offers, listing-ratings) seguem esse padrão no controller:
+
+```ts
+const STATUS_BY_CODE: Record<string, number> = {
+  ALREADY_LISTED: 409,
+  LISTING_NOT_FOUND: 404,
+  NOT_OWNER: 403,
+  // ...
+}
+
+// no try/catch:
+if (error instanceof ListingsError) {
+  const status = STATUS_BY_CODE[error.code] ?? 400
+  return reply.status(status).send({ error: error.code })
+}
+```
+
+O cliente faz:
+
+```ts
+const r = await fetch(...)
+if (!r.ok) {
+  const { error } = await r.json()
+  switch (error) {
+    case 'ALREADY_LISTED': /* mostra modal específico */ break
+    case 'LISTING_NOT_FOUND': /* redireciona */ break
+    default: /* fallback genérico */ break
+  }
+}
+```
+
+## Por que tipado e não traduzido
+
+- **i18n no cliente** — frontend traduz códigos para a língua do usuário; backend não conhece o idioma do consumidor
+- **Estabilidade** — refatorar mensagem em PT não quebra clientes
+- **Mapeamento de UI** — alguns códigos disparam ações específicas (ex: 401 → refresh; ALREADY_LISTED → mostra anúncio existente). Isso só dá pra fazer com switch em código.
+
+## Catálogo
+
+Ver [Códigos de erro](/docs/reference/codigos-erro) para a lista completa por módulo.
+
+## Erros não-tipados (legacy)
+
+O módulo Auth ainda retorna em alguns casos mensagens em PT (ex: `{ "error": "E-mail já cadastrado" }` em vez de `EMAIL_ALREADY_EXISTS`). Isso é débito técnico — clientes devem comparar pelo código futuro tipado e tratar a string como fallback. Migração planejada.

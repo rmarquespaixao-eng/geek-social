@@ -1,0 +1,51 @@
+---
+title: Stack e arquitetura
+description: Tecnologias e como o sistema é estruturado.
+---
+
+## Camadas
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ geek-social-frontend (Vue 3 + Vite + Pinia)                 │
+│   Bearer JWT no Authorization header                        │
+│   Cookies HttpOnly para refresh                             │
+└──────────────────┬──────────────────────────────────────────┘
+                   │  REST / Socket.IO
+┌──────────────────▼──────────────────────────────────────────┐
+│ geek-social-api (Fastify, TypeScript)                       │
+│   Clean Architecture lite + DDD                             │
+│   src/modules/<área>/  (auth, users, chat, posts, ...)      │
+│   src/shared/  (contracts, infra, middleware)               │
+│   Type provider Zod no Fastify (validação + OpenAPI)        │
+└──────────┬─────────────────────────┬────────────┬───────────┘
+           │                         │            │
+┌──────────▼──────────┐  ┌───────────▼──────┐  ┌──▼──────────┐
+│ PostgreSQL 17       │  │ MinIO (S3 local) │  │ pg-boss     │
+│  Drizzle ORM        │  │  avatares, posts │  │  fila p/ jobs│
+│  migrations em SQL  │  │  audio/video/imgs│  │  Steam, etc │
+└─────────────────────┘  └──────────────────┘  └─────────────┘
+```
+
+## Backend — princípios
+
+- **Module por área de negócio** — cada módulo dono de seu controller, service, repository, schema, routes
+- **Repository contracts em `shared/contracts/`** — quebra ciclos e permite test doubles
+- **Schemas Zod por módulo** — fonte da verdade pra validação e OpenAPI
+- **Erros tipados com SCREAMING_SNAKE_CASE** — código no campo `error`, status mapeado por `STATUS_BY_CODE` no controller
+- **`notifySafe` e setters injetados** — quebra de dependências circulares (ex: `listingsService.setOffersIntegration(...)`)
+
+## Banco — princípios
+
+- **PostgreSQL como source of truth** — sem caches "espertos" no app
+- **Drizzle ORM** — schema TypeScript-first em `src/shared/infra/database/schema.ts`
+- **Migrations geradas por `drizzle-kit`** — checked-in em `src/shared/infra/database/migrations/`
+- **Índices parciais usados liberalmente** — performance sem cardinalidade desnecessária
+- **Cascades explícitos nos FKs** — `onDelete: 'cascade'` quando o filho não faz sentido sozinho
+
+## Frontend — princípios
+
+- **Módulos espelham o backend** — `src/app/modulos/<area>/`
+- **`HttpClient` shared** — injeção automática de Bearer + tratamento de 401 → logout
+- **Pinia stores por área** — estado compartilhado entre componentes
+- **Socket.IO client** singleton — reage a eventos do backend

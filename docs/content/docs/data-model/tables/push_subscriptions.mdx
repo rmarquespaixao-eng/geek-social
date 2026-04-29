@@ -1,0 +1,68 @@
+---
+title: push_subscriptions
+description: Subscrições Web Push (VAPID) por dispositivo/navegador.
+---
+
+import Columns from '@/generated/data-model/tables/push_subscriptions/columns'
+import Fks from '@/generated/data-model/tables/push_subscriptions/fks'
+import Indexes from '@/generated/data-model/tables/push_subscriptions/indexes'
+import Constraints from '@/generated/data-model/tables/push_subscriptions/constraints'
+
+Subscrições Web Push por usuário/dispositivo. Quando o user permite notifications no browser, o frontend chama `pushManager.subscribe()` que retorna `{ endpoint, keys: { p256dh, auth } }` — esses dados ficam aqui pra que o backend possa mandar pushes.
+
+Cada usuário pode ter várias subscrições (Chrome do desktop + Firefox do laptop + Edge do trabalho). O `endpoint` é único globalmente — se o usuário re-permitir, o navegador retorna o mesmo endpoint (UPSERT idempotente).
+
+## Colunas
+
+<Columns />
+
+## Funcionalidade dos campos
+
+- **`id`** — UUID, PK
+- **`user_id`** — dono (cascade delete)
+- **`endpoint`** — URL do push service (Mozilla, Google, etc.). Único globalmente. Identificador da subscrição.
+- **`p256dh`** — chave pública do user pra criptografar payload (P-256 ECDH)
+- **`auth`** — secret de autenticação pra payload (HMAC)
+- **`created_at`** — primeira subscrição com esse endpoint
+
+## Foreign keys
+
+<Fks />
+
+## Índices
+
+<Indexes />
+
+`push_subscriptions_endpoint_unique` em `endpoint` impede duplicidade.
+
+## Constraints
+
+<Constraints />
+
+## Configuração VAPID
+
+Backend tem keys VAPID em env (`VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_CONTACT`). Lib `web-push` é configurada no boot via `PushService.configure(...)`.
+
+Pra gerar keys: `npx web-push generate-vapid-keys`. **Ronaldo** essas keys são per-app — uma vez geradas e usadas, trocar invalida todas as subs existentes.
+
+## Lifecycle
+
+- **Subscribe** — frontend (PWA) pede permissão, chama `pushManager.subscribe(applicationServerKey: VAPID_PUBLIC_KEY)`, manda result pro backend via `POST /chat/push-subscriptions`
+- **Send** — backend envia via `web-push.sendNotification(subscription, payload, { vapidDetails })`. Payload é JSON criptografado.
+- **Errors 410 Gone** — endpoint expirou; backend deleta a row
+- **Unsubscribe** — frontend chama `pushManager.unsubscribe()` + `DELETE /chat/push-subscriptions/:id`
+
+## Privacy
+
+Nada sensível aqui — keys são criptográficas, endpoint é uma URL opaca. Mas `user_id` revela quais users têm push ativado, então cuidado com queries cross-user (não há).
+
+## Padrões de uso
+
+- **Subscribe** — POST com body `{ endpoint, keys: { p256dh, auth } }` UPSERT por endpoint
+- **Send notif** — `PushService.sendToUser(userId, payload)` itera subscrições, envia em paralelo, deleta as que retornam 410
+- **Unsubscribe** — DELETE por id ou endpoint
+
+## Tabelas relacionadas
+
+- [`users`](/docs/data-model/tables/users) — dono (cascade)
+- [`notifications`](/docs/data-model/tables/notifications) — fonte do payload pra push

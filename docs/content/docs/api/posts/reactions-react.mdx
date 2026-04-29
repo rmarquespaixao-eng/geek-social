@@ -1,0 +1,41 @@
+---
+title: POST /posts/{postId}/reactions
+description: Reagir ao post
+---
+
+import Meta from '@/generated/api/posts/reactions-react/meta'
+import Request from '@/generated/api/posts/reactions-react/request'
+import Responses from '@/generated/api/posts/reactions-react/responses'
+import Errors from '@/generated/api/posts/reactions-react/errors'
+import Examples from '@/generated/api/posts/reactions-react/examples'
+
+<Meta />
+
+UPSERT reaction (1 por user/post). Trocar tipo é UPDATE. Dispara notif post_reaction ao dono do post.
+
+## Request
+
+<Request />
+
+## Response
+
+<Responses />
+
+## Erros
+
+<Errors />
+
+{/* TODO: para cada código de erro acima, explique a causa e como resolver. */}
+
+## Exemplos
+
+<Examples />
+
+
+## Side effects
+
+{/* TODO: eventos de socket emitidos, notificações disparadas, jobs enfileirados, cascades. */}
+
+## Relacionados
+
+{/* TODO: links pra módulo, conceitos, endpoints relacionados. */}

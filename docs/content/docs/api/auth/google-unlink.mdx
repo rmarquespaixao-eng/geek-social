@@ -1,0 +1,81 @@
+---
+title: DELETE /auth/google/link
+description: Desvincular conta Google (autenticado)
+---
+
+import Meta from '@/generated/api/auth/google-unlink/meta'
+import Request from '@/generated/api/auth/google-unlink/request'
+import Responses from '@/generated/api/auth/google-unlink/responses'
+import Errors from '@/generated/api/auth/google-unlink/errors'
+import Examples from '@/generated/api/auth/google-unlink/examples'
+
+<Meta />
+
+Remove o vínculo entre a conta atual e o Google. Apaga `users.google_id` e `users.google_linked_at`. **Falha** se a conta não tem senha local definida — caso contrário a conta ficaria sem método de login (orfã).
+
+## Quando chamar
+
+- Tela "Configurações → Conexões" → botão "Desvincular Google"
+- Antes de desvincular, garantir que o user tem senha local. Se não tiver, primeiro chamar [`POST /auth/set-password`](/docs/api/auth/set-password)
+
+## Request
+
+<Request />
+
+**Sem body**. **Header obrigatório**: `Authorization: Bearer <accessToken>`.
+
+## Response
+
+<Responses />
+
+`204 No Content`.
+
+## Erros
+
+<Errors />
+
+**Como resolver cada caso**:
+
+| Status | Código | Causa | Como resolver |
+|---|---|---|---|
+| 401 | (sem corpo) | JWT ausente/inválido | Refresh ou login |
+| 404 | `USER_NOT_FOUND` | User do JWT não existe mais | Logout + re-login |
+| 404 | `GOOGLE_NOT_LINKED` | Conta atual nunca vinculou Google | Não há ação — a conta não está vinculada |
+| 409 | `PASSWORD_REQUIRED_BEFORE_UNLINK` | Conta não tem `password_hash` | Chame [`POST /auth/set-password`](/docs/api/auth/set-password) primeiro, depois retente |
+
+## Exemplos
+
+<Examples />
+
+
+### Fluxo no frontend
+
+```ts
+async function unlinkGoogle() {
+  const r = await fetch('/auth/google/link', {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${accessToken}` },
+  })
+  if (r.status === 204) return  // sucesso
+  const { error } = await r.json()
+  if (error === 'PASSWORD_REQUIRED_BEFORE_UNLINK') {
+    // Mostrar modal "Defina uma senha antes de desvincular"
+    promptSetPasswordFirst()
+  } else {
+    showError(error)
+  }
+}
+```
+
+## Side effects
+
+- **DB**: `UPDATE users SET google_id = NULL, google_linked_at = NULL WHERE id = userId`
+- **NÃO mexe em refresh_tokens** — a sessão atual continua válida
+- **Avatar do Google permanece** (`users.avatar_url` não é tocado) — o user pode trocar manualmente depois
+- **Sem notificação ou socket**
+
+## Relacionados
+
+- Endpoint: [`POST /auth/set-password`](/docs/api/auth/set-password) — pré-requisito quando não há senha local
+- Endpoint: [`GET /auth/google/link`](/docs/api/auth/google-link-start) — vincular novamente depois (operação inversa)
+- Tabela: [`users`](/docs/data-model/tables/users) — campos `google_id`, `google_linked_at`

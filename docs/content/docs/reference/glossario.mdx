@@ -1,0 +1,74 @@
+---
+title: Glossário
+description: Termos do domínio do Geek Social.
+---
+
+Termos específicos do domínio do produto. Para conceitos genéricos (REST, JWT, OAuth) consulte literatura externa.
+
+## Auth e sessão
+
+**Access token** — JWT curto (15min) emitido em login/register/refresh. Carrega `userId` e `email` nos claims. Vai no header `Authorization: Bearer ...` em requests autenticados.
+
+**Refresh token** — Token aleatório (32 bytes hex) com TTL longo (7 dias default). Vive em cookie HttpOnly. Usado apenas em `/auth/refresh` pra trocar por novo par de tokens. Cada refresh **rotaciona** (invalida o atual e emite novo).
+
+**Refresh rotation** — Política de invalidar o refresh anterior a cada uso. Permite detecção precoce de roubo: se atacante usa primeiro, o user real pega 401 no próximo refresh.
+
+**State token (OAuth)** — JWT curto (5min) que `/auth/google` assina e injeta no `state` da URL de autorização. Callback verifica antes de aceitar — protege contra CSRF e injeção de fluxo.
+
+**Modos do OAuth callback** — `registered` (conta criada nova), `logged-in` (login normal), `linked-login` (vínculo automático via e-mail batendo + login na mesma operação), `linked` (vínculo a partir de conta autenticada, sem login).
+
+## Conteúdo
+
+**Coleção** — Agrupamento de itens do usuário. Tem tipo (`games`, `books`, `cardgames`, `boardgames`, `custom`), schema dinâmico de campos customizados, e visibilidade própria.
+
+**Item** — Entidade individual dentro de uma coleção. Tem campos comuns (nome, capa) e campos custom definidos pela `field_definitions` da coleção.
+
+**Field definition** — Definição de um campo customizado (nome, tipo `text|number|date|boolean|select|money`, opções se select). Pode ser do sistema (compartilhado entre todos) ou do usuário.
+
+**Schema dinâmico de coleção** — Mapeamento ordenado de quais `field_definitions` aparecem numa coleção específica, na ordem que o usuário definiu (`collection_field_schema`).
+
+## Vitrine (marketplace)
+
+**Listing** — Anúncio de um item à venda ou disponível pra troca. Source of truth da disponibilidade — quando aberto, o item está "no mercado". Estados: `open`, `closed` (manualmente encerrado), `sold` (transação fechada). Pode ser excluído se `closed`.
+
+**Offer** — Proposta feita por outro usuário sobre um listing. Tem tipo (`buy` ou `trade`), itens oferecidos (se trade), valor (se buy). Cada offer tem **uma proposta pendente por vez** — modelagem em `offer_proposals`.
+
+**Offer proposal** — Rodada de negociação dentro de uma offer. Estados: `pending` (esperando ação do receptor), `accepted` (aceita, transação a ser confirmada), `rejected` (rejeitada — fim daquela rodada), `superseded` (substituída por counter-proposta). Apenas 1 `pending` por offer ao mesmo tempo (unique partial index).
+
+**Counter-proposta** — Quando o receptor de uma proposta cria uma nova com termos modificados. A anterior vira `superseded`, a nova é `pending` com o turno do outro lado.
+
+**Dual confirmation** — Antes de transferir itens, ambos os usuários precisam confirmar ("li, está tudo certo"). Só após dois confirms a transação executa (move itens entre coleções).
+
+**Auto-create de coleção destino** — Se o receptor não tem coleção compatível pra acolher os itens transferidos, o backend cria automaticamente uma com nome amigável ("Jogos recebidos", etc.) e move os itens pra lá.
+
+**Auto-rejeição em close** — Quando um listing é encerrado/excluído com offers pendentes, todas elas viram `rejected` automaticamente (e notificações são enviadas aos ofertantes).
+
+**Listing rating** — Avaliação que cada lado dá após uma transação confirmada. **Imutável** (sem PATCH/DELETE no backend). Visibilidade gated por `MIN_RATINGS=3` — perfis com menos de 3 avaliações não exibem reputação.
+
+**Rating window** — Janela de 30 dias após confirmação da transação em que cada lado pode submeter rating. Após isso, fica congelado.
+
+**Reputação** — Agregação visual das avaliações imutáveis (estrelas + count). Aparece no perfil via `<ReputationBadge>` se atingir o threshold.
+
+## Social
+
+**Friendship** — Relação simétrica entre dois users. Tem status (`pending` antes do aceite, `accepted` depois). Necessário pra conteúdo `friends_only` ser visível.
+
+**Block** — Relação assimétrica. Bloquear corta amizade existente, esconde conteúdo, e desconecta conversas dos dois lados.
+
+**DM request** — Mensagem inicial de um non-friend. Vai pra "Solicitações" do destinatário; só após aceite, vira conversa normal.
+
+**Ephemeral chat (per-user)** — Modo Snapchat-style por conversa: mensagens são apagadas após X tempo de "lidas" pelo usuário (configurável por usuário, não global). Hard delete no DB.
+
+## Realtime
+
+**Notification** — Evento que o user precisa saber sobre (alguém comentou, oferta nova, amigo aceitou). Persistido em `notifications` + emitido em real-time via socket + push notification opcional.
+
+**Push (VAPID)** — Notificação Web Push. User assina via service worker; backend manda via VAPID keys configuradas em env.
+
+**Presence** — Indicador "online agora". Mantido em memória + tabela `presence` (last_seen). Visibilidade gated por `users.show_presence`.
+
+## Steam integration
+
+**Import job** — Tarefa pg-boss que busca jogos do user no Steam. Tem dois workers: `steam.import-game` (lista de owned games) e `steam.enrich-game` (detalhes via appdetails, com throttle agressivo).
+
+**Batch finalization** — Mecanismo pra detectar fim de uma importação (todos os jobs do batch terminaram), independentemente de quem termina por último.

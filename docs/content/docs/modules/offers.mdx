@@ -1,0 +1,188 @@
+---
+title: Offers
+description: Sistema de ofertas com counter-propostas (proposal rounds) e dual confirmation.
+---
+
+## Visão geral
+
+**Offers** modelam negociação entre ofertante e dono de um listing. Suporta:
+- **Tipo `buy`** (com dinheiro) ou **`trade`** (com outro item)
+- **Counter-propostas** via tabela `offer_proposals` — apenas 1 proposal `pending` por offer ao mesmo tempo
+- **Dual confirmation** antes da transferência efetivar
+- **Auto-create** de coleção destino se receptor não tem
+- **Auto-rejeição** quando listing é encerrado
+
+A offer "como um todo" tem status `pending → accepted → completed` (ou `rejected/cancelled/expired`). A negociação real (counters) acontece em proposals; quando uma proposal é aceita, a offer evolui pra `accepted`.
+
+## Entidades principais
+
+| Tabela | Papel |
+|---|---|
+| [`item_offers`](/docs/data-model/tables/item_offers) | Offer guarda-chuva (status global, dual confirm timestamps) |
+| [`offer_proposals`](/docs/data-model/tables/offer_proposals) | Rodadas de negociação (pending/accepted/rejected/superseded) |
+| [`listings`](/docs/data-model/tables/listings) | Anúncio alvo |
+| [`items`](/docs/data-model/tables/items) | Item alvo + opcional offered_item_id (em trade) |
+
+## Endpoints
+
+10 endpoints em `/offers`:
+
+| Endpoint | Resumo |
+|---|---|
+| `POST /offers` | Criar oferta |
+| `GET /offers/received` | Recebidas (filtrar por status) |
+| `GET /offers/sent` | Enviadas |
+| `GET /offers/:id` | Detalhes (inclui latestProposal) |
+| `POST /offers/:id/accept` | Aceitar a proposal corrente |
+| `POST /offers/:id/reject` | Rejeitar a proposal corrente |
+| `POST /offers/:id/cancel` | Ofertante cancela |
+| `POST /offers/:id/confirm` | Dual confirm + execute transfer |
+| `POST /offers/:id/propose` | Counter-proposta |
+| `GET /offers/:id/history` | Timeline de proposals |
+
+## Fluxos
+
+### Criar oferta
+
+<Mermaid chart={`sequenceDiagram
+  autonumber
+  participant O as Offerer
+  participant API as Backend
+  participant DB as PostgreSQL
+  participant N as NotificationsService
+
+  O->>API: POST /offers { type:'trade', listingId, offeredItemId, message? }
+  API->>API: Pre-check: existing pending offer (item_id, offerer_id)
+  alt Duplicado
+    API-->>O: 409 DUPLICATE_PENDING_OFFER
+  else
+    API->>DB: BEGIN
+    API->>DB: INSERT item_offers (status=pending)
+    API->>DB: INSERT offer_proposals (proposer=offerer, status=pending)<br/>— a primeira rodada
+    API->>DB: COMMIT
+    API->>N: notify({ recipient: listing.owner, type:'offer_received' })
+    API-->>O: 201 { offer com latestProposal embutida }
+  end`} />
+
+### Aceitar proposal corrente
+
+<Mermaid chart={`sequenceDiagram
+  autonumber
+  participant Owner as Listing owner (turno dele)
+  participant API as Backend
+  participant DB as PostgreSQL
+  participant N as NotificationsService
+
+  Owner->>API: POST /offers/:id/accept
+  API->>API: Verifica turno: latestProposal.proposer != currentUser
+  API->>DB: BEGIN
+  API->>DB: UPDATE offer_proposals<br/>SET status='accepted'<br/>WHERE id=latestProposal.id
+  API->>DB: UPDATE item_offers SET status='accepted'
+  API->>DB: COMMIT
+  API->>N: notify({ recipient: offerer, type:'offer_accepted' })
+  Note over API: Próximo passo: dual confirm pelos 2 lados`} />
+
+### Counter-proposta
+
+<Mermaid chart={`sequenceDiagram
+  autonumber
+  participant U as User (turno dele)
+  participant API as Backend
+  participant DB as PostgreSQL
+  participant N as NotificationsService
+
+  U->>API: POST /offers/:id/propose<br/>{ offeredPrice?, offeredItemId?, message? }
+  API->>API: Verifica turno: oposto da última proposal
+  API->>DB: BEGIN
+  API->>DB: UPDATE offer_proposals<br/>SET status='superseded'<br/>WHERE offer_id=? AND status='pending'
+  API->>DB: INSERT offer_proposals<br/>(proposer=currentUser, status='pending')
+  API->>DB: COMMIT
+  API->>N: notify({ recipient: oposto, type:'counter_proposal_received' })`} />
+
+### Dual confirm + transferência
+
+<Mermaid chart={`sequenceDiagram
+  autonumber
+  participant Lado1 as Lado 1
+  participant Lado2 as Lado 2
+  participant API as Backend
+  participant DB as PostgreSQL
+  participant CS as CollectionsService
+  participant N as NotificationsService
+  participant LS as ListingsService
+
+  Lado1->>API: POST /offers/:id/confirm
+  API->>DB: UPDATE offerer_confirmed_at = now()<br/>(ou owner_confirmed_at, conforme quem é)
+  alt Apenas 1 lado confirmado
+    API-->>Lado1: { offer com 1 confirmado }
+  else Ambos confirmados
+    API->>DB: BEGIN executeTransfer
+    API->>CS: ensureDestinationCollection(receiver, item.type)
+    Note over CS: Cria coleção "Jogos recebidos" se não houver
+    API->>DB: UPDATE items[item_id].collection_id = destinoColeção<br/>(transferência)
+    alt Trade
+      API->>DB: UPDATE items[offered_item_id].collection_id = colDoOwner
+    end
+    API->>DB: UPDATE item_offers status='completed'
+    API->>LS: closeListing (status='closed')
+    API->>DB: COMMIT
+    API->>N: notify ambos: 'offer_completed'
+  end
+
+  Lado2->>API: POST /offers/:id/confirm (se ainda não tinha)
+  Note over API: Idempotente — se já completed, retorna OK<br/>se faltou execute por algum erro, retenta`} />
+
+### Cancelar (offerer)
+
+<Mermaid chart={`sequenceDiagram
+  autonumber
+  participant O as Offerer
+  participant API as Backend
+  participant DB as PostgreSQL
+  participant N as NotificationsService
+
+  O->>API: POST /offers/:id/cancel
+  API->>DB: UPDATE item_offers status='cancelled'
+  API->>DB: UPDATE proposal pending status='superseded'
+  API->>N: notify({ recipient: owner, type:'offer_cancelled' })`} />
+
+### Auto-expiração (cron)
+
+`runOffersExpire` roda a cada 1h:
+
+```sql
+UPDATE item_offers
+SET status = 'expired'
+WHERE status = 'accepted'
+  AND (offerer_confirmed_at IS NULL OR owner_confirmed_at IS NULL)
+  AND updated_at < now() - INTERVAL '7 days'
+```
+
+Notifica ambos os lados com `offer_expired`.
+
+## Eventos de socket
+
+Eventos via NotificationsService:
+- `offer_received`, `offer_accepted`, `offer_rejected`, `offer_cancelled`, `offer_completed`, `offer_expired`
+- `counter_proposal_received`, `proposal_rejected`
+
+## Edge cases e regras especiais
+
+- **Pre-check anti-500**: oferta duplicada retorna 409 com `DUPLICATE_PENDING_OFFER`, não erro de unique constraint
+- **`isMyTurn` no frontend** — calculado de `latestProposal.proposerId !== currentUserId`
+- **Confirm idempotente** — re-chamar não falha; se transfer já rodou, retorna estado atual
+- **Auto-create de coleção destino** — receptor não precisa ter coleção compatível previamente
+- **Hard delete de listing** seta `listing_id=NULL` em offers (preserva offer history)
+- **Janela de avaliação 30 dias** após `offer_completed` — após isso, rate retorna RATING_WINDOW_CLOSED
+- **`offered_item_id` set null** se item original deletado — preserva offer record
+- **Reject só rejeita rodada**, não offer inteira. Pra cancelar, ofertante usa `/cancel`.
+- **Trade requires both items present** — se algum foi transferido em outra offer entre a criação e o confirm, falha com TRADE_ITEM_UNAVAILABLE.
+
+## Dependências entre módulos
+
+- **Listings** — auto-reject em close, hard delete preserva via set null
+- **Items** — alvo + opcional offered + transferência muda collection_id
+- **Collections** — auto-create destino em transfer
+- **Listing Ratings** — habilitado após completed
+- **Notifications** — 8 tipos diferentes
+- **Friends** — block impede oferta entre user bloqueado/bloqueador

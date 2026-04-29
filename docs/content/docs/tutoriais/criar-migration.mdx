@@ -1,0 +1,297 @@
+---
+title: Como criar uma migration
+description: Adicionar coluna, criar tabela, mudar enum — passo a passo com Drizzle Kit.
+---
+
+Migrations no Geek Social são **geradas automaticamente** pelo Drizzle Kit comparando o `schema.ts` com o último snapshot. Esse fluxo evita erros de sincronia, mas tem casos onde edição manual é necessária.
+
+## Fluxo padrão
+
+### 1. Edite `schema.ts`
+
+`src/shared/infra/database/schema.ts` é a **fonte de verdade**. Toda mudança começa aqui:
+
+```ts
+// Antes
+export const users = pgTable('users', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  email: varchar('email', { length: 255 }).unique().notNull(),
+  // ...
+})
+
+// Depois — adicionei phone_number
+export const users = pgTable('users', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  email: varchar('email', { length: 255 }).unique().notNull(),
+  phoneNumber: varchar('phone_number', { length: 30 }),
+  // ...
+})
+```
+
+### 2. Gere a migration
+
+```bash
+cd ~/workspace_ssh/geek-social-api
+npm run db:generate
+```
+
+Drizzle compara com `meta/<latest>_snapshot.json` e cria:
+
+```
+src/shared/infra/database/migrations/
+├── 0035_add_user_phone.sql        ← novo
+├── meta/
+│   ├── _journal.json              ← atualizado
+│   └── 0035_snapshot.json         ← novo
+```
+
+### 3. Revise o SQL
+
+```bash
+cat src/shared/infra/database/migrations/0035_add_user_phone.sql
+```
+
+```sql
+ALTER TABLE "users" ADD COLUMN "phone_number" varchar(30);
+```
+
+Pra adições simples está OK. **Edite manualmente** quando:
+- Precisa de **backfill** de dados antes de aplicar NOT NULL
+- Precisa de transformação custom
+- A geração automática não cobre o caso
+
+### 4. Aplique e teste
+
+```bash
+npm run db:migrate          # aplica pendentes sem subir app
+# OU
+npm run dev                 # aplica + sobe (dev)
+```
+
+### 5. Commit
+
+Commite os 3 arquivos juntos:
+- O `.sql`
+- O snapshot novo
+- O `_journal.json` atualizado
+
+## Caso 1: Adicionar coluna nullable
+
+Trivial. Drizzle gera correto:
+
+```ts
+phoneNumber: varchar('phone_number', { length: 30 }),  // nullable por default
+```
+
+```sql
+ALTER TABLE "users" ADD COLUMN "phone_number" varchar(30);
+```
+
+## Caso 2: Adicionar coluna NOT NULL com default
+
+Trivial pra Drizzle:
+
+```ts
+emailVerified: boolean('email_verified').default(false).notNull(),
+```
+
+```sql
+ALTER TABLE "users" ADD COLUMN "email_verified" boolean DEFAULT false NOT NULL;
+```
+
+PG aplica o default em rows existentes (rápido em PG 11+ por causa de fast default).
+
+## Caso 3: Adicionar coluna NOT NULL sem default (precisa backfill)
+
+Drizzle gera SQL que **falhará** se houver rows existentes:
+
+```sql
+ALTER TABLE "users" ADD COLUMN "country" varchar(2) NOT NULL;  -- ERRO em rows existentes
+```
+
+**Edite manualmente** pra fazer 3-step:
+
+```sql
+-- 1. Add nullable
+ALTER TABLE "users" ADD COLUMN "country" varchar(2);
+
+-- 2. Backfill
+UPDATE "users" SET "country" = 'BR' WHERE "country" IS NULL;
+
+-- 3. Set NOT NULL
+ALTER TABLE "users" ALTER COLUMN "country" SET NOT NULL;
+```
+
+## Caso 4: Renomear coluna
+
+Drizzle por default gera DROP + ADD — **perde dados**! Detecta e pede confirmação:
+
+```
+Is `phone_number` column in users table renamed from `phone`? (y/n)
+```
+
+Se você responder `y`, gera:
+
+```sql
+ALTER TABLE "users" RENAME COLUMN "phone" TO "phone_number";
+```
+
+Se você responder `n`, gera DROP + ADD (errado nesse caso). **Sempre revise** o SQL.
+
+## Caso 5: Adicionar tabela nova
+
+```ts
+export const wishlistItems = pgTable('wishlist_items', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  // ...
+})
+```
+
+Drizzle gera:
+
+```sql
+CREATE TABLE IF NOT EXISTS "wishlist_items" (
+  "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  "user_id" uuid NOT NULL REFERENCES "users"("id") ON DELETE CASCADE,
+  -- ...
+);
+```
+
+## Caso 6: Adicionar valor a um enum
+
+PG suporta `ALTER TYPE ... ADD VALUE`:
+
+```ts
+export const notificationTypeEnum = pgEnum('notification_type', [
+  // existentes
+  'friend_request',
+  // ...
+  'meu_novo_tipo',  // NOVO
+])
+```
+
+Drizzle gera:
+
+```sql
+ALTER TYPE "notification_type" ADD VALUE 'meu_novo_tipo';
+```
+
+> **Cuidado**: `ADD VALUE` precisa estar **fora de transação** em PG \< 12. Drizzle usa transação por default; pode dar erro. Workaround: rodar a SQL fora.
+
+**Não dá pra remover valor de enum** sem dropar+recriar. Pra "descontinuar":
+- Adicionar coluna `is_deprecated` na entidade que usa
+- OU criar enum novo, migrar valores, dropar antigo (caro)
+
+## Caso 7: Mudar tipo de coluna
+
+```ts
+// Antes
+playtimeMinutes: integer('playtime_minutes')
+// Depois
+playtimeMinutes: bigint('playtime_minutes', { mode: 'number' })
+```
+
+Drizzle gera:
+
+```sql
+ALTER TABLE "items" ALTER COLUMN "playtime_minutes" SET DATA TYPE bigint;
+```
+
+PG faz a conversão se for compatível (int → bigint OK; varchar → integer só se valores são numéricos).
+
+## Caso 8: Adicionar índice parcial
+
+```ts
+export const messages = pgTable('messages', {
+  // colunas...
+}, (table) => ({
+  unreadIdx: index('messages_unread_idx')
+    .on(table.userId, table.createdAt)
+    .where(sql`deleted_at IS NULL`),
+}))
+```
+
+```sql
+CREATE INDEX IF NOT EXISTS "messages_unread_idx"
+ON "messages" ("user_id", "created_at")
+WHERE deleted_at IS NULL;
+```
+
+Útil pra queries frequentes em subset de rows.
+
+## Caso 9: Drop coluna
+
+```ts
+// Removeu phone_number do schema
+```
+
+```sql
+ALTER TABLE "users" DROP COLUMN "phone_number";
+```
+
+⚠️ **Destrutivo**. Em prod:
+- Faça deploy do código que **não lê** essa coluna primeiro
+- Aguarde alguns dias (rollback ok)
+- Depois rode a migration de DROP
+
+## Caso 10: Drop tabela
+
+```ts
+// Removeu wishlistItems
+```
+
+```sql
+DROP TABLE "wishlist_items";
+```
+
+Mesma cautela do drop de coluna. CASCADE se há FKs.
+
+## Em produção (consideração geral)
+
+- **Lock de tabela**: `ALTER TABLE ... ADD COLUMN NOT NULL` em PG 11+ é fast (rewrite avoided com fast default), mas em tabelas gigantes ainda é cuidado
+- **Rebuild de índice em produção**: `CREATE INDEX CONCURRENTLY` evita lock; Drizzle não gera por default — edite manualmente
+- **Rollback**: NÃO há migration de "down" automatic. Se rodou e quer reverter, escreva nova migration que desfaz
+
+## Padrões que evitamos
+
+- **Editar migration já merged em main** — rompe sincronia com snapshot. Sempre crie nova.
+- **Modificar `_journal.json` à mão** — exceto pra remover migration órfã (raro)
+- **Drop column + recreate** pra "renomear" — usar RENAME
+
+## Troubleshooting
+
+### "schema do app não bate com snapshot"
+
+Você editou `schema.ts` mas rodou `db:migrate` sem rodar `db:generate` antes. Solução:
+
+```bash
+npm run db:generate    # gera migration que fecha o gap
+npm run db:migrate
+```
+
+### "migration .sql faltando snapshot/journal"
+
+Commit incompleto. Adicione e commite os 3 arquivos juntos:
+
+```
+0035_xxx.sql
+meta/_journal.json
+meta/0035_snapshot.json
+```
+
+### "ERROR: column already exists"
+
+Migration foi parcialmente aplicada e retomou. Verifique:
+
+```sql
+SELECT * FROM drizzle.__drizzle_migrations ORDER BY id DESC LIMIT 5;
+```
+
+Se a migration não está lá mas a coluna já foi criada, marque manualmente ou ajuste o SQL pra `IF NOT EXISTS`.
+
+## Referências
+
+- [Convenções do banco](/docs/data-model/convencoes)
+- [Migrations](/docs/data-model/migrations)
+- [Drizzle Kit docs](https://orm.drizzle.team/kit-docs/overview)

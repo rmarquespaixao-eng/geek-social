@@ -1,0 +1,71 @@
+---
+title: collections
+description: Coleções de itens (jogos, livros, custom) pertencentes a um usuário.
+---
+
+import Columns from '@/generated/data-model/tables/collections/columns'
+import Fks from '@/generated/data-model/tables/collections/fks'
+import Indexes from '@/generated/data-model/tables/collections/indexes'
+import Constraints from '@/generated/data-model/tables/collections/constraints'
+
+Uma coleção é um grupo de itens pertencentes a um usuário. Tem **tipo** (`games`, `books`, `cardgames`, `boardgames`, `custom`) que determina os field definitions disponíveis, e **visibilidade** própria (independente do `users.privacy`).
+
+Coleções têm schema dinâmico: o usuário escolhe quais `field_definitions` aparecem nos itens dela e em que ordem (via [`collection_field_schema`](/docs/data-model/tables/collection_field_schema)).
+
+## Colunas
+
+<Columns />
+
+## Funcionalidade dos campos
+
+- **`id`** — UUID, PK
+- **`user_id`** — dono. CASCADE delete: apagar user apaga suas coleções (e os items delas).
+- **`name`** — texto livre 1–100 chars. Não precisa ser único por user (pode ter duas "Favoritos" em tipos diferentes).
+- **`description`** — texto longo opcional, livre.
+- **`icon_url`** — URL de ícone customizado (S3/MinIO). Opcional; frontend usa default por tipo se ausente.
+- **`cover_url`** — URL de capa da coleção (banner exibido no detalhe da coleção).
+- **`type`** — enum imutável após criar. Determina quais field definitions são compatíveis.
+- **`visibility`** — `public` | `private` | `friends_only`. Granular por coleção (não pega `users.privacy`).
+- **`auto_share_to_feed`** — se `true`, adicionar item nessa coleção dispara um post `item_share` no feed do usuário automaticamente.
+- **`created_at` / `updated_at`** — managed pelo app.
+
+## Foreign keys
+
+<Fks />
+
+## Índices
+
+<Indexes />
+
+Sem índices secundários customizados. Lookups típicos: `WHERE user_id = ?` (favorecido pelo plano de query do PG via FK + sequential scan filtrado, baixo volume por user).
+
+## Constraints
+
+<Constraints />
+
+## Visibility e cross-user access
+
+Listar coleções de outro usuário (`GET /users/:id/collections`):
+- `public` → visível a todos
+- `friends_only` → visível só se há amizade aceita entre os dois
+- `private` → invisível pra qualquer um exceto o dono
+
+Backend valida via `friendsRepository` no `collections.service`.
+
+## Coleção destino em transferências (Vitrine)
+
+Quando uma offer é confirmada e itens são transferidos pro receptor, o backend tenta encontrar uma coleção compatível no destino. Se não encontrar, **cria automaticamente** uma do tipo correspondente com nome amigável: "Jogos recebidos", "Livros recebidos", etc. Implementado em `OffersService.ensureDestinationCollection`.
+
+## Padrões de uso
+
+- **Criar** — INSERT após validação de tipo. Se for `custom`, sem field schema inicial; o user adiciona via UI depois.
+- **Editar** — UPDATE de `name`, `description`, `icon_url`, `cover_url`, `visibility`, `auto_share_to_feed`. **Tipo é imutável** após criação (mudaria semântica dos itens).
+- **Deletar** — DELETE cascateia para `items` e `collection_field_schema`.
+
+## Tabelas relacionadas
+
+- [`users`](/docs/data-model/tables/users) — dono (cascade)
+- [`collection_field_schema`](/docs/data-model/tables/collection_field_schema) — schema dinâmico (cascade)
+- [`items`](/docs/data-model/tables/items) — itens dentro (cascade)
+- [`field_definitions`](/docs/data-model/tables/field_definitions) — definições disponíveis pra esse tipo
+- [`posts`](/docs/data-model/tables/posts) — post de auto-share quando item adicionado

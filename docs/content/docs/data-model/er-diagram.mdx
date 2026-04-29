@@ -1,0 +1,347 @@
+---
+title: ER Diagram
+description: Visão geral completa do schema do banco — 28 tabelas e seus relacionamentos.
+---
+
+O schema completo é gerado automaticamente a partir do `src/shared/infra/database/schema.ts` usando `drizzle-dbml-generator`. O DBML completo está em [`/schema.dbml`](/schema.dbml) — cole no [dbdiagram.io](https://dbdiagram.io) pra um diagrama interativo navegável.
+
+## ER completo (Mermaid)
+
+<Mermaid chart={`erDiagram
+  users ||--o{ refresh_tokens : "session"
+  users ||--o{ password_reset_tokens : "reset"
+  users ||--o{ collections : "owns"
+  users ||--o{ field_definitions : "creates custom"
+  users ||--o{ posts : "authors"
+  users ||--o{ post_reactions : "reacts"
+  users ||--o{ post_comments : "comments"
+  users ||--o{ friendships : "as requester or receiver"
+  users ||--o{ user_blocks : "as blocker or blocked"
+  users ||--o{ conversation_members : "in"
+  users ||--o{ messages : "sends"
+  users ||--o{ message_reactions : "reacts"
+  users ||--o{ message_attachments : "uploads"
+  users ||--o{ dm_requests : "as sender or receiver"
+  users ||--o{ push_subscriptions : "subscribes"
+  users ||--|| user_presence : "has"
+  users ||--o{ notifications : "as recipient or actor"
+  users ||--o{ listings : "owns"
+  users ||--o{ item_offers : "as owner or offerer"
+  users ||--o{ offer_proposals : "proposes"
+  users ||--o{ listing_ratings : "as rater or ratee"
+  users ||--o{ reports : "reports"
+  users ||--o{ import_batch_finalized : "imports"
+
+  collections ||--o{ items : "contains"
+  collections ||--o{ collection_field_schema : "schema of"
+  collections ||--o{ posts : "shared via item_share"
+  collections ||--o{ import_batch_finalized : "destination of"
+
+  field_definitions ||--o{ collection_field_schema : "referenced by"
+
+  items ||--o| listings : "currently listed (active)"
+  items ||--o{ item_offers : "target of"
+  items ||--o{ posts : "shared in item_share"
+
+  listings ||--o{ item_offers : "received offers"
+
+  item_offers ||--o{ offer_proposals : "negotiation rounds"
+  item_offers ||--o{ listing_ratings : "rated after completion"
+
+  posts ||--o{ post_media : "has"
+  posts ||--o{ post_reactions : "has"
+  posts ||--o{ post_comments : "has"
+
+  conversations ||--o{ conversation_members : "has"
+  conversations ||--o{ messages : "has"
+  conversations ||--o{ dm_requests : "results in"
+
+  messages ||--o{ message_reactions : "has"
+  messages ||--o{ message_attachments : "has"
+  messages ||--o{ messages : "reply to (self-ref)"
+
+  notifications }o--|| users : "actor + recipient"`} />
+
+## Diagrama por domínio
+
+### Auth & sessão
+
+<Mermaid chart={`erDiagram
+  users ||--o{ refresh_tokens : "active sessions"
+  users ||--o{ password_reset_tokens : "reset attempts"
+  users {
+    uuid id PK
+    varchar email UK
+    varchar password_hash
+    varchar google_id UK
+    boolean email_verified
+    timestamp created_at
+  }
+  refresh_tokens {
+    uuid id PK
+    uuid user_id FK
+    varchar token_hash
+    timestamp expires_at
+  }
+  password_reset_tokens {
+    uuid id PK
+    uuid user_id FK
+    varchar token_hash
+    timestamp expires_at
+    timestamp used_at
+  }`} />
+
+### Conteúdo (coleções e itens)
+
+<Mermaid chart={`erDiagram
+  users ||--o{ collections : "owns"
+  collections ||--o{ items : "contains"
+  collections ||--o{ collection_field_schema : "schema"
+  field_definitions ||--o{ collection_field_schema : "referenced"
+  users ||--o{ field_definitions : "creates custom"
+  collections {
+    uuid id PK
+    uuid user_id FK
+    varchar name
+    enum type
+    enum visibility
+    boolean auto_share_to_feed
+  }
+  items {
+    uuid id PK
+    uuid collection_id FK
+    varchar name
+    jsonb fields
+    smallint rating
+  }
+  field_definitions {
+    uuid id PK
+    uuid user_id FK
+    varchar name
+    enum field_type
+    enum collection_type
+    boolean is_system
+  }
+  collection_field_schema {
+    uuid id PK
+    uuid collection_id FK
+    uuid field_definition_id FK
+    integer display_order
+  }`} />
+
+### Vitrine (listings + offers + ratings)
+
+<Mermaid chart={`erDiagram
+  items ||--o| listings : "currently active"
+  listings ||--o{ item_offers : "receives offers"
+  item_offers ||--o{ offer_proposals : "negotiation rounds"
+  item_offers ||--o{ listing_ratings : "rated after"
+  users ||--o{ listings : "owns"
+  users ||--o{ item_offers : "as owner/offerer"
+  users ||--o{ offer_proposals : "proposes"
+  users ||--o{ listing_ratings : "rater/ratee"
+  listings {
+    uuid id PK
+    uuid item_id FK
+    uuid owner_id FK
+    enum availability
+    enum status
+    numeric asking_price
+  }
+  item_offers {
+    uuid id PK
+    uuid item_id FK
+    uuid owner_id FK
+    uuid offerer_id FK
+    enum type
+    enum status
+    timestamp offerer_confirmed_at
+    timestamp owner_confirmed_at
+  }
+  offer_proposals {
+    uuid id PK
+    uuid offer_id FK
+    uuid proposer_id FK
+    enum status
+  }
+  listing_ratings {
+    uuid id PK
+    uuid offer_id FK
+    uuid rater_id FK
+    uuid ratee_id FK
+    smallint score
+  }`} />
+
+### Social (amizade + bloqueio)
+
+<Mermaid chart={`erDiagram
+  users ||--o{ friendships : "requester"
+  users ||--o{ friendships : "receiver"
+  users ||--o{ user_blocks : "blocker"
+  users ||--o{ user_blocks : "blocked"
+  friendships {
+    uuid id PK
+    uuid requester_id FK
+    uuid receiver_id FK
+    enum status
+  }
+  user_blocks {
+    uuid id PK
+    uuid blocker_id FK
+    uuid blocked_id FK
+  }`} />
+
+### Posts e feed
+
+<Mermaid chart={`erDiagram
+  users ||--o{ posts : "authors"
+  posts ||--o{ post_media : "has"
+  posts ||--o{ post_reactions : "has"
+  posts ||--o{ post_comments : "has"
+  items ||--o{ posts : "item_share"
+  collections ||--o{ posts : "item_share"
+  users ||--o{ post_reactions : "reacts"
+  users ||--o{ post_comments : "comments"
+  posts {
+    uuid id PK
+    uuid user_id FK
+    enum type
+    text content
+    enum visibility
+    uuid item_id FK
+    uuid collection_id FK
+  }
+  post_media {
+    uuid id PK
+    uuid post_id FK
+    text url
+    text thumbnail_url
+  }
+  post_reactions {
+    uuid id PK
+    uuid post_id FK
+    uuid user_id FK
+    enum type
+  }
+  post_comments {
+    uuid id PK
+    uuid post_id FK
+    uuid user_id FK
+    text content
+  }`} />
+
+### Chat
+
+<Mermaid chart={`erDiagram
+  users ||--o{ conversation_members : "in"
+  conversations ||--o{ conversation_members : "has"
+  conversations ||--o{ messages : "has"
+  conversations ||--o{ dm_requests : "from"
+  messages ||--o{ message_reactions : "has"
+  messages ||--o{ message_attachments : "has"
+  users ||--o{ messages : "sends"
+  conversations {
+    uuid id PK
+    enum type
+    varchar name
+    boolean is_temporary
+  }
+  conversation_members {
+    uuid id PK
+    uuid conversation_id FK
+    uuid user_id FK
+    enum role
+    timestamp last_read_at
+    boolean is_muted
+  }
+  messages {
+    uuid id PK
+    uuid conversation_id FK
+    uuid user_id FK
+    text content
+    uuid reply_to_id FK
+    boolean is_temporary
+    timestamp deleted_at
+  }
+  dm_requests {
+    uuid id PK
+    uuid sender_id FK
+    uuid receiver_id FK
+    enum status
+    uuid conversation_id FK
+  }`} />
+
+### Notificações + presence + push
+
+<Mermaid chart={`erDiagram
+  users ||--|| user_presence : "tracks"
+  users ||--o{ push_subscriptions : "subscribes"
+  users ||--o{ notifications : "recipient"
+  users ||--o{ notifications : "actor"
+  users {
+    uuid id PK
+  }
+  user_presence {
+    uuid user_id PK
+    timestamp last_seen_at
+  }
+  push_subscriptions {
+    uuid id PK
+    uuid user_id FK
+    text endpoint UK
+  }
+  notifications {
+    uuid id PK
+    uuid recipient_id FK
+    uuid actor_id FK
+    enum type
+    uuid entity_id
+    boolean read
+  }`} />
+
+### Steam imports + reports
+
+<Mermaid chart={`erDiagram
+  users ||--o{ import_batch_finalized : "imports"
+  collections ||--o{ import_batch_finalized : "destination"
+  users ||--o{ reports : "reports"
+  import_batch_finalized {
+    uuid batch_id PK
+    uuid user_id FK
+    uuid collection_id FK
+    integer total
+    integer imported
+    integer failed
+  }
+  reports {
+    uuid id PK
+    uuid reporter_id FK
+    enum target_type
+    uuid target_id
+    enum reason
+    enum status
+  }`} />
+
+## Como o ER é regenerado
+
+```bash
+# No backend:
+cd geek-social-api
+npm run export:dbml        # gera dist/schema.dbml + dist/schema.json
+
+# No docs:
+cd geek-social-docs
+npm run sync               # copia pra public/
+npm run gen                # regenera tabelas auto-geradas
+```
+
+O DBML completo serve dois propósitos:
+- ER diagrams pro humano (este portal, dbdiagram.io, dbdocs.io)
+- Source of truth pra validação cruzada de schema vs migrations
+
+## Notas sobre relacionamentos
+
+- **Self-reference em messages** — `messages.reply_to_id` aponta pra `messages.id` (sem cascade — preserva reply mesmo se a msg referenciada for deletada; UI mostra "mensagem deletada")
+- **Polimorfismo em notifications.entity_id** — não é FK; aponta pra UUID de tabelas variadas dependendo do `type` (ver [tipos de notificação](/docs/reference/tipos-notificacao))
+- **Polimorfismo em reports.target_id** — idem, aponta pra users/messages/posts/collections/conversations dependendo de `target_type`
+- **Sem FK em listing_ratings.rater_id/ratee_id** — usa `references()` mas sem `onDelete` — preserva ratings se user deleta conta (precisa de tratamento especial no fluxo de delete)

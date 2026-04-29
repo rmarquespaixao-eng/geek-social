@@ -1,0 +1,336 @@
+---
+title: Como adicionar um módulo novo
+description: Estrutura completa para criar um novo domínio de negócio (controller, service, repo, schema, routes).
+---
+
+Adicionar um módulo novo segue a estrutura de Clean Architecture lite + DDD usada nos existentes. Como exemplo, vamos imaginar um módulo `wishlist` (lista de desejo de items específicos com prioridade).
+
+## 1. Crie a pasta e os arquivos básicos
+
+```
+src/modules/wishlist/
+├── wishlist.routes.ts
+├── wishlist.controller.ts
+├── wishlist.service.ts
+├── wishlist.repository.ts
+└── wishlist.schema.ts
+```
+
+E o contract em:
+
+```
+src/shared/contracts/
+└── wishlist.repository.contract.ts
+```
+
+## 2. Defina o schema Zod
+
+`src/modules/wishlist/wishlist.schema.ts`:
+
+```ts
+import { z } from 'zod'
+
+export const addWishlistItemSchema = z.object({
+  itemId: z.string().uuid().optional(),
+  externalUrl: z.string().url().optional(),
+  notes: z.string().max(500).optional(),
+  priority: z.enum(['low', 'medium', 'high']).default('medium'),
+}).refine(
+  (data) => Boolean(data.itemId) !== Boolean(data.externalUrl),
+  { message: 'Forneça itemId OU externalUrl, não ambos' }
+)
+
+export const updateWishlistItemSchema = z.object({
+  notes: z.string().max(500).nullable().optional(),
+  priority: z.enum(['low', 'medium', 'high']).optional(),
+})
+
+export type AddWishlistItemInput = z.infer<typeof addWishlistItemSchema>
+export type UpdateWishlistItemInput = z.infer<typeof updateWishlistItemSchema>
+```
+
+## 3. Adicione tabelas em schema.ts
+
+`src/shared/infra/database/schema.ts`:
+
+```ts
+export const wishlistPriorityEnum = pgEnum('wishlist_priority', ['low', 'medium', 'high'])
+
+export const wishlistItems = pgTable('wishlist_items', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  itemId: uuid('item_id').references(() => items.id, { onDelete: 'set null' }),
+  externalUrl: varchar('external_url'),
+  notes: text('notes'),
+  priority: wishlistPriorityEnum('priority').notNull().default('medium'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  userPriorityIdx: index('wishlist_user_priority_idx').on(table.userId, table.priority, table.createdAt),
+}))
+```
+
+## 4. Gere migration
+
+```bash
+cd ~/workspace_ssh/geek-social-api
+npm run db:generate
+```
+
+Drizzle cria `0035_wishlist.sql` (ou similar). **Revise o SQL gerado** — verificar se enum + tabela estão OK.
+
+## 5. Defina o contract
+
+`src/shared/contracts/wishlist.repository.contract.ts`:
+
+```ts
+export interface IWishlistRepository {
+  add(userId: string, input: AddWishlistItemInput): Promise<WishlistItem>
+  list(userId: string): Promise<WishlistItem[]>
+  update(id: string, input: UpdateWishlistItemInput): Promise<WishlistItem | null>
+  remove(id: string): Promise<void>
+  findById(id: string): Promise<WishlistItem | null>
+}
+
+export type WishlistItem = {
+  id: string
+  userId: string
+  itemId: string | null
+  externalUrl: string | null
+  notes: string | null
+  priority: 'low' | 'medium' | 'high'
+  createdAt: Date
+  updatedAt: Date
+}
+```
+
+## 6. Implemente o repository
+
+`src/modules/wishlist/wishlist.repository.ts`:
+
+```ts
+import { eq, desc } from 'drizzle-orm'
+import { wishlistItems } from '../../shared/infra/database/schema.js'
+import type { IWishlistRepository } from '../../shared/contracts/wishlist.repository.contract.js'
+
+export class WishlistRepository implements IWishlistRepository {
+  constructor(private readonly db: NodePgDatabase) {}
+
+  async add(userId, input) { /* INSERT ... RETURNING */ }
+  async list(userId) { /* SELECT ... ORDER BY priority DESC, created_at DESC */ }
+  async update(id, input) { /* UPDATE ... RETURNING */ }
+  async remove(id) { /* DELETE */ }
+  async findById(id) { /* SELECT ... LIMIT 1 */ }
+}
+```
+
+## 7. Crie o service
+
+`src/modules/wishlist/wishlist.service.ts`:
+
+```ts
+export class WishlistError extends Error {
+  constructor(public readonly code: string) { super(code); this.name = 'WishlistError' }
+}
+
+export class WishlistService {
+  constructor(private readonly repo: IWishlistRepository) {}
+
+  async add(userId: string, input: AddWishlistItemInput) {
+    return this.repo.add(userId, input)
+  }
+
+  async list(userId: string) {
+    return this.repo.list(userId)
+  }
+
+  async update(userId: string, id: string, input: UpdateWishlistItemInput) {
+    const existing = await this.repo.findById(id)
+    if (!existing) throw new WishlistError('NOT_FOUND')
+    if (existing.userId !== userId) throw new WishlistError('NOT_AUTHORIZED')
+    return this.repo.update(id, input)
+  }
+
+  async remove(userId: string, id: string) {
+    const existing = await this.repo.findById(id)
+    if (!existing) throw new WishlistError('NOT_FOUND')
+    if (existing.userId !== userId) throw new WishlistError('NOT_AUTHORIZED')
+    await this.repo.remove(id)
+  }
+}
+```
+
+## 8. Crie o controller
+
+`src/modules/wishlist/wishlist.controller.ts`:
+
+```ts
+const STATUS_BY_CODE: Record<string, number> = {
+  NOT_FOUND: 404,
+  NOT_AUTHORIZED: 403,
+}
+
+export class WishlistController {
+  constructor(private readonly service: WishlistService) {}
+
+  private handleError(err: unknown, reply: FastifyReply) {
+    if (err instanceof WishlistError) {
+      return reply.status(STATUS_BY_CODE[err.code] ?? 400).send({ error: err.code })
+    }
+    throw err
+  }
+
+  async add(request: FastifyRequest<{ Body: AddWishlistItemInput }>, reply: FastifyReply) {
+    const { userId } = request.user as AccessTokenClaims
+    const item = await this.service.add(userId, request.body)
+    return reply.status(201).send(item)
+  }
+
+  async list(request: FastifyRequest, reply: FastifyReply) {
+    const { userId } = request.user as AccessTokenClaims
+    return reply.send(await this.service.list(userId))
+  }
+
+  // ... update, remove
+}
+```
+
+## 9. Registre as rotas
+
+`src/modules/wishlist/wishlist.routes.ts`:
+
+```ts
+import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod'
+
+export const wishlistRoutes: FastifyPluginAsyncZod<{ wishlistService: WishlistService }> = async (app, options) => {
+  const ctrl = new WishlistController(options.wishlistService)
+  const noContent = z.void()
+  const idParam = z.object({ id: z.string().uuid() })
+
+  app.post('/', {
+    schema: {
+      operationId: 'wishlist_add',
+      tags: ['Wishlist'],
+      summary: 'Adicionar item à wishlist',
+      security: [{ accessToken: [] }],
+      body: addWishlistItemSchema,
+    },
+    preHandler: [authenticate],
+    handler: ctrl.add.bind(ctrl),
+  })
+
+  app.get('/', {
+    schema: {
+      operationId: 'wishlist_list',
+      tags: ['Wishlist'],
+      summary: 'Listar minha wishlist',
+      security: [{ accessToken: [] }],
+    },
+    preHandler: [authenticate],
+    handler: ctrl.list.bind(ctrl),
+  })
+
+  app.patch('/:id', {
+    schema: {
+      operationId: 'wishlist_update',
+      tags: ['Wishlist'],
+      summary: 'Editar item da wishlist',
+      security: [{ accessToken: [] }],
+      params: idParam,
+      body: updateWishlistItemSchema,
+    },
+    preHandler: [authenticate],
+    handler: ctrl.update.bind(ctrl),
+  })
+
+  app.delete('/:id', {
+    schema: {
+      operationId: 'wishlist_remove',
+      tags: ['Wishlist'],
+      summary: 'Remover da wishlist',
+      security: [{ accessToken: [] }],
+      params: idParam,
+      response: { 204: noContent },
+    },
+    preHandler: [authenticate],
+    handler: ctrl.remove.bind(ctrl),
+  })
+}
+```
+
+## 10. Wire up em app.ts
+
+`src/app.ts`:
+
+```ts
+import { WishlistRepository } from './modules/wishlist/wishlist.repository.js'
+import { WishlistService } from './modules/wishlist/wishlist.service.js'
+import { wishlistRoutes } from './modules/wishlist/wishlist.routes.js'
+
+// dentro de buildApp(), após criar db e antes de register rotas:
+const wishlistRepository = new WishlistRepository(db)
+const wishlistService = new WishlistService(wishlistRepository)
+
+await app.register(wishlistRoutes, { prefix: '/wishlist', wishlistService })
+```
+
+## 11. Atualize OpenAPI tags
+
+`app.ts` — adicione tag à config do swagger:
+
+```ts
+tags: [
+  // ... existentes
+  { name: 'Wishlist', description: 'Lista de desejos do usuário' },
+],
+```
+
+## 12. Crie a página do módulo
+
+`content/docs/modules/wishlist.mdx` — siga o template dos outros módulos (visão geral, entidades, endpoints, fluxos com Mermaid, edge cases, dependências).
+
+## 13. Adicione na sidebar
+
+- `content/docs/api/meta.json` — adicione `wishlist`
+- `content/docs/modules/meta.json` — adicione `wishlist`
+
+## 14. Crie tabela de docs
+
+Os 28 já existentes têm prose manual. Para a nova `wishlist_items`:
+
+1. `npm run export:dbml && npm run sync && npm run gen` — cria stub
+2. Edite `content/docs/data-model/tables/wishlist_items.mdx` com prose detalhada
+
+## 15. Atualize códigos de erro
+
+`content/docs/reference/codigos-erro.mdx` — adicione seção Wishlist com `NOT_FOUND`, `NOT_AUTHORIZED`.
+
+## 16. Atualize ER diagram
+
+`content/docs/data-model/er-diagram.mdx` — adicione `wishlist_items` no diagrama global e crie diagrama por domínio se faz sentido.
+
+## 17. Testes
+
+- Unit: `wishlist.service.test.ts`
+- Integration: `wishlist.repository.test.ts` (Testcontainers)
+- E2E: cobre add → list → update → remove
+
+## Checklist
+
+- [ ] Schema Zod
+- [ ] Migration aplicada (`db:migrate`)
+- [ ] Contract em `shared/contracts/`
+- [ ] Repository implementado
+- [ ] Service com lógica + ownership checks
+- [ ] Controller com STATUS_BY_CODE
+- [ ] Routes com FastifyPluginAsyncZod
+- [ ] Wire up em `app.ts`
+- [ ] Tag adicionada no OpenAPI config
+- [ ] Página do módulo (`modules/<nome>.mdx`)
+- [ ] Códigos de erro documentados
+- [ ] Tabela documentada
+- [ ] ER diagram atualizado
+- [ ] sidebar atualizada (api + modules)
+- [ ] Testes (unit + integration + e2e)
+- [ ] `tsc --noEmit` passa
+- [ ] `npm run export:all && cd ../geek-social-docs && npm run sync && npm run gen`

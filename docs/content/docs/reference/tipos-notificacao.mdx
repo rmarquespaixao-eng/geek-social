@@ -1,0 +1,82 @@
+---
+title: Tipos de notificação
+description: Catálogo dos tipos de notificação (enum notification_type).
+---
+
+Todos os valores possíveis em [`notifications.type`](/docs/data-model/tables/notifications). O frontend usa o `type` pra renderizar copy + ícone + link.
+
+## Sociais
+
+| Type | Quando dispara | `entity_id` | Sugestão de copy | Link sugerido |
+|---|---|---|---|---|
+| `friend_request` | A pede amizade pra B | `friendships.id` | `{actor} te enviou pedido de amizade` | `/friends/requests` |
+| `friend_accepted` | A aceita pedido de B | `friendships.id` | `{actor} aceitou seu pedido de amizade` | `/perfil/{actor}` |
+| `dm_request_received` | Não-amigo manda DM | `dm_requests.id` | `{actor} quer falar com você` | `/chat/requests` |
+| `post_comment` | Alguém comenta seu post | `posts.id` | `{actor} comentou seu post` | `/posts/{post}` |
+| `post_reaction` | Alguém reage seu post | `posts.id` | `{actor} reagiu ao seu post` | `/posts/{post}` |
+
+## Vitrine — ofertas
+
+| Type | Quando dispara | `entity_id` | Sugestão de copy |
+|---|---|---|---|
+| `offer_received` | Recebe oferta nova num seu listing | `item_offers.id` | `{actor} fez uma oferta no seu anúncio` |
+| `offer_accepted` | Dono aceitou sua oferta | `item_offers.id` | `{actor} aceitou sua oferta — confirme a transação` |
+| `offer_rejected` | Sua oferta foi rejeitada (pelo dono ou auto-reject por close) | `item_offers.id` | `Sua oferta foi rejeitada` |
+| `offer_completed` | Transação confirmada pelos 2 lados | `item_offers.id` | `Transação concluída — você pode avaliar` |
+| `offer_cancelled` | Ofertante cancelou | `item_offers.id` | `{actor} cancelou a oferta` |
+| `offer_expired` | 7 dias após accepted sem confirms | `item_offers.id` | `Sua oferta expirou` |
+
+## Vitrine — propostas (counters)
+
+| Type | Quando dispara | `entity_id` | Sugestão de copy |
+|---|---|---|---|
+| `counter_proposal_received` | Outro lado fez counter-proposta | `offer_proposals.id` | `{actor} fez uma contra-proposta` |
+| `proposal_rejected` | Sua proposta foi rejeitada (mas oferta continua aberta) | `offer_proposals.id` | `{actor} rejeitou sua proposta — você pode contra-propor` |
+
+## Vitrine — reputação
+
+| Type | Quando dispara | `entity_id` | Sugestão de copy |
+|---|---|---|---|
+| `rating_received` | Alguém te avaliou após transação | `listing_ratings.id` | `{actor} avaliou você` |
+
+## Steam integration
+
+| Type | Quando dispara | `entity_id` | Sugestão de copy |
+|---|---|---|---|
+| `steam_import_done` | Batch terminou ok (todos sucesso) | `collections.id` | `Importação concluída — {N} jogos adicionados` |
+| `steam_import_partial` | Batch terminou com `failed > 0` | `collections.id` | `Importação concluída com erros — {imported} ok, {failed} falharam` |
+
+## Adicionando tipo novo
+
+Para adicionar um type:
+
+1. **Migration**: estender o enum no `schema.ts`
+   ```ts
+   export const notificationTypeEnum = pgEnum('notification_type', [
+     // ...existentes
+     'meu_novo_type',
+   ])
+   ```
+2. **Drizzle gera** SQL `ALTER TYPE notification_type ADD VALUE 'meu_novo_type'`
+3. **Service** dispara via `notify({ type: 'meu_novo_type', ... })`
+4. **Frontend** trata em `NotificationItem.vue` — copy, ícone, link
+
+## Ícones e cores (sugestões)
+
+Padrão visual usado no frontend (`NotificationItem.vue`):
+
+| Categoria | Ícone | Cor accent |
+|---|---|---|
+| Sociais | 👥 | azul |
+| Vitrine — positivo (received, accepted, completed) | 🛒 | verde |
+| Vitrine — negativo (rejected, cancelled, expired) | ⚠️ | vermelho |
+| Vitrine — propostas | 🔁 | amarelo |
+| Vitrine — rating | ⭐ | amarelo |
+| Steam — done | 🎮 | verde |
+| Steam — partial | 🎮 | amarelo |
+
+## Relacionados
+
+- Tabela [`notifications`](/docs/data-model/tables/notifications)
+- Conceito [Notificações](/docs/concepts/notificacoes) — fluxo end-to-end
+- Tabela [`push_subscriptions`](/docs/data-model/tables/push_subscriptions) — entrega Web Push

@@ -1,0 +1,4 @@
+{
+  "title": "Banco de dados",
+  "pages": ["er-diagram", "convencoes", "migrations", "seeds", "operations", "tables"]
+}

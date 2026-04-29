@@ -1,0 +1,22 @@
+{
+  "title": "API Reference",
+  "pages": [
+    "visao-geral",
+    "playground",
+    "auth",
+    "users",
+    "friends",
+    "collections",
+    "field-definitions",
+    "items",
+    "posts",
+    "feed",
+    "chat",
+    "notifications",
+    "listings",
+    "offers",
+    "listing-ratings",
+    "steam",
+    "reports"
+  ]
+}

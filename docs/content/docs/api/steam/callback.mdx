@@ -1,0 +1,41 @@
+---
+title: GET /integrations/steam/callback
+description: Callback OpenID Steam (não chamar diretamente)
+---
+
+import Meta from '@/generated/api/steam/callback/meta'
+import Request from '@/generated/api/steam/callback/request'
+import Responses from '@/generated/api/steam/callback/responses'
+import Errors from '@/generated/api/steam/callback/errors'
+import Examples from '@/generated/api/steam/callback/examples'
+
+<Meta />
+
+Endpoint chamado pelo Steam após autenticação OpenID. Vincula steam_id à conta + redireciona pro frontend com status.
+
+## Request
+
+<Request />
+
+## Response
+
+<Responses />
+
+## Erros
+
+<Errors />
+
+{/* TODO: para cada código de erro acima, explique a causa e como resolver. */}
+
+## Exemplos
+
+<Examples />
+
+
+## Side effects
+
+{/* TODO: eventos de socket emitidos, notificações disparadas, jobs enfileirados, cascades. */}
+
+## Relacionados
+
+{/* TODO: links pra módulo, conceitos, endpoints relacionados. */}

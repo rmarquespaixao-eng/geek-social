@@ -1,0 +1,56 @@
+---
+title: post_comments
+description: Comentários em posts (planos, sem aninhamento).
+---
+
+import Columns from '@/generated/data-model/tables/post_comments/columns'
+import Fks from '@/generated/data-model/tables/post_comments/fks'
+import Indexes from '@/generated/data-model/tables/post_comments/indexes'
+import Constraints from '@/generated/data-model/tables/post_comments/constraints'
+
+Comentários em posts. **Sem aninhamento** (sem reply-to-comment) por design — feed simples, sem threads. Cada comment é só texto, sem mídia.
+
+## Colunas
+
+<Columns />
+
+## Funcionalidade dos campos
+
+- **`id`** — UUID, PK
+- **`post_id`** — pai (cascade)
+- **`user_id`** — autor (cascade). Editar é restrito ao autor; deletar pode ser autor OU dono do post.
+- **`content`** — texto livre obrigatório.
+- **`created_at` / `updated_at`** — `updated_at` muda em edits (UI mostra "editado").
+
+## Foreign keys
+
+<Fks />
+
+## Índices
+
+<Indexes />
+
+`post_comments_post_created_at_idx` ordena cronologicamente os comments de um post (mais antigos primeiro, paginação simples).
+
+## Constraints
+
+<Constraints />
+
+## Permissões de edição/exclusão
+
+- **Autor**: pode editar e deletar
+- **Dono do post**: pode deletar (pra moderar comentários no próprio post), mas **não editar** (preserva voz do autor)
+
+Implementação no `CommentsService.canModify(userId, comment, post)`.
+
+## Padrões de uso
+
+- **Adicionar** — `POST /posts/:id/comments { content }` → INSERT + dispara notificação `post_comment` ao dono do post (só se autor != dono)
+- **Editar** — `PUT /posts/:postId/comments/:id`
+- **Deletar** — `DELETE /posts/:postId/comments/:id`
+
+## Tabelas relacionadas
+
+- [`posts`](/docs/data-model/tables/posts) — pai (cascade)
+- [`users`](/docs/data-model/tables/users) — autor (cascade)
+- [`notifications`](/docs/data-model/tables/notifications) — `post_comment`

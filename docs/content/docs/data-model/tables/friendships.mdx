@@ -1,0 +1,72 @@
+---
+title: friendships
+description: Relação simétrica de amizade entre dois usuários, com fluxo de pedido/aceite.
+---
+
+import Columns from '@/generated/data-model/tables/friendships/columns'
+import Fks from '@/generated/data-model/tables/friendships/fks'
+import Indexes from '@/generated/data-model/tables/friendships/indexes'
+import Constraints from '@/generated/data-model/tables/friendships/constraints'
+
+Tabela única para representar pedidos de amizade e amizades aceitas. Um row é criado quando A pede amizade pra B (`requester_id=A, receiver_id=B, status=pending`). Quando B aceita, vira `status=accepted` (mesmo row, sem duplicar). Reject deleta o row.
+
+A relação é **simétrica em significado** mas **assimétrica em armazenamento** — o `requester_id` é sempre quem iniciou o pedido. Pra responder "A e B são amigos?" a query precisa cobrir ambas as direções: `WHERE (requester_id=A AND receiver_id=B) OR (requester_id=B AND receiver_id=A)` com `status='accepted'`.
+
+## Colunas
+
+<Columns />
+
+## Funcionalidade dos campos
+
+- **`id`** — UUID, PK.
+- **`requester_id`** — quem iniciou o pedido. Imutável após criação.
+- **`receiver_id`** — quem recebeu o pedido. Imutável após criação.
+- **`status`** — enum `pending` ou `accepted`. Reject vira DELETE, não muda status.
+- **`created_at`** — momento do pedido (não do aceite).
+- **`updated_at`** — atualizado quando aceita o pedido (`pending` → `accepted`).
+
+## Foreign keys
+
+<Fks />
+
+## Índices
+
+<Indexes />
+
+`friendships_requester_receiver_unique` impede duplicação na **mesma direção**. Não impede A→B e B→A simultâneos (raro mas possível se ambos pedem ao mesmo tempo). O service trata: se A pede e já existe B→A pendente, aceita automaticamente em vez de criar novo row.
+
+## Constraints
+
+<Constraints />
+
+## Padrões de uso
+
+- **Pedir amizade** — INSERT com `status='pending'`. Dispara notificação `friend_request`.
+- **Aceitar** — UPDATE `status='accepted'`, `updated_at=now()`. Dispara notificação `friend_accepted` + emite socket pra atualizar lista de amigos dos dois lados + linka chat 1-1 (se permitido).
+- **Rejeitar** — DELETE. Não dispara notificação (rejeição silenciosa).
+- **Desfazer amizade** — DELETE. Dispara desconexão de chat (`unlinkFriendship`).
+- **Bloquear** — não passa por essa tabela; ver `user_blocks`. Block faz delete dessa amizade automaticamente se existir.
+
+## Queries comuns
+
+```sql
+-- Lista de amigos aceitos do usuário X
+SELECT
+  CASE WHEN requester_id = $X THEN receiver_id ELSE requester_id END AS friend_id
+FROM friendships
+WHERE status = 'accepted'
+  AND (requester_id = $X OR receiver_id = $X);
+
+-- Pedidos pendentes que X recebeu
+SELECT * FROM friendships WHERE receiver_id = $X AND status = 'pending';
+
+-- Pedidos que X enviou
+SELECT * FROM friendships WHERE requester_id = $X AND status = 'pending';
+```
+
+## Tabelas relacionadas
+
+- [`users`](/docs/data-model/tables/users) — ambos os lados
+- [`user_blocks`](/docs/data-model/tables/user_blocks) — bloquear apaga amizade
+- [`notifications`](/docs/data-model/tables/notifications) — `friend_request`, `friend_accepted`
+- [`conversations`](/docs/data-model/tables/conversations) — amizade aceita pode disparar criação de chat 1-1

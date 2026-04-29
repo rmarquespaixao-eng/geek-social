@@ -1,0 +1,268 @@
+---
+title: Operações de banco
+description: Backup/restore, performance, monitoramento e tuning do PostgreSQL.
+---
+
+Operações práticas com o PostgreSQL do Geek Social — `dev` (single container) e `prod` (single VPS hoje).
+
+## Backup
+
+### Manual (dump completo)
+
+```bash
+docker exec dev-postgres pg_dump -U dev -F c -b -v -f /tmp/geek-social-$(date +%Y%m%d).dump geek_social
+docker cp dev-postgres:/tmp/geek-social-$(date +%Y%m%d).dump ./backups/
+```
+
+`-F c` = formato custom (compactado). `-b` = inclui large objects (não usamos hoje, mas seguro).
+
+### Restore
+
+```bash
+docker cp ./backups/geek-social-20260429.dump dev-postgres:/tmp/
+docker exec dev-postgres pg_restore -U dev -d geek_social_new -v /tmp/geek-social-20260429.dump
+```
+
+**Restore em DB novo**, não sobre o existente — `pg_restore` em DB com tabelas pode falhar em FKs. Pra reset completo:
+
+```bash
+docker exec dev-postgres psql -U dev -c "DROP DATABASE geek_social;"
+docker exec dev-postgres psql -U dev -c "CREATE DATABASE geek_social;"
+docker exec dev-postgres pg_restore -U dev -d geek_social /tmp/geek-social-20260429.dump
+```
+
+### Backup automático (roadmap)
+
+```bash
+# Cron diário (3am):
+0 3 * * * docker exec dev-postgres pg_dump -U dev -F c geek_social > /backup/geek-$(date +\%Y\%m\%d).dump
+```
+
+Em prod (VPS), apontar pra disco separado + sync periódico pra storage offsite (Backblaze B2 free tier, S3 Glacier, ou outro VPS).
+
+### Point-in-time recovery (PITR) — futuro
+
+Para recuperação granular (não só "último dump"), precisaria:
+- WAL archiving habilitado
+- Storage extra pros WAL files
+- Tooling: pgBackRest, Barman
+
+Não implementado — escopo simples por enquanto.
+
+## MinIO/S3 backup
+
+### Mirror
+
+```bash
+docker exec dev-minio mc alias set local http://localhost:9000 minioadmin minioadmin
+docker exec dev-minio mc mirror local/geek-social-media /tmp/minio-backup
+docker cp dev-minio:/tmp/minio-backup ./backups/
+```
+
+### Restore
+
+```bash
+docker cp ./backups/minio-backup dev-minio:/tmp/
+docker exec dev-minio mc mirror /tmp/minio-backup local/geek-social-media
+```
+
+### Em prod
+
+Setar versionamento no bucket + replicação cross-region (ou cross-bucket no mesmo provedor) cobre maior parte dos casos sem custo de pipeline próprio.
+
+## Monitoramento de queries
+
+### Habilitar log de queries lentas
+
+```sql
+ALTER SYSTEM SET log_min_duration_statement = 100;  -- log queries > 100ms
+ALTER SYSTEM SET log_lock_waits = on;
+ALTER SYSTEM SET log_temp_files = 0;
+SELECT pg_reload_conf();
+```
+
+Queries lentas aparecem em `docker logs dev-postgres`.
+
+### Verificar índices em uso
+
+```sql
+SELECT
+  schemaname, relname, indexrelname,
+  idx_scan, idx_tup_read, idx_tup_fetch
+FROM pg_stat_user_indexes
+ORDER BY idx_scan ASC;
+```
+
+`idx_scan = 0` indica índice não utilizado — candidato a remoção.
+
+### Tamanho de tabelas
+
+```sql
+SELECT
+  relname AS table,
+  pg_size_pretty(pg_total_relation_size(relid)) AS total_size,
+  pg_size_pretty(pg_relation_size(relid)) AS table_size,
+  n_live_tup AS rows
+FROM pg_stat_user_tables
+ORDER BY pg_total_relation_size(relid) DESC;
+```
+
+Útil pra detectar tabelas que crescem fora de proporção (ex: `messages` em uso intenso → considerar archival).
+
+### Connection pool
+
+`pg.Pool` no `postgres.client.ts`. Defaults razoáveis. Em load alto:
+
+```ts
+const pool = new Pool({
+  connectionString: env.DATABASE_URL,
+  max: 20,                        // connections concorrentes (default 10)
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 2000,
+})
+```
+
+## Performance tuning
+
+### postgresql.conf settings recomendados
+
+Em prod (VPS com ~4GB RAM):
+
+```ini
+# memory
+shared_buffers = 1GB              # 25% da RAM
+effective_cache_size = 3GB        # 75% da RAM
+work_mem = 16MB                   # por operação de sort/hash
+maintenance_work_mem = 256MB      # VACUUM, índices
+
+# checkpoint
+checkpoint_completion_target = 0.9
+
+# WAL
+wal_buffers = 16MB
+
+# planner
+default_statistics_target = 100
+
+# parallel queries
+max_worker_processes = 4
+max_parallel_workers_per_gather = 2
+```
+
+Calculadora online: [pgtune.leopard.in.ua](https://pgtune.leopard.in.ua/).
+
+### VACUUM
+
+PG faz autovacuum por default. Em tabelas com muitos UPDATE/DELETE (ex: `messages` no modo temporary, `notifications`), monitorar:
+
+```sql
+SELECT
+  relname,
+  n_dead_tup,
+  n_live_tup,
+  ROUND(100.0 * n_dead_tup / NULLIF(n_live_tup, 0), 2) AS dead_pct,
+  last_autovacuum
+FROM pg_stat_user_tables
+WHERE n_dead_tup > 1000
+ORDER BY dead_pct DESC;
+```
+
+Se `dead_pct > 20%` consistentemente, autovacuum não está acompanhando — tunar:
+
+```sql
+ALTER TABLE messages SET (
+  autovacuum_vacuum_scale_factor = 0.05,   -- mais agressivo
+  autovacuum_vacuum_cost_limit = 1000
+);
+```
+
+### Índices parciais usados estrategicamente
+
+Ver tabela [`item_offers`](/docs/data-model/tables/item_offers) — `item_offers_pending_unique` em `WHERE status='pending'`. Tamanho do índice é proporcional só aos rows pending (poucos), não à tabela inteira.
+
+Mesma ideia em `listings_item_active_uniq`, `offer_proposals_one_pending_uniq`.
+
+### Pendências de performance
+
+Conforme volume crescer:
+- Particionamento de `messages` por mês
+- Materialized view pra reputação (cache do count/avg de `listing_ratings`)
+- Read replica pra queries pesadas (feed, marketplace)
+
+## Connection issues
+
+### "too many connections"
+
+Verifique:
+
+```sql
+SELECT count(*) FROM pg_stat_activity;
+SHOW max_connections;
+```
+
+Default PG = 100. App usa pool de 10. Se exceder, alguém está vazando connection.
+
+`pg_stat_activity` mostra queries em andamento — busque por `idle in transaction` (transações não fechadas).
+
+### "deadlock detected"
+
+```sql
+SELECT * FROM pg_stat_activity WHERE wait_event_type = 'Lock';
+```
+
+No app, transações que tocam múltiplas tabelas devem **sempre** seguir mesma ordem (ex: `users` → `friendships` → `conversations`). Ordem inversa em diferentes transações = deadlock.
+
+## Migrations em produção
+
+Em dev: `migrate(db, ...)` no `buildApp()` roda as pendentes.
+
+Em prod com múltiplos containers:
+- **Race condition**: 2 containers tentam migrar simultaneamente
+- Solução simples: `migrate` lock via `pg_advisory_lock` antes
+- Solução robusta: rodar migrations num **job separado** antes do deploy do app, não no boot
+
+Roadmap pra sub-projeto E (Deploy):
+1. Container de "migration runner" no `docker-compose.deploy.yml`
+2. CI roda migration runner antes de subir app containers
+
+## Troubleshooting comum
+
+### "relation does not exist"
+
+Migration não rodou. Verifique:
+
+```bash
+docker exec dev-postgres psql -U dev -d geek_social -c "SELECT * FROM drizzle.__drizzle_migrations ORDER BY created_at DESC LIMIT 5;"
+```
+
+### "duplicate key value violates unique constraint"
+
+Race condition na app — busque por `INSERT` sem `ON CONFLICT` em código que assume "primeira vez". Em paralelo, dois requests podem inserir o mesmo.
+
+### "could not serialize access due to concurrent update"
+
+Conflito de transação SERIALIZABLE. App usa READ COMMITTED por default; SERIALIZABLE só em casos específicos (não usamos hoje).
+
+## Útil pra dev
+
+### Reset banco
+
+```bash
+docker exec dev-postgres psql -U dev -c "DROP DATABASE geek_social; CREATE DATABASE geek_social;"
+cd ~/workspace_ssh/geek-social-api && npm run db:migrate
+npm run dev   # roda seeds automático
+```
+
+### Inspect schema atual
+
+```bash
+docker exec dev-postgres pg_dump -U dev -s geek_social    # dump só do schema (sem data)
+```
+
+### Connection direta no DB
+
+```bash
+docker exec -it dev-postgres psql -U dev -d geek_social
+```
+
+Útil pra explorar dados durante debug. **Atenção**: em prod, evitar — qualquer mudança fora de migration acumula deriva.

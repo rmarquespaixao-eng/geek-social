@@ -1,0 +1,44 @@
+---
+title: Visão geral do produto
+description: O que é o Geek Social, propósito e principais funcionalidades.
+---
+
+O **Geek Social** é uma rede social temática para gamers e colecionadores. Une perfil, coleções de itens (jogos, livros, card games, board games, customizadas), feed, chat em tempo real, vitrine de troca/venda, e integrações externas (Steam) num único produto self-hosted.
+
+## Pilares do produto
+
+- **Coleções estruturadas** — cada coleção tem schema dinâmico (campos customizados) e itens reutilizáveis. Importação automática via Steam.
+- **Sociabilidade** — perfil rico (bio, interesses, pronouns, capa, fundo), amizades com privacidade, feed de atividades, chat 1-1 e em grupos com áudio/vídeo/arquivos.
+- **Vitrine** — anúncios de itens (venda ou troca) com sistema de propostas/contra-propostas, dupla confirmação na transação, reputação imutável por avaliações.
+- **Ferramentas geek** — integrações com Steam (import de games), denúncias, notificações push, OAuth social.
+
+## Stack alto nível
+
+| Camada | Tecnologia |
+|---|---|
+| Backend | Fastify (Node.js 20+, TypeScript), Drizzle ORM |
+| Banco | PostgreSQL 17 |
+| Storage | S3 (MinIO local) |
+| Realtime | Socket.IO |
+| Jobs | pg-boss |
+| Auth | JWT + cookies HttpOnly + Google OAuth |
+| Frontend | Vue 3 + Vite + Pinia |
+| Push | Web Push (VAPID) |
+| Infra dev | Docker Compose |
+
+Para detalhes do stack ver [Stack e arquitetura](/docs/intro/stack).
+
+## Repos
+
+| Repo | Conteúdo |
+|---|---|
+| `geek-social-api` | Backend Fastify, schema Drizzle, migrations, jobs |
+| `geek-social-frontend` | Web app Vue 3 |
+| `geek-social-docs` | Este portal de documentação |
+| `local-env-dev` | Docker Compose com Postgres, MinIO, Keycloak |
+
+## Convenções gerais
+
+- Idioma do código e API: inglês para identificadores; mensagens de UI em português
+- Banco: snake_case nos nomes de colunas/tabelas; camelCase nos identificadores TypeScript
+- Erros: códigos tipados em SCREAMING_SNAKE_CASE retornados via `{ error: "CODIGO" }` (ver [Convenções de erro](/docs/concepts/convencoes-erro))

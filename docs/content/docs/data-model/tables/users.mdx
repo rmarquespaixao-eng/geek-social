@@ -1,0 +1,82 @@
+---
+title: users
+description: Conta de usuário — credenciais, perfil, configurações de privacidade, vínculos sociais.
+---
+
+import Columns from '@/generated/data-model/tables/users/columns'
+import Fks from '@/generated/data-model/tables/users/fks'
+import Indexes from '@/generated/data-model/tables/users/indexes'
+import Constraints from '@/generated/data-model/tables/users/constraints'
+
+A tabela `users` é o coração do sistema — todo o restante referencia ela. Guarda credenciais (hash de senha, vínculo Google), dados de perfil (avatar, capa, bio), e configurações granulares de privacidade. Um usuário pode autenticar via senha, via Google, ou ambos (vínculo). Soft delete não existe: deletar um usuário cascateia a remoção em todas as tabelas que dependem dele.
+
+## Colunas
+
+<Columns />
+
+## Funcionalidade dos campos
+
+### Identidade
+- **`id`** — UUID v4 gerado pelo PG; é a chave primária e o identificador público (aparece em URLs e payloads). Nunca expor `email` em URLs.
+- **`email`** — único globalmente. Usado pra login email/senha e pra vincular conta Google quando o e-mail bate.
+- **`password_hash`** — bcrypt cost 12. Pode ser `NULL` para contas criadas via Google que ainda não definiram senha local. Endpoint `POST /auth/set-password` preenche esse campo.
+- **`display_name`** — nome público (≤100 chars). Mutável a qualquer momento. Não precisa ser único.
+
+### Perfil visual
+- **`bio`** — texto livre até 10k chars. Suporta múltiplas linhas. Renderizado como texto puro no frontend (sem MD).
+- **`avatar_url`** — URL S3/MinIO da foto de perfil. Ao fazer upload, o backend deleta a anterior. Pode ser `NULL` (renderiza placeholder).
+- **`cover_url`** + **`cover_color`** — capa do perfil (estilo Twitter). Mutuamente exclusivos: setar um zera o outro. Se ambos `NULL`, frontend usa gradient default. `cover_color` é um hex de 7 chars (`#RRGGBB`).
+- **`profile_background_url`** + **`profile_background_color`** — fundo customizável da página de perfil. Mesma semântica de exclusividade da capa.
+
+### Privacidade e configs
+- **`privacy`** (enum `public` | `friends_only` | `private`) — visibilidade default do perfil. Coleções e posts têm flags próprias e mais granulares.
+- **`email_verified`** — indica se o e-mail de verificação foi clicado. Hoje informativo apenas (login não bloqueia se `false`).
+- **`show_presence`** — se `false`, o backend não emite o status online deste usuário pra outros nem expõe `last_seen` no perfil.
+- **`show_read_receipts`** — se `false`, mensagens lidas por este usuário NÃO marcam o "lido" pro emissor.
+
+### Vínculos externos
+- **`steam_id`** + **`steam_linked_at`** + **`steam_api_key`** — OpenID + chave Web API pra importação de jogos. Único globalmente quando definido. Ver módulo Steam (em breve).
+- **`google_id`** + **`google_linked_at`** — vínculo OAuth Google. Único globalmente.
+
+### Demografia
+- **`birthday`** — DATE (sem hora). Idade calculada client-side.
+- **`interests`** — JSONB `string[]`. Lista livre de interesses tipo "Souls-likes", "Magic the Gathering". Limite de tamanho enforced no app.
+- **`pronouns`**, **`location`**, **`website`** — campos opcionais de perfil; sem normalização especial.
+
+### Auditoria
+- **`created_at`** / **`updated_at`** — gerenciados pelo backend. `updated_at` é manualmente atualizado em todo `UPDATE`.
+
+## Foreign keys
+
+<Fks />
+
+Nenhuma FK saindo de `users` — é o "vértice raiz" do grafo. Quase todas as outras tabelas referenciam `users.id` com `ON DELETE CASCADE`.
+
+## Índices
+
+<Indexes />
+
+Índices implícitos via `UNIQUE`: `email`, `steam_id`, `google_id`. Não há índices secundários pesados em `users` porque queries típicas são por PK ou por FK em tabelas filhas.
+
+## Constraints
+
+<Constraints />
+
+Constraints adicionais a nível de aplicação (não DB):
+- `bio` ≤ 10000 chars
+- `cover_color` / `profile_background_color` formato `#RRGGBB`
+- `interests` deve ser array de strings (Drizzle `$type<string[]>`)
+
+## Tabelas relacionadas
+
+| Relação | Quem aponta pra `users` |
+|---|---|
+| Sessão / auth | [`refresh_tokens`](/docs/data-model/tables/refresh_tokens), `password_reset_tokens` |
+| Conteúdo | `collections`, `items` (via collections), `posts`, `comments`, `reactions` |
+| Social | `friendships`, `blocks`, `notifications` |
+| Vitrine | `listings`, `offers`, `offer_proposals`, `listing_ratings` |
+| Chat | `conversations` (via members), `messages` |
+| Steam | `import_batches`, `import_batch_finalizations` |
+| Reports | `reports` (autor + alvo) |
+
+A regra geral: **deletar um user cascateia tudo**. Se quiser preservar dados ao "deletar", a abordagem seria soft-delete via flag em `users` — não foi feito pelo princípio "zero débito técnico": quem pediu pra excluir conta quer mesmo excluir.

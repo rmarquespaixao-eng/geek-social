@@ -1,0 +1,207 @@
+---
+title: HttpClient — interceptors
+description: Singleton Axios com auto-Bearer + auto-refresh em 401 + redirect login.
+---
+
+`shared/http/api.ts` exporta um Axios singleton usado por **todos** os services. Centraliza:
+
+- Bearer token automático no header
+- Tratamento de 401 com refresh + retry
+- Redirect pra login se refresh falhar
+- `withCredentials: true` pra cookies HttpOnly
+
+## Setup
+
+```ts
+import axios from 'axios'
+
+export const api = axios.create({
+  baseURL: import.meta.env.VITE_API_URL ?? '/api',
+  withCredentials: true,   // envia cookies (refreshToken) cross-origin
+})
+```
+
+`baseURL` vem de env (`VITE_API_URL`). Em prod, injeção runtime via `entrypoint.sh` substitui antes do bundle carregar.
+
+## Interceptor de request — Bearer auto
+
+```ts
+api.interceptors.request.use((config) => {
+  const store = useAuthStore()
+  if (store.token && config.headers) {
+    config.headers.Authorization = `Bearer ${store.token}`
+  }
+  return config
+})
+```
+
+Cada request lê o token corrente do `authStore` (em memória). Se logout aconteceu, header não é setado, backend retorna 401.
+
+## Interceptor de response — auto-refresh em 401
+
+```ts
+api.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    const originalRequest = error.config
+    if (error.response?.status !== 401) return Promise.reject(error)
+
+    // Evita loop: se já tentou refresh e falhou de novo, não retenta
+    if (originalRequest._retry) return Promise.reject(error)
+    if (originalRequest.url?.includes('/auth/refresh')) return Promise.reject(error)
+
+    originalRequest._retry = true
+    const store = useAuthStore()
+
+    try {
+      const { data } = await api.post<{ accessToken: string }>('/auth/refresh')
+      store.setToken(data.accessToken)
+      originalRequest.headers.Authorization = `Bearer ${data.accessToken}`
+      return api(originalRequest)   // retry
+    } catch {
+      store.clearAuth()
+      if (!window.location.pathname.startsWith('/login')) {
+        window.location.href = '/login'
+      }
+      return Promise.reject(error)
+    }
+  },
+)
+```
+
+**Fluxo**:
+1. Request normal → 401
+2. Interceptor detecta, marca `_retry=true`
+3. Chama `/auth/refresh` (cookie HttpOnly automático)
+4. Sucesso → atualiza store + retry do original com novo token
+5. Falha → limpa auth + redirect `/login`
+
+**Proteções anti-loop**:
+- `_retry` flag — evita retry infinito se refresh falhar e voltar 401
+- Skip se URL contém `/auth/refresh` — evita refresh-do-refresh
+
+## Race condition: múltiplas requests simultâneas
+
+**Problema**: 5 requests caem 401 ao mesmo tempo. Cada uma tenta refresh → 4 falham porque token foi rotacionado.
+
+**Solução atual**: cada request faz seu próprio refresh. Em ~5min de tempo de access token, race é raro. Aceito.
+
+**Solução robusta (futuro)**:
+
+```ts
+let refreshPromise: Promise<string> | null = null
+
+async function getNewToken() {
+  if (!refreshPromise) {
+    refreshPromise = api.post('/auth/refresh').then(r => r.data.accessToken).finally(() => {
+      refreshPromise = null
+    })
+  }
+  return refreshPromise
+}
+```
+
+Single-flight pattern: só 1 refresh em voo por vez; outros aguardam o mesmo Promise.
+
+## Uso típico em services
+
+```ts
+// modules/auth/services/authService.ts
+import { api } from '@/shared/http/api'
+
+export const authService = {
+  async login(email: string, password: string) {
+    const { data } = await api.post('/auth/login', { email, password })
+    return data  // { accessToken, user }
+  },
+
+  async refresh() {
+    const { data } = await api.post('/auth/refresh')
+    return data
+  },
+
+  async logout() {
+    await api.post('/auth/logout')
+  },
+}
+```
+
+Nada de `axios.create` em services. **Sempre** `import { api }`.
+
+## Tipagem das responses
+
+Use generics ou tipos:
+
+```ts
+import type { User } from '@/shared/types/user'
+
+const { data } = await api.get<User>('/users/me')
+//      ^^^^ User
+```
+
+OU
+
+```ts
+type LoginResponse = { accessToken: string; user: User }
+const { data }: { data: LoginResponse } = await api.post('/auth/login', { ... })
+```
+
+## Tratamento de erro
+
+`error.response?.data` traz o body do backend:
+
+```ts
+try {
+  await authService.login(email, password)
+} catch (err) {
+  if (err.response?.status === 401) {
+    showError('Credenciais inválidas')   // OU compare por código tipado quando refator concluído
+  } else {
+    showError('Erro ao logar')
+  }
+}
+```
+
+[Filosofia](/docs/intro/filosofia) — princípio 5 — sugere comparar por **código** tipado. Auth ainda retorna mensagem em PT em alguns casos (débito conhecido).
+
+## Cancelar requests
+
+Pra requests pesados (busca em digitação), cancele o anterior:
+
+```ts
+const controller = new AbortController()
+api.get('/users/search', { params: { q: input.value }, signal: controller.signal })
+
+// Em mudança de input:
+controller.abort()
+```
+
+Combinar com debounce no input pra menos requests no servidor.
+
+## Upload (multipart)
+
+Axios infere automaticamente:
+
+```ts
+const formData = new FormData()
+formData.append('file', file)
+const { data } = await api.post('/users/me/avatar', formData)
+```
+
+Não precise setar `Content-Type` manual — `FormData` setá-lo com `boundary` correto.
+
+## CORS
+
+Backend tem `cors({ origin: env.FRONTEND_URL, credentials: true })`. Frontend manda com `withCredentials: true`. Cookies HttpOnly só vão se URL bater.
+
+Em dev: `VITE_API_URL=http://localhost:3003` + backend `FRONTEND_URL=http://localhost:5173`. Match.
+
+Em prod: ambos sob mesmo domínio (`docs.example.com` + `api.example.com`) ou subdomain. CORS configurado.
+
+## Próximas melhorias
+
+- Single-flight refresh (race protection)
+- Mapping centralizado de error codes → mensagens user-facing (i18n)
+- Retry com exponential backoff em 5xx (rede instável)
+- Request deduplication pra GETs idempotentes
+- Telemetry (tempo de resposta médio, taxa de erro) — Sentry/GlitchTip

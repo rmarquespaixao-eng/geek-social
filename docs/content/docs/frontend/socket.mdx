@@ -1,0 +1,249 @@
+---
+title: Socket singleton
+description: Conexão Socket.IO única, reconexão, listeners globais e por componente.
+---
+
+`shared/socket/socket.ts` exporta uma instância única de `socket.io-client`. Toda a app usa essa conexão.
+
+## Setup
+
+```ts
+import { io, type Socket } from 'socket.io-client'
+import { useAuthStore } from '@/shared/auth/authStore'
+
+let socket: Socket | null = null
+
+export function getSocket(): Socket {
+  if (socket) return socket
+
+  const store = useAuthStore()
+  socket = io(import.meta.env.VITE_API_URL ?? '/', {
+    auth: { token: store.token },
+    autoConnect: false,
+    reconnection: true,
+    reconnectionDelay: 1000,
+    reconnectionDelayMax: 5000,
+  })
+
+  return socket
+}
+
+export function connectSocket() {
+  const s = getSocket()
+  if (!s.connected) s.connect()
+}
+
+export function disconnectSocket() {
+  socket?.disconnect()
+  socket = null
+}
+```
+
+## Conectar após login
+
+`composables/useLogin.ts`:
+
+```ts
+import { connectSocket } from '@/shared/socket/socket'
+
+async function login(...) {
+  // ... auth flow
+  store.setToken(accessToken)
+  store.setUser(user)
+  connectSocket()
+  router.push('/dashboard')
+}
+```
+
+## Desconectar no logout
+
+```ts
+import { disconnectSocket } from '@/shared/socket/socket'
+
+async function logout() {
+  await api.post('/auth/logout')
+  disconnectSocket()
+  store.clearAuth()
+  router.push('/login')
+}
+```
+
+## Refresh token + reconexão
+
+Quando o access token é renovado via interceptor HTTP, o socket precisa **reconectar** com o novo token (porque o auth.token foi sent no handshake inicial).
+
+```ts
+// authStore.ts
+watch(token, (newToken) => {
+  if (!newToken) {
+    disconnectSocket()
+  } else {
+    disconnectSocket()  // fecha com token velho
+    connectSocket()      // reabre com novo
+  }
+})
+```
+
+Ou, em vez de re-conectar, atualizar o auth do socket (Socket.IO 4 suporta):
+
+```ts
+const s = getSocket()
+s.auth = { token: newToken }
+s.disconnect().connect()
+```
+
+## Listeners globais
+
+`shared/socket/listeners.ts`:
+
+```ts
+import { getSocket } from './socket'
+import { useNotificationsStore } from '@/modules/notifications/store'
+import { useChatStore } from '@/modules/chat/store'
+
+export function registerGlobalListeners() {
+  const socket = getSocket()
+  const notifs = useNotificationsStore()
+  const chat = useChatStore()
+
+  socket.on('notification:new', (notif) => {
+    notifs.addNotification(notif)
+  })
+
+  socket.on('message:new', (msg) => {
+    chat.addMessage(msg)
+  })
+
+  socket.on('conversation:read', (data) => {
+    chat.markRead(data)
+  })
+
+  socket.on('presence:online', (data) => {
+    chat.updatePresence(data.userId, true)
+  })
+
+  // ... outros eventos
+}
+```
+
+Chame uma vez em `App.vue`:
+
+```vue
+<script setup>
+import { onMounted } from 'vue'
+import { registerGlobalListeners } from '@/shared/socket/listeners'
+
+onMounted(registerGlobalListeners)
+</script>
+```
+
+## Listeners por componente (escoped)
+
+Pra eventos relevantes só numa view (ex: typing indicator dentro de um chat específico):
+
+```vue
+<script setup>
+import { onMounted, onUnmounted } from 'vue'
+import { getSocket } from '@/shared/socket/socket'
+
+const props = defineProps<{ conversationId: string }>()
+const socket = getSocket()
+
+const onTyping = (data) => {
+  if (data.conversationId === props.conversationId) {
+    // mostra "typing..." na UI
+  }
+}
+
+onMounted(() => socket.on('conversation:typing', onTyping))
+onUnmounted(() => socket.off('conversation:typing', onTyping))
+</script>
+```
+
+**Importante**: sempre desregistrar com `off` em `onUnmounted` pra evitar memory leaks.
+
+## Emit do cliente
+
+Pra ações que o cliente notifica via socket (typing, read receipts):
+
+```ts
+const socket = getSocket()
+
+socket.emit('conversation:typing', { conversationId, isTyping: true })
+```
+
+## Tratamento de desconexão
+
+```ts
+socket.on('disconnect', (reason) => {
+  if (reason === 'io server disconnect') {
+    // backend decidiu desconectar (ex: token inválido)
+    socket.connect()  // tenta reconectar
+  }
+  // 'io client disconnect' = você chamou disconnect()
+  // 'transport close' / 'transport error' = rede; auto-reconecta
+})
+
+socket.on('connect_error', (err) => {
+  console.error('Socket connection error:', err.message)
+  // Se err.message === 'UNAUTHORIZED', token inválido — refresh + reconectar
+})
+```
+
+## Status indicador na UI
+
+Pra mostrar "Online" / "Reconectando..." no header:
+
+```vue
+<script setup>
+import { ref, onMounted } from 'vue'
+import { getSocket } from '@/shared/socket/socket'
+
+const isConnected = ref(false)
+
+onMounted(() => {
+  const socket = getSocket()
+  socket.on('connect', () => isConnected.value = true)
+  socket.on('disconnect', () => isConnected.value = false)
+})
+</script>
+
+<template>
+  <span :class="isConnected ? 'text-green-500' : 'text-amber-500'">
+    {{ isConnected ? '● Online' : '○ Reconectando' }}
+  </span>
+</template>
+```
+
+## Performance — não escutar tudo
+
+Listeners caros (ex: que disparam re-render de lista grande) — debounce:
+
+```ts
+import { debounce } from '@/shared/utils/debounce'
+
+const handleNotificationsRefresh = debounce(() => {
+  notifs.fetchUnreadCount()
+}, 500)
+
+socket.on('notification:new', handleNotificationsRefresh)
+```
+
+## Eventos por categoria
+
+Catálogo completo em [Eventos de socket](/docs/reference/eventos-socket).
+
+Resumo:
+- `notification:new` — pra `notificationsStore.addNotification()`
+- `message:new`, `:edited`, `:deleted`, `:reaction` — pra `chatStore`
+- `conversation:read`, `:typing`, `:refresh` — pra UI ephemeral
+- `presence:online/offline/update` — pra mostrar status de amigos
+- `import:progress`, `:done` — pra Steam import progress bar
+- `call:*` — pra video/audio calls (separado em hook próprio)
+
+## Pendências
+
+- Single-flight refresh + reconexão automática
+- Métrica de latency (ping/pong)
+- Fallback pra long-polling se WebSocket bloqueado por proxy/firewall
+- Detecção de "user offline" robusta (nem sempre `disconnect` dispara em rede instável)

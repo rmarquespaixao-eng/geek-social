@@ -1,0 +1,106 @@
+---
+title: Storage (S3/MinIO)
+description: Como uploads de mídia são armazenados e servidos.
+---
+
+Geek Social usa **S3-compatível** pra armazenar arquivos de mídia: avatares, capas, post media, message attachments, ícones de coleção. Em dev, MinIO local; em prod, AWS S3 (ou outro provedor compatível).
+
+## Adapter
+
+Implementação em `src/shared/infra/storage/s3.adapter.ts`. Implementa interface comum com `put`, `delete`, `getSignedUrl`. Backend usa `@aws-sdk/client-s3` com endpoint customizável.
+
+## Configuração
+
+Via `.env`:
+
+```bash
+AWS_REGION=us-east-1
+AWS_ACCESS_KEY_ID=minioadmin             # em dev
+AWS_SECRET_ACCESS_KEY=minioadmin
+S3_BUCKET_NAME=geek-social-media
+STORAGE_ENDPOINT=http://localhost:9000   # MinIO local
+STORAGE_PUBLIC_URL=http://localhost:9000/geek-social-media
+```
+
+**Atenção**: `STORAGE_PUBLIC_URL` precisa incluir o nome do bucket no path (path-style do MinIO). Sem isso, URLs salvas no DB ficam quebradas (403 Forbidden ao acessar).
+
+Em prod com AWS S3, as URLs ficam virtual-hosted: `https://geek-social-media.s3.amazonaws.com/...`. Adapter detecta automaticamente baseado em `STORAGE_ENDPOINT`.
+
+## Estrutura de paths
+
+```
+geek-social-media/
+├── avatars/<userId>.jpg
+├── covers/<userId>.jpg
+├── backgrounds/<userId>.jpg
+├── collections/<collectionId>/icon.jpg
+├── collections/<collectionId>/cover.jpg
+├── posts/<postId>/<random>.jpg
+├── posts/<postId>/<random>-thumb.jpg
+├── chat/<conversationId>/<messageId>/<random>.<ext>
+└── chat/<conversationId>/<messageId>/<random>-thumb.jpg
+```
+
+Não há subdiretórios `users/<userId>/...` em chat — preferimos por conversation pra facilitar TTL futuro de conversas temporárias.
+
+## Upload pipeline
+
+```
+[Cliente envia multipart]
+       ↓
+@fastify/multipart parser (limite 5MB/arquivo)
+       ↓
+Validações de mime + size
+       ↓
+Processing (sharp pra thumbnails, ffmpeg pra áudio/vídeo)
+       ↓
+S3Adapter.put(key, buffer, contentType)
+       ↓
+URL gerada via PUBLIC_URL + key
+       ↓
+INSERT no DB (table específica: avatar_url no users, message_attachments, etc.)
+```
+
+## Thumbnails
+
+- **Imagens** — `sharp` resize pra 256px width, qualidade 80, JPEG
+- **Vídeos** — `ffmpeg` extrai frame em 1s do início (`-ss 1 -frames:v 1`), salva como JPEG
+- **Áudios** — sem thumbnail; em vez disso, `waveform_peaks` (array de amplitudes) é gerado e guardado em [`message_attachments.waveform_peaks`](/docs/data-model/tables/message_attachments)
+
+## Servir arquivos
+
+URLs são públicas — qualquer um com link acessa. Não há ACL granular no nível do storage.
+
+**Implicação**: arquivos `private` (post visibility=private, message em conversa privada) ainda são acessíveis se alguém conseguir o link. Mitigação possível: signed URLs com TTL curta, mas adiciona complexidade na UI (URLs renovadas a cada N minutos). Hoje aceito o trade-off.
+
+## Limpeza de órfãos
+
+Quando um post/message é deletado (cascade ou hard), o **registro de DB** desaparece (post_media, message_attachments) mas **arquivos no S3 não**. Pendência geral.
+
+Estratégias possíveis:
+1. **App-level** — hook em delete pra chamar `S3Adapter.delete(...)` pra cada arquivo
+2. **Background reconciler** — job que compara objetos S3 com URLs em DB; deleta órfãos
+3. **S3 lifecycle policy** — auto-delete objetos com tag não-renovada após X dias
+
+Hoje cresce sem limpeza. Aceitável em volume baixo (dev/early prod).
+
+## CDN
+
+Em prod, recomendado fronar com CloudFront/Cloudflare CDN pra cache. URLs do bucket ficam por trás. Setup futuro.
+
+## Fastify multipart limite
+
+```ts
+await app.register(fastifyMultipart, {
+  limits: { fileSize: 5 * 1024 * 1024, files: 10 }
+})
+```
+
+Bota 5MB por arquivo, máximo 10 arquivos por request. Subir esses limites tem custo de memória — `fastifyMultipart` lê arquivo todo em buffer antes de mandar pro adapter (não streaming end-to-end por simplicidade).
+
+## Relacionados
+
+- Tabela [`users`](/docs/data-model/tables/users) — avatar_url, cover_url, profile_background_url
+- Tabela [`post_media`](/docs/data-model/tables/post_media)
+- Tabela [`message_attachments`](/docs/data-model/tables/message_attachments)
+- Tabela [`collections`](/docs/data-model/tables/collections) — icon_url, cover_url

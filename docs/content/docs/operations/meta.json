@@ -1,0 +1,4 @@
+{
+  "title": "Operations",
+  "pages": ["arquitetura", "deploy", "ci-cd", "nginx", "monitoring"]
+}

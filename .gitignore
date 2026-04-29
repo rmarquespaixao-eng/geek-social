@@ -141,3 +141,30 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
+
+# IDE / editor
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Agentes / ferramentas locais
+.claude/
+.superpowers/
+.autohand/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs/lockfiles auxiliares do monorepo
+*.log
+
+# Fumadocs gerado
+.source/
+
+# TypeScript build info dos subprojetos
+**/tsconfig.tsbuildinfo
+
+# Drizzle migrations geradas (manter migrations versionadas → comentar se for o caso)
+# api/src/shared/infra/database/migrations/meta/

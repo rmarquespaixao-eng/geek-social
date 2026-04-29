@@ -1,0 +1,80 @@
+---
+title: posts
+description: Posts do feed — manuais escritos pelo usuário ou item-share automáticos.
+---
+
+import Columns from '@/generated/data-model/tables/posts/columns'
+import Fks from '@/generated/data-model/tables/posts/fks'
+import Indexes from '@/generated/data-model/tables/posts/indexes'
+import Constraints from '@/generated/data-model/tables/posts/constraints'
+
+Posts são publicações de feed — texto livre + mídia, ou compartilhamento estruturado de um item. O feed mostra posts dos amigos respeitando `visibility` por post (independente de `users.privacy`).
+
+Tipos:
+- **`manual`** — post comum: texto + mídia opcional. `content` é o texto.
+- **`item_share`** — post automatizado quando o usuário adiciona item numa coleção com `auto_share_to_feed=true`. `item_id` referencia o item.
+
+## Colunas
+
+<Columns />
+
+## Funcionalidade dos campos
+
+- **`id`** — UUID, PK
+- **`user_id`** — autor. Cascade delete: apaga posts do user.
+- **`type`** — `manual` ou `item_share`
+- **`content`** — texto livre. Opcional (post pode ter só mídia, ou só ser item_share).
+- **`visibility`** — `public`, `friends_only`, `private`
+- **`item_id`** — só pra `item_share`. Cascade delete (item apagado → post some).
+- **`collection_id`** — só pra `item_share` (qual coleção recebeu o item). Set null em delete (post permanece no feed mesmo se coleção sumir).
+- **`created_at` / `updated_at`** — managed.
+
+## Foreign keys
+
+<Fks />
+
+## Índices
+
+<Indexes />
+
+**Detalhes**:
+- **`posts_user_created_at_idx`** — perfil do usuário (timeline ordenada)
+- **`posts_visibility_created_at_idx`** — feed público
+- **`posts_item_id_idx`** — "todos os posts referenciando este item"
+
+## Constraints
+
+<Constraints />
+
+## Visibility na construção do feed
+
+`FeedService` cria query que respeita visibility e relação:
+
+```sql
+SELECT * FROM posts
+WHERE
+  (visibility = 'public')
+  OR (visibility = 'friends_only' AND EXISTS (SELECT 1 FROM friendships ...))
+  OR (visibility = 'private' AND user_id = $currentUser)
+ORDER BY created_at DESC
+LIMIT 20 OFFSET ?
+```
+
+(Acoplado com filtro de `user_blocks` pra não mostrar de gente bloqueada.)
+
+## Padrões de uso
+
+- **Criar post manual** — `POST /posts` com `content` + media uploads → INSERT post + INSERT post_media
+- **Item share automático** — disparado pelo `ItemsService.create` se `collection.auto_share_to_feed`
+- **Editar** — `PUT /posts/:id` (content + visibility)
+- **Deletar** — DELETE cascateia comments/reactions/media
+
+## Tabelas relacionadas
+
+- [`users`](/docs/data-model/tables/users) — autor (cascade)
+- [`items`](/docs/data-model/tables/items) — alvo de item_share (cascade)
+- [`collections`](/docs/data-model/tables/collections) — origem de item_share (set null)
+- [`post_media`](/docs/data-model/tables/post_media) — anexos (cascade)
+- [`post_reactions`](/docs/data-model/tables/post_reactions) — reactions (cascade)
+- [`post_comments`](/docs/data-model/tables/post_comments) — comments (cascade)
+- [`notifications`](/docs/data-model/tables/notifications) — `post_comment`, `post_reaction`

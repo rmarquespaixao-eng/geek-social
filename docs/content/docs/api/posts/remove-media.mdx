@@ -1,0 +1,41 @@
+---
+title: DELETE /posts/{id}/media/{mediaId}
+description: Remover mídia do post
+---
+
+import Meta from '@/generated/api/posts/remove-media/meta'
+import Request from '@/generated/api/posts/remove-media/request'
+import Responses from '@/generated/api/posts/remove-media/responses'
+import Errors from '@/generated/api/posts/remove-media/errors'
+import Examples from '@/generated/api/posts/remove-media/examples'
+
+<Meta />
+
+DELETE da row em post_media. Arquivo S3 fica órfão.
+
+## Request
+
+<Request />
+
+## Response
+
+<Responses />
+
+## Erros
+
+<Errors />
+
+{/* TODO: para cada código de erro acima, explique a causa e como resolver. */}
+
+## Exemplos
+
+<Examples />
+
+
+## Side effects
+
+{/* TODO: eventos de socket emitidos, notificações disparadas, jobs enfileirados, cascades. */}
+
+## Relacionados
+
+{/* TODO: links pra módulo, conceitos, endpoints relacionados. */}

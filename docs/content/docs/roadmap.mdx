@@ -1,0 +1,557 @@
+---
+title: Roadmap
+description: O que já está pronto e o que vem pela frente — features, moderação, arquitetura.
+---
+
+Status atual do projeto + features e melhorias planejadas. Atualizado conforme entregamos coisa nova.
+
+## Sumário
+
+- [Estado atual](#estado-atual) — tudo que já está implementado
+- [Próximas features](#próximas-features) — o que vem por aí no produto
+- [Plataforma de admin](#plataforma-de-admin) — moderação, painéis, auditoria
+- [Conformidade e segurança](#conformidade-e-segurança) — LGPD, idade mínima, AI moderation
+- [Ajustes de arquitetura](#ajustes-de-arquitetura) — reorganização técnica
+- [Cronograma sugerido](#cronograma-sugerido)
+
+---
+
+## Estado atual
+
+Tudo que está rodando hoje (referências cruzadas com a documentação técnica):
+
+### ✅ Autenticação e identidade
+- Email/senha com bcrypt (cost 12) + refresh token rotation
+- Google OAuth via OpenID Connect (vincular/desvincular)
+- Recuperação de senha por e-mail (token single-use, TTL 1h)
+- Troca de senha autenticada + definição inicial de senha (após OAuth)
+- Cookies HttpOnly + Secure + SameSite
+- Exclusão de conta com cascade total (irreversível)
+- 📖 [Módulo Auth](/docs/modules/auth) · [Conceito](/docs/concepts/autenticacao)
+
+### ✅ Perfil e privacidade
+- Perfil rico: bio (10k chars), birthday, interests, pronouns, location, website
+- Avatar + capa + fundo de perfil (imagem OU cor sólida)
+- Privacy granular: perfil (`public/friends_only/private`), `show_presence`, `show_read_receipts`
+- Search de usuários por nome/e-mail
+- 📖 [Módulo Users](/docs/modules/users)
+
+### ✅ Social
+- Sistema de amizades simétrico com fluxo de pedido/aceite (auto-aceite em interesse mútuo)
+- Bloqueio direcional com cascade (desfaz amizade, desconecta chat, esconde conteúdo)
+- 📖 [Módulo Friends](/docs/modules/friends)
+
+### ✅ Coleções e items
+- Coleções tipadas (`games`, `books`, `cardgames`, `boardgames`, `custom`)
+- Schema dinâmico por coleção (campos custom configuráveis)
+- 50+ field definitions de sistema seedadas (Plataforma, Gênero, Status, etc.)
+- Items com fields JSONB + rating + comment + cover
+- Filtros dinâmicos na listagem (por field, range, sort customizável)
+- Cursor pagination
+- 📖 [Módulo Collections+Items](/docs/modules/collections-items)
+
+### ✅ Feed e posts
+- Posts manuais com texto + mídia (galeria)
+- Posts `item_share` automáticos quando coleção tem `auto_share_to_feed`
+- Reactions temáticas (power_up, epic, critical, loot, gg)
+- Comentários planos (sem aninhamento)
+- Visibility por post (`public/friends_only/private`)
+- Feed cronológico filtrado por amizade + blocks
+- 📖 [Módulo Posts/Feed](/docs/modules/posts-feed)
+
+### ✅ Chat
+- Conversas DM 1-1 + grupos (com roles owner/admin/member + permissions)
+- DM Requests entre não-amigos (caixa "Solicitações")
+- Mensagens texto, áudio (com waveform), vídeo, imagem, arquivo
+- Reactions livres com emoji, replies, forward (até 20 destinos)
+- Calls 1-1 (vídeo/áudio) via WebRTC com sinalização Socket.IO
+- Modo Snapchat per-user (mensagens efêmeras com cleanup cron)
+- Read receipts respeitando `show_read_receipts`
+- Mute, archive, hide per-conversation
+- 📖 [Módulo Chat](/docs/modules/chat)
+
+### ✅ Vitrine (marketplace)
+- Listings com status (`active/paused/closed`) + auto-rejeição de offers em close
+- Offers tipo `buy` (dinheiro) ou `trade` (item por item)
+- **Counter-propostas** via `offer_proposals` (apenas 1 pending por offer)
+- Dual confirmation antes de transferir + auto-criação de coleção destino
+- Auto-expiração 7 dias após accepted sem confirms
+- Avaliações **imutáveis** pós-transação com threshold de visibilidade (`MIN_RATINGS=3`)
+- 📖 [Listings](/docs/modules/listings) · [Offers](/docs/modules/offers) · [Ratings](/docs/modules/listing-ratings)
+
+### ✅ Steam Integration
+- Vínculo via OpenID 2.0
+- API key per-user pra chamadas autorizadas
+- Importação de games em batch via pg-boss (workers `import-game` + `enrich-game`)
+- Throttle de `appdetails` pra respeitar rate limit Steam
+- Finalização atômica (race-free) via `import_batch_finalized`
+- 📖 [Módulo Steam](/docs/modules/steam)
+
+### ✅ Notificações
+- Persistência + entrega real-time via Socket.IO
+- Web Push (VAPID) pra notificação fora do app
+- 16 tipos de notificação (sociais, vitrine, propostas, ratings, Steam)
+- 📖 [Módulo Notifications](/docs/modules/notifications)
+
+### ✅ Reports
+- Denúncias em 5 superfícies (user, message, post, collection, conversation)
+- 5 razões (spam, harassment, nsfw, hate, other)
+- 📖 [Módulo Reports](/docs/modules/reports)
+
+### ✅ Realtime + infra
+- Socket.IO no mesmo HTTP server do Fastify
+- 20+ eventos socket (notifications, chat, presence, calls, imports)
+- pg-boss queue persistida no PG pra jobs assíncronos
+- 📖 [Conceito Realtime](/docs/concepts/realtime) · [Eventos socket](/docs/reference/eventos-socket)
+
+### ✅ Documentação
+- Portal Fumadocs self-hosted com 681 páginas estáticas
+- API Reference auto-gerada de Zod schemas (143 endpoints)
+- Sandbox interativo Scalar embedado em cada endpoint
+- Dicionário de banco com 28 tabelas + ER diagrams Mermaid
+- Filosofia, conceitos, tutoriais, frontend, operations
+- 📖 Você está nele
+
+---
+
+## Próximas features
+
+Em ordem aproximada de prioridade.
+
+### 🚧 Comunidades (estilo Orkut)
+
+Espaço para reunir pessoas com **interesses comuns** (jogos específicos, gêneros, hobbies). Mecânica de **inscrição + aceite** + permissões granulares.
+
+**Funcionalidades planejadas:**
+- Criar comunidade com nome, descrição, capa, ícone, tópico/categoria
+- Visibilidade: pública (qualquer um vê e pode pedir entrada), privada (invisível na busca, só por convite)
+- Regras de entrada: aberta (entrar direto) ou com aceite (mod aprova)
+- Roles: owner, admin (moderar), membro
+- Posts dentro da comunidade (feed próprio + opção de cross-post no feed pessoal)
+- Tópicos/threads dentro da comunidade (estrutura mais leve que fórum)
+- Eventos da comunidade (encontros, raids, watch parties)
+- Tags pra descoberta
+- Sub-comunidades? (a decidir)
+
+**Decisões pendentes:**
+- Comunidade tem chat próprio (group chat já existe — reusar?) ou só feed estilo timeline?
+- Posts da comunidade aparecem no feed do membro? Default opt-in ou opt-out?
+- Limite de comunidades por usuário?
+- Quem pode banir membro? (owner sempre; admin sim/não)
+
+**Modelagem inicial (a refinar)**:
+
+```
+communities
+├── id, name, description, slug
+├── owner_id, created_at
+├── icon_url, cover_url
+├── visibility: public | private
+├── join_policy: open | approval | invite_only
+└── topic / category
+
+community_members
+├── community_id, user_id
+├── role: owner | admin | member
+├── joined_at, banned_at?
+└── permissions JSONB
+
+community_join_requests
+├── community_id, user_id
+├── status: pending | accepted | rejected
+└── message?
+
+community_posts
+└── (estende posts com community_id FK opcional)
+```
+
+📋 **Spec dedicada futura**: brainstorm completo antes de codar.
+
+### 🚧 Recomendações no feed (algoritmo de ranking)
+
+Hoje o feed é cronológico simples. Migrar pra **ranking inteligente** que mistura recência + afinidade + engajamento.
+
+**Abordagens possíveis (a pesquisar e decidir):**
+
+1. **Collaborative filtering** — "users que curtiram o que você curtiu também curtiram X"
+   - Matrix factorization (SVD, ALS)
+   - Item-based similarity
+   - Cold start: novos users sem histórico → fallback cronológico
+2. **Content-based** — usa embeddings dos itens/posts pra rankear por similaridade ao histórico
+   - Tags, categorias, conteúdo de bio
+   - Vector store (pgvector já no Postgres)
+3. **Hybrid** — combina os dois pesos
+4. **Engagement-based** (mais simples) — pondera por:
+   - Recência (decay temporal)
+   - Reações/comments (mais engajamento → maior score)
+   - Afinidade com autor (interagiu antes? amigo? mesma comunidade?)
+   - Diversidade (não saturar com 1 só pessoa)
+
+**Provável caminho inicial**: heurística simples (engagement + decay + afinidade) → coletar métricas → eventualmente migrar pra ML formal.
+
+**Considerações:**
+- Calcular ranking sob demanda (custo por request) ou pré-computar (job recorrente)?
+- pgvector pra embeddings semânticos vale a pena? (depende do volume)
+- A/B testing infra (a planejar — usa feature flags do roadmap abaixo)
+
+📋 **Pesquisa antes**: revisão de papers + benchmark de complexidade vs ganho.
+
+### 🚧 Criptografia E2E (chat)
+
+Mensagens cifradas **end-to-end** — só remetente e destinatário leem; servidor vê apenas blob criptografado.
+
+**Padrão de referência: Signal Protocol** (X3DH + Double Ratchet)
+- X3DH (Extended Triple Diffie-Hellman) — handshake inicial entre dois users
+- Double Ratchet — chave por mensagem com forward + post-compromise security
+- PreKeys publicadas no servidor pra setup assíncrono (offline contact)
+
+**Implicações no design atual:**
+- `messages.content` armazenado **cifrado** (servidor não consegue indexar full-text)
+- Search dentro de conversas precisa ser client-side
+- Notificações push: payload mínimo ("Nova mensagem de Joe") — conteúdo só é decifrado quando user abre o app
+- Backup/restore complicado (chaves no device → perder device = perder mensagens)
+- Group chat E2E é **muito mais complexo** (Sender Keys ou MLS — RFC 9420)
+- Cuidado com forward de mensagem cifrada (não dá pra forward sem re-cifrar pro novo destino)
+
+**Decisões pendentes:**
+- E2E em DMs apenas, ou grupos também (MLS)?
+- Storage de keys no device — IndexedDB? Web Crypto API?
+- Multi-device (ex: web + mobile do mesmo user)? Usar backend como hub de keys públicas
+- Migração: conversas existentes ficam em texto plano legacy, ou re-cifradas?
+- Modo Snapchat (efêmero) já oferece privacidade alta — vale o custo do E2E completo?
+
+📋 **Spec MUITO detalhada antes de implementar** — este é o item mais arriscado da lista.
+
+### 🚧 Melhorar lista de amigos
+
+Hoje a lista é simples (nome + avatar). Melhorias planejadas:
+
+- **Status online** (já temos `presence`, falta integrar visualmente)
+- **Last interaction** — última conversa/comment/reaction
+- **Filtros** — online agora, amigos novos (últimos 30 dias), favoritos
+- **Pin/favoritar** amigos pra topo da lista
+- **Categorias** — "Família", "Trabalho", "Gaming" (tags por usuário, não compartilhadas)
+- **Atividades recentes** — preview de últimos posts/coleções relevantes do amigo
+- **Aniversários** — destaque pros que fazem aniversário hoje/semana
+- **Sugestões** — "amigos de amigos" (pode usar mesmo algoritmo do feed recomendação)
+
+**Decisões pendentes:**
+- Categorias/tags são per-user (privadas) ou colaborativas?
+- Notificação de aniversário automática (já no roadmap em [Tutorial: tipo de notificação](/docs/tutoriais/adicionar-tipo-notificacao))?
+
+---
+
+## Plataforma de admin
+
+Hoje **não há painel administrativo**. Tudo é gerenciado por SQL direto + log do app. Roadmap pra um sistema robusto.
+
+### 🚧 Painel administrador
+
+**Acesso restrito** por role (`users.role = 'admin'` — coluna a adicionar):
+
+#### Dashboard principal
+- Usuários online agora (em tempo real via socket)
+- Total de usuários cadastrados
+- Cadastros novos hoje/semana/mês
+- Posts publicados, mensagens enviadas, ofertas confirmadas (KPIs de saúde)
+- Reports pendentes
+- Imports Steam ativos
+- Erros recentes (5xx, exceções)
+
+#### Moderação de usuários
+- Buscar user por email/displayName/ID
+- Ver histórico completo: posts, ofertas, ratings, denúncias recebidas/feitas
+- **Banir** — flag `users.banned_at` + motivo + auto-logout (revogar refresh tokens)
+- **Suspender** — `users.suspended_until` (data) — login bloqueado, conteúdo escondido temporariamente
+- **Reativar** — limpar flags
+- **Forçar logout** — revogar todos refresh_tokens
+- **Forçar reset de senha** — invalidar password_hash, mandar e-mail de reset
+
+#### Gerenciar conteúdo
+- Listar posts/coleções/mensagens denunciadas
+- Marcar conteúdo como `removed_by_admin` (soft delete com motivo)
+- Restaurar conteúdo removido por engano
+
+### 🚧 Painel de denúncias e remoção de conteúdo
+
+- Lista de reports pendentes ordenados por prioridade (volume, severidade)
+- Histórico de denúncias por target/reporter
+- Marcar como `reviewed` (válida + ação tomada) ou `dismissed`
+- Templates de resposta automática ao denunciante
+- **API de denúncia direta pra casos graves** — webhook que envia pra autoridades quando detectar conteúdo grave automaticamente (CSAM, ameaças explícitas)
+- Integração com Linear/Notion pra tracking?
+
+### 🚧 Sistema de logs de atividade (audit log)
+
+Tabela `audit_log` dedicada (ver [Observability](/docs/concepts/observability)):
+
+```sql
+audit_log
+├── id, user_id, action, target_type, target_id
+├── metadata JSONB
+├── ip_address inet
+├── geo_location (cidade aproximada via GeoIP)
+├── user_agent
+└── created_at
+```
+
+**Eventos a logar:**
+- Login (sucesso/falha) com IP e UA
+- Logout
+- Mudança de senha / e-mail / settings
+- Posts criados/editados/deletados
+- Coleções criadas/deletadas
+- Listings/offers criadas/aceitas/canceladas
+- Reports criados
+- Bans/suspensões aplicadas pelo admin
+- Bloqueios feitos
+- Mudanças de privacy
+
+**Privacidade**: log é interno; user **vê só os próprios** via `GET /users/me/activity-log`. Admin vê todos. Retenção: 1 ano? Definir.
+
+### 🚧 Conformidade LGPD
+
+- **Direito ao esquecimento**: já implementado via `DELETE /users/me`
+- **Portabilidade**: endpoint pra exportar dados pessoais (`GET /users/me/export`)
+  - JSON com perfil, coleções, items, posts, comentários, mensagens, offers
+  - Bundle ZIP com mídia incluída?
+- **Consentimento**: termos no signup (UI implementada; texto pendente revisão jurídica)
+- **Direito de acesso**: log de quem acessou meus dados (admin queries no audit_log)
+- **Correção**: já coberto pelos endpoints de update
+- **Notificação de breach**: protocolo definido (ainda não há infra)
+- **DPO**: identificar responsável + canal de contato
+
+### 🚧 Moderação de imagem e vídeo (anti-CSAM, conteúdo proibido)
+
+**Crítico** pra evitar uso da plataforma pra crimes. Opções:
+
+1. **Hash matching** com bases públicas
+   - PhotoDNA (Microsoft, gratuito pra non-profits)
+   - NCMEC hash list (CSAM identification)
+   - Funciona com mídia já catalogada por autoridades
+2. **AI vision** — modelos que detectam conteúdo NSFW/violento
+   - AWS Rekognition (pago, mas barato por imagem)
+   - Google Vision SafeSearch (pago)
+   - Open source: NSFW Detection (CLIP-based, self-host)
+3. **Manual review queue** — toda mídia uploadada passa por aprovação humana antes de ficar pública
+
+**Recomendação inicial**: combinação 1 + 2.
+- Hash matching automático no upload (bloqueia + reporta NCMEC se match positivo)
+- AI vision pra flag de NSFW (não bloqueia, mas marca pra review do admin + esconde de minors)
+- Manual review apenas pra reports
+
+### 🚧 Feature flags
+
+Habilitar/desabilitar recursos sem deploy. Permite:
+- Rollout gradual (10% dos users → 50% → 100%)
+- Killswitch em prod (algo deu errado, desliga sem revert)
+- A/B testing
+- Beta features opt-in
+
+**Implementação possível:**
+- Tabela `feature_flags` (key, enabled, rollout_percentage, target_user_ids)
+- Service `FeatureFlagsService.isEnabled(flag, userId)`
+- Hooks no frontend pra esconder UI de features off
+- Hooks no backend pra rejeitar endpoints de features off
+- Admin UI pra toggle em runtime
+
+**Alternativas SaaS** (se decidir abrir mão do "100% self-host"):
+- GrowthBook self-host (gratuito, open-source)
+- Unleash self-host
+- LaunchDarkly (caro)
+
+📋 Decisão na sessão de implementação: rolar próprio simples ou usar GrowthBook self-host.
+
+### 🚧 Verificação de idade (16+)
+
+Plataforma exclusiva pra **maiores de 16 anos**. Como verificar de forma barata e razoável (sem rodar serviços caros tipo Veriff)?
+
+**Opções por custo crescente:**
+
+1. **Self-declaration** + birthday no signup
+   - Usuário declara idade; legal disclaimer ("falsa declaração responsabiliza o usuário")
+   - **Já parcialmente implementado** (`users.birthday` existe; falta gate no signup)
+   - Custo: 0
+   - Confiabilidade: baixa (qualquer um mente)
+2. **Verificação por documento** apenas em flags (perfil reportado)
+   - User suspeito é forçado a enviar foto de documento + selfie
+   - Admin valida manualmente
+   - Custo: tempo do admin
+3. **Provas de idade via cartão de crédito** (verificação emissor)
+   - Razoável em adultos; minors raramente têm
+   - Cartão precisa coincidir com nome do user
+   - Custo: gateway de pagamento (Stripe/Pagar.me — taxa por verificação)
+4. **Identidade digital governamental** (Gov.br no Brasil)
+   - Confiável, "barato"
+   - User precisa ter conta gov.br
+   - Custo: integração técnica + UX cara
+5. **Provedores de verificação especializados** (Veriff, Onfido, Stripe Identity)
+   - Caro
+   - Best UX
+
+**Recomendação**: começar com **(1) self-declaration + disclaimer + check de birthday** + **(2) escalada manual em reports** quando houver suspeita. Caro/complexo só se tiver problema concreto.
+
+### 🚧 Moderação via AI
+
+Augment a moderação humana com modelos pre-treinados:
+
+**Texto:**
+- Detecção de toxicidade (Perspective API ou models open-source tipo Detoxify)
+- Detecção de hate speech / insulto
+- Detecção de threats / harassment
+- Auto-flag mensagens/comentários acima de threshold pra review
+
+**Imagem:**
+- NSFW detection (já mencionado acima)
+- Violência / armas
+- Texto em imagem (OCR + análise — anti-spam)
+
+**Combina com flags humanas:**
+- AI flag → fila de review do admin
+- Admin valida ou rejeita o flag
+- Modelo aprende com decisões humanas (active learning)
+
+**Fica pra fase tardia** — quando tivermos volume que justifique.
+
+---
+
+## Conformidade e segurança
+
+Itens cross-cutting já mencionados acima, agrupados:
+
+- ✅ Erros tipados (já implementado)
+- ✅ Cookies HttpOnly/Secure (já)
+- ✅ bcrypt + sha256 (já)
+- 🚧 Rate limiting backend (`@fastify/rate-limit`)
+- 🚧 Helmet headers (CSP, HSTS, X-Frame-Options)
+- 🚧 Audit log estruturado (descrito acima)
+- 🚧 Signed URLs S3 pra mídia private
+- 🚧 Criptografia at-rest pra `steam_api_key` em DB
+- 🚧 `npm audit` em CI + Dependabot
+- 🚧 Pen testing (terceirizar quando chegar a fase comercial)
+- 🚧 LGPD compliance check (descrito acima)
+
+📖 [Security checklist](/docs/concepts/security)
+
+---
+
+## Ajustes de arquitetura
+
+### 🚧 Reorganização de módulos do backend
+
+Hoje a estrutura é razoável mas tem inconsistências históricas. Reorganizar pra:
+- **Tudo de um domínio em um único módulo** — facilita encontrar
+- **Cada módulo auto-contido** com routes + controller + service + repo + schema + types
+- **Sub-módulos** quando faz sentido (ex: `posts/comments`, `posts/reactions`, `posts/feed` poderiam ser explícitos)
+
+**Inconsistências atuais:**
+- `posts/` tem comments, reactions, feed misturados (poderia ser `posts/posts.*`, `posts/comments.*`, `posts/reactions.*`, `posts/feed.*` — JÁ ESTÁ ASSIM, mas a relação não está documentada bem)
+- `chat/` tem conversations, messages, dm-requests, push, presence — todos juntos. Considerar splitar em `chat/conversations`, `chat/messages`, etc.?
+- `integrations/steam/` é o único integration; quando vier mais (Discord? Twitch?) precisa de pasta `integrations/<provider>/` consistente
+- Tabelas no `schema.ts` único de 400+ linhas — considerar splitar por domínio (`schema/auth.ts`, `schema/chat.ts`, etc.) e re-exportar
+
+**Plano de refator:**
+1. **Catalogar a estrutura atual** — diagrama de quem importa de quem
+2. **Identificar acoplamentos cross-module ruins** (imports diretos entre módulos)
+3. **Mover gradualmente** — 1 módulo por PR, com testes passando
+4. **Atualizar docs** — caminhos em tutoriais e módulos
+
+**Risco**: refator grande sem ganho funcional. Fazer em momento de baixo throughput de features novas.
+
+📋 **Sub-projeto dedicado** — não fazer parcial.
+
+---
+
+## Outras melhorias técnicas no backlog
+
+### Observability + Monitoring
+- Prometheus + Grafana + Loki + Jaeger (descrito em [Observability](/docs/concepts/observability))
+- GlitchTip pra exception tracking
+- Dashboards de KPIs de produto (não só de infra)
+
+### Performance
+- Particionamento de `messages` por mês (quando volume crescer)
+- Materialized views pra reputação (cache de `count + avg` em `listing_ratings`)
+- Read replica de Postgres pra queries pesadas
+- CDN na frente do MinIO (Cloudflare)
+- Service worker do frontend com cache mais agressivo de imagens
+
+### Testes
+- Cobertura threshold no CI
+- Playwright pra E2E do frontend
+- Performance tests com k6
+- Mutation testing (Stryker)
+
+### DX (developer experience)
+- Faker.js factories pra fixtures de dev (não seeds checked-in)
+- Hot reload mais rápido (já bom com `tsx watch`, mas pode melhorar)
+- Storybook ou Histoire pro frontend? (talvez não precisar)
+
+### Mobile
+- App nativo (React Native ou Tauri?) — out of scope no curto prazo
+- PWA já cobre o caso "instalar como app"
+
+### Outros recursos de produto
+- Seguir alguém sem ser amigo (similar ao Twitter follow)
+- Stories (24h) — tipo Instagram
+- Eventos / Calendário compartilhado entre amigos
+- Wishlist pública (já tem rascunho mencionado em [tutorial](/docs/tutoriais/adicionar-modulo))
+- Importação de outras plataformas (Goodreads pra livros, BoardGameGeek pra board games, RetroAchievements)
+
+---
+
+## Cronograma sugerido
+
+Ordem de execução proposta (cada bloco = sub-projeto com spec própria + plano + execução):
+
+### Próximas 1-2 sessões (curto prazo)
+1. **Painel administrador básico + audit log** — fundação pra moderação
+2. **Comunidades** (sem aceite ainda — feature simples primeiro)
+3. **Lista de amigos melhorada** — UX win rápido
+
+### Médio prazo
+4. **Feature flags** — habilitador de features futuras com rollout gradual
+5. **Comunidades com aceite + admin de comunidade**
+6. **LGPD: portabilidade (export) + audit log self-service**
+7. **Verificação de idade (self-declaration + gate)**
+8. **Moderação AI básica** (texto via Detoxify open-source)
+
+### Longo prazo (requer pesquisa/spec extensa)
+9. **Feed com recomendações** — após coletar dados de engajamento
+10. **Criptografia E2E em DMs** — investimento alto, recompensa alta
+11. **Moderação de mídia (NCMEC + AI vision)**
+12. **Refator de arquitetura backend** — quando o volume de features novas baixar
+
+### Sub-projeto E (paralelo, qualquer momento)
+- Deploy + CI/CD em produção real (descrito em [Operations](/docs/operations/arquitetura))
+- Observability stack completa (Loki + Prometheus + Jaeger + GlitchTip)
+
+---
+
+## Como contribuir com este roadmap
+
+1. **Brainstorm** — usar a [skill `brainstorming`](https://github.com/anthropics/superpowers) antes de codar qualquer item ⚠️
+2. **Spec** — escrever em `docs/superpowers/specs/YYYY-MM-DD-<feature>-design.md`
+3. **Plano** — `docs/superpowers/plans/`
+4. **Execute** — sessão dedicada com TDD onde aplicável
+5. **Documente** — adicione/atualize páginas em `geek-social-docs`
+6. **Atualize este roadmap** — move o ✅ pra "Estado atual" + remove de "Próximas"
+
+A documentação é parte do produto — mudanças de feature **só consideram-se prontas** quando os docs refletem.
+
+---
+
+## Histórico de releases
+
+Tracking aproximado de quando cada bloco entrou:
+
+| Período | Marcos |
+|---|---|
+| Sessão 2026-04-23 | Amigos + privacidade · Chat tempo real · Coleções+Items · Feed+interações · Frontend |
+| Sessão 2026-04-24 | E2E tests |
+| Sessão 2026-04-26 | Chat áudio · Chat privacidade · Steam integration · Vídeo call 1-1 |
+| Sessão 2026-04-27 | Chat temporário · Forward/share/download · Google OAuth · Coleção cross-user · Perfil expandido |
+| Sessão 2026-04-28 | Vitrine completa (listings + offer_proposals + ratings) · Keycloak removido · Cor sólida capa/fundo · Excluir conta |
+| Sessão 2026-04-29 | Portal de documentação completo (681 páginas) |
+
+Próximas sessões: este roadmap.

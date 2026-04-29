@@ -1,0 +1,85 @@
+---
+title: GET /auth/google
+description: Iniciar OAuth com Google (login/registro)
+---
+
+import Meta from '@/generated/api/auth/google-start/meta'
+import Request from '@/generated/api/auth/google-start/request'
+import Responses from '@/generated/api/auth/google-start/responses'
+import Errors from '@/generated/api/auth/google-start/errors'
+import Examples from '@/generated/api/auth/google-start/examples'
+
+<Meta />
+
+Inicia o fluxo OAuth com Google no modo **login/registro** (sem necessidade de estar autenticado). Gera um `state` JWT (5 min de validade), monta a URL de autorização do Google com `scope=openid email profile` e `prompt=select_account`, e **redireciona o navegador** pra essa URL.
+
+Não consome JSON. Use redirecionando o navegador inteiro pra essa rota — não chame via fetch (perderá o redirect).
+
+## Quando chamar
+
+- Botão "Entrar com Google" / "Cadastrar com Google" na tela de login
+- Frontend faz `window.location.href = 'http://localhost:3003/auth/google'` (ou `<a href="...">`)
+
+## Request
+
+<Request />
+
+**Sem body, sem auth obrigatória.** O backend não conhece quem o user é nesse momento.
+
+## Response
+
+<Responses />
+
+**302 Redirect** pra `accounts.google.com/o/oauth2/v2/auth?...&state=<jwt>`. O navegador segue automaticamente.
+
+## Erros
+
+<Errors />
+
+Apenas erros de servidor (5xx) se a config OAuth do Google estiver quebrada (`GOOGLE_CLIENT_ID` ausente, etc.) ou o discovery endpoint do Google estiver fora.
+
+## Exemplos
+
+<Examples />
+
+
+### Fluxo no frontend
+
+```html
+<a href="http://localhost:3003/auth/google">Entrar com Google</a>
+```
+
+Ou via JS:
+
+```ts
+window.location.href = `${API_BASE_URL}/auth/google`
+```
+
+## Side effects
+
+- **JWT signing** — gera state token com `{ mode: 'login', exp: now + 5min }`
+- **Sem mudança em DB** ainda — só ocorre no `/auth/google/callback`
+- **Sem cookies setados**
+- **Sem notificações ou socket**
+
+## Configuração necessária
+
+Para o endpoint funcionar, o backend precisa ter:
+
+```bash
+GOOGLE_OAUTH_ENABLED=true
+GOOGLE_CLIENT_ID=...apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=...
+APP_URL=http://localhost:3003   # usado pra montar o redirect_uri
+```
+
+Sem essas variáveis, o módulo Google nem registra as rotas — chamar essa URL retorna 404.
+
+No console do Google Cloud, o OAuth client precisa ter **redirect URI autorizado**: `${APP_URL}/auth/google/callback` (ex: `http://localhost:3003/auth/google/callback`).
+
+## Relacionados
+
+- Endpoint: [`GET /auth/google/callback`](/docs/api/auth/google-callback) — passo seguinte do fluxo
+- Endpoint: [`GET /auth/google/link`](/docs/api/auth/google-link-start) — vincular Google a uma conta já autenticada
+- Conceito: [Autenticação](/docs/concepts/autenticacao)
+- Módulo: [Auth](/docs/modules/auth#3-login-com-google-oauth) — sequence diagram completo

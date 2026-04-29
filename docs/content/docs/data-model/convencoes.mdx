@@ -1,0 +1,77 @@
+---
+title: Convenções do banco
+description: Padrões usados no schema Drizzle e no PostgreSQL.
+---
+
+## Naming
+
+- **Tabelas**: `snake_case` plural (`users`, `refresh_tokens`, `listing_ratings`)
+- **Colunas**: `snake_case` singular (`user_id`, `created_at`, `display_name`)
+- **No TypeScript**: identificadores Drizzle em `camelCase` (`userId`, `createdAt`, `displayName`) — Drizzle faz a tradução
+
+```ts
+export const users = pgTable('users', {
+  id: uuid('id').defaultRandom().primaryKey(),         // coluna 'id'
+  displayName: varchar('display_name', { length: 100 }) // coluna 'display_name'
+    .notNull(),
+  // ...
+})
+```
+
+**Atenção**: queries com `sql\`...\`` template usam o nome **real** da coluna (snake_case), não o do TypeScript. Esquecer disso quebra silenciosamente.
+
+## Tipos canônicos
+
+| Drizzle | PG | Quando usar |
+|---|---|---|
+| `uuid().defaultRandom().primaryKey()` | `uuid` | PKs |
+| `varchar('name', { length: N })` | `varchar(N)` | strings limitadas (e-mail, nome, etc.) |
+| `text('content')` | `text` | textos longos sem limite (bio, descrição, mensagem) |
+| `boolean` | `boolean` | flags |
+| `timestamp({ withTimezone: true })` | `timestamptz` | **sempre com timezone** |
+| `date` | `date` | data sem hora (birthday) |
+| `integer`, `smallint`, `numeric` | iguais | numéricos |
+| `jsonb('field').$type<T>()` | `jsonb` | dados estruturados (com tipo TS) |
+| `pgEnum('name', [...])` | `enum` | conjuntos fixos de valores |
+
+**Regra**: sempre `timestamptz`, nunca `timestamp` sem timezone. Datas sem timezone causam ambiguidade no roundtrip frontend/backend.
+
+## Defaults
+
+- IDs: `defaultRandom()` (`gen_random_uuid()` no PG)
+- Timestamps: `defaultNow().notNull()` em `created_at` e `updated_at`
+- Booleans com sentido: `default(true)` ou `default(false)` explícito; preferível a permitir `NULL`
+- Arrays JSONB: `.default([])`
+
+## Foreign keys
+
+- Sempre que filho não faz sentido sem pai → `onDelete: 'cascade'`
+- Sempre que filho pode existir órfão (raro) → `onDelete: 'set null'` + coluna nullable
+
+```ts
+userId: uuid('user_id').notNull()
+  .references(() => users.id, { onDelete: 'cascade' })
+```
+
+## Índices
+
+- **Regular** (`index('name')`) — quando há queries `WHERE col = ?` ou `ORDER BY col`
+- **Único** (`uniqueIndex('name')`) — para invariantes de domínio (1 oferta pendente por offer, 1 vínculo Google por user)
+- **Parcial** (`.where(sql\`...\`)`) — para colunas com cardinalidade alta mas só uma fração interessante
+
+Exemplo de unique parcial (módulo offers):
+
+```ts
+uniqueIndex('uniq_pending_offer_per_listing')
+  .on(offers.listingId, offers.offererId)
+  .where(sql\`status = 'pending'\`)
+```
+
+## Migrations
+
+- Geradas por `drizzle-kit generate` — checked-in em `src/shared/infra/database/migrations/`
+- Numeradas (`0001_xxx.sql`) e descritivas no nome
+- Aplicadas no boot do app (`migrate(db, { migrationsFolder: ... })`)
+- **Nunca editar migration já merged**; criar nova adicionando
+
+Detalhes em [Migrations](/docs/data-model/migrations).

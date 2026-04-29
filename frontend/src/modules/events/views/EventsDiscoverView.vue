@@ -33,16 +33,26 @@ function viewParticipants(id: string) {
 <template>
   <div class="min-h-screen bg-[#0f0f1a]" data-testid="events-discover-view">
     <header class="bg-[#1e2038] border-b border-[#252640] py-4">
-      <div class="max-w-5xl mx-auto px-4 flex items-center justify-between">
+      <div class="max-w-5xl mx-auto px-4 flex items-center justify-between gap-3">
         <h1 class="text-xl font-bold text-slate-100">Rolês</h1>
-        <button
-          type="button"
-          data-testid="create-event-cta"
-          @click="router.push('/roles/novo')"
-          class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-500 hover:bg-amber-400 text-[#0f0f1a] transition-colors"
-        >
-          + Novo Rolê
-        </button>
+        <div class="flex items-center gap-2">
+          <button
+            type="button"
+            data-testid="my-events-cta"
+            @click="router.push('/meus-roles')"
+            class="px-3 py-1.5 rounded-lg text-xs font-semibold border border-[#252640] text-slate-300 hover:bg-[#252640] transition-colors"
+          >
+            Meus Rolês
+          </button>
+          <button
+            type="button"
+            data-testid="create-event-cta"
+            @click="router.push('/roles/novo')"
+            class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-500 hover:bg-amber-400 text-[#0f0f1a] transition-colors"
+          >
+            + Novo Rolê
+          </button>
+        </div>
       </div>
     </header>
 

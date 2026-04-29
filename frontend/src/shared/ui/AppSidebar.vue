@@ -99,7 +99,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
-import { Home, Library, Users, MessageSquare, Bell, Gamepad2, Settings, PanelLeftClose, PanelLeft, PanelLeftOpen, Store } from 'lucide-vue-next'
+import { Home, Library, Users, MessageSquare, Bell, Gamepad2, Settings, PanelLeftClose, PanelLeft, PanelLeftOpen, Store, Ticket } from 'lucide-vue-next'
 import { useAuthStore } from '@/shared/auth/authStore'
 import { useFriends } from '@/modules/friends/composables/useFriends'
 import { useChat } from '@/modules/chat/composables/useChat'
@@ -133,6 +133,7 @@ const navItems = computed(() => [
   { to: '/feed', label: 'Feed', icon: Home, badge: 0 },
   { to: '/collections', label: 'Coleções', icon: Library, badge: 0 },
   { to: '/vitrine', label: 'Vitrine', icon: Store, badge: 0 },
+  { to: '/roles', label: 'Rolê', icon: Ticket, badge: 0 },
   { to: '/friends', label: 'Amigos', icon: Users, badge: friendsStore.pendingCount },
   { to: '/chat', label: 'Chat', icon: MessageSquare, badge: chatStore.totalUnread },
   { to: '/notifications', label: 'Notificações', icon: Bell, badge: notificationsStore.unreadCount },

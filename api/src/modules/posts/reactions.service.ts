@@ -20,6 +20,11 @@ export class ReactionsService {
     const post = await this.postsRepo.findById(postId)
     if (!post) throw new ReactionsError('NOT_FOUND')
     if (post.userId === userId) throw new ReactionsError('SELF_REACTION')
+    if (post.visibility === 'private') throw new ReactionsError('NOT_FOUND')
+    if (post.visibility === 'friends_only' && post.userId !== userId) {
+      const areFriends = await this.friendsRepo.areFriends(userId, post.userId)
+      if (!areFriends) throw new ReactionsError('NOT_FOUND')
+    }
     const blocked = await this.friendsRepo.isBlockedEitherDirection(userId, post.userId)
     if (blocked) throw new ReactionsError('NOT_FOUND')
     await this.reactionsRepo.upsert(postId, userId, type)
@@ -35,7 +40,19 @@ export class ReactionsService {
   async getReactions(postId: string, viewerId: string | null): Promise<{ counts: ReactionCounts; myReaction: ReactionType | null }> {
     const post = await this.postsRepo.findById(postId)
     if (!post) throw new ReactionsError('NOT_FOUND')
-    const counts = await this.reactionsRepo.countsByPostId(postId)
+    if (post.visibility === 'private' && post.userId !== viewerId) throw new ReactionsError('NOT_FOUND')
+    if (post.visibility === 'friends_only' && post.userId !== viewerId) {
+      if (!viewerId) throw new ReactionsError('NOT_FOUND')
+      const areFriends = await this.friendsRepo.areFriends(viewerId, post.userId)
+      if (!areFriends) throw new ReactionsError('NOT_FOUND')
+    }
+    let counts: ReactionCounts
+    if (viewerId) {
+      const blockedUserIds = await this.friendsRepo.findAllBlockRelationUserIds(viewerId)
+      counts = await this.reactionsRepo.countsByPostIdExcludingUsers(postId, blockedUserIds)
+    } else {
+      counts = await this.reactionsRepo.countsByPostId(postId)
+    }
     const myReaction = viewerId
       ? (await this.reactionsRepo.findByPostAndUser(postId, viewerId))?.type ?? null
       : null

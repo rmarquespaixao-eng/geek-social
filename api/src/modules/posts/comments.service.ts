@@ -20,6 +20,10 @@ export class CommentsService {
     const post = await this.postsRepo.findById(postId)
     if (!post) throw new CommentsError('NOT_FOUND')
     if (post.visibility === 'private' && post.userId !== viewerId) throw new CommentsError('NOT_FOUND')
+    if (post.visibility === 'friends_only' && post.userId !== viewerId) {
+      const areFriends = await this.friendsRepo.areFriends(viewerId, post.userId)
+      if (!areFriends) throw new CommentsError('NOT_FOUND')
+    }
     const blocked = await this.friendsRepo.isBlockedEitherDirection(viewerId, post.userId)
     if (blocked) throw new CommentsError('NOT_FOUND')
   }
@@ -29,18 +33,27 @@ export class CommentsService {
     return this.commentsRepo.create(postId, userId, content)
   }
 
-  async listComments(userId: string | null, postId: string, cursorToken?: string, limit = 20) {
+  async listComments(userId: string, postId: string, cursorToken?: string, limit = 20) {
     const post = await this.postsRepo.findById(postId)
     if (!post) throw new CommentsError('NOT_FOUND')
     if (post.visibility === 'private' && post.userId !== userId) throw new CommentsError('NOT_FOUND')
-    if (userId && post.userId !== userId) {
-      const blocked = await this.friendsRepo.isBlockedEitherDirection(userId, post.userId)
-      if (blocked) throw new CommentsError('NOT_FOUND')
+    if (post.visibility === 'friends_only' && post.userId !== userId) {
+      const areFriends = await this.friendsRepo.areFriends(userId, post.userId)
+      if (!areFriends) throw new CommentsError('NOT_FOUND')
     }
-    const cursor = cursorToken ? decodeCursor(cursorToken) : undefined
+    const blocked = await this.friendsRepo.isBlockedEitherDirection(userId, post.userId)
+    if (blocked) throw new CommentsError('NOT_FOUND')
+    let cursor: CommentCursor | undefined
+    try {
+      cursor = cursorToken ? decodeCursor(cursorToken) : undefined
+    } catch {
+      throw new CommentsError('INVALID_CURSOR')
+    }
     const result = await this.commentsRepo.findByPostId(postId, cursor, limit)
+    const blockedUserIds = await this.friendsRepo.findAllBlockRelationUserIds(userId)
+    const comments = result.comments.filter(c => !blockedUserIds.includes(c.authorId))
     return {
-      comments: result.comments,
+      comments,
       nextCursor: result.nextCursor ? encodeCursor(result.nextCursor) : null,
     }
   }
@@ -49,11 +62,7 @@ export class CommentsService {
     const comment = await this.commentsRepo.findById(commentId)
     if (!comment || comment.postId !== postId) throw new CommentsError('NOT_FOUND')
     if (comment.userId !== userId) throw new CommentsError('FORBIDDEN')
-    const post = await this.postsRepo.findById(postId)
-    if (post && post.userId !== userId) {
-      const blocked = await this.friendsRepo.isBlockedEitherDirection(userId, post.userId)
-      if (blocked) throw new CommentsError('NOT_FOUND')
-    }
+    await this.assertCanInteract(userId, postId)
     return this.commentsRepo.update(commentId, content)
   }
 

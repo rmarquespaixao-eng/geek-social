@@ -107,11 +107,33 @@ describe('CommentsService', () => {
 
       await expect(service.addComment('commenter-1', 'nao-existe', 'oi')).rejects.toThrow('NOT_FOUND')
     })
+
+    it('deve lançar NOT_FOUND para post friends_only se viewer não é amigo', async () => {
+      vi.mocked(postsRepo.findById).mockResolvedValue(makePost({ userId: 'author-1', visibility: 'friends_only' }))
+      vi.mocked(friendsRepo.areFriends).mockResolvedValue(false)
+
+      await expect(service.addComment('commenter-1', 'post-1', 'oi')).rejects.toThrow('NOT_FOUND')
+      expect(commentsRepo.create).not.toHaveBeenCalled()
+    })
+
+    it('deve permitir comentário em post friends_only se viewer é amigo', async () => {
+      vi.mocked(postsRepo.findById).mockResolvedValue(makePost({ userId: 'author-1', visibility: 'friends_only' }))
+      vi.mocked(friendsRepo.areFriends).mockResolvedValue(true)
+      vi.mocked(friendsRepo.isBlockedEitherDirection).mockResolvedValue(false)
+      vi.mocked(commentsRepo.create).mockResolvedValue(makeComment({ content: 'ótimo!' }))
+
+      const result = await service.addComment('commenter-1', 'post-1', 'ótimo!')
+
+      expect(friendsRepo.areFriends).toHaveBeenCalledWith('commenter-1', 'author-1')
+      expect(result.content).toBe('ótimo!')
+    })
   })
 
   describe('updateComment', () => {
     it('deve editar comentário do próprio autor', async () => {
       vi.mocked(commentsRepo.findById).mockResolvedValue(makeComment({ userId: 'commenter-1' }))
+      vi.mocked(postsRepo.findById).mockResolvedValue(makePost({ visibility: 'public', userId: 'author-1' }))
+      vi.mocked(friendsRepo.isBlockedEitherDirection).mockResolvedValue(false)
       vi.mocked(commentsRepo.update).mockResolvedValue(makeComment({ content: 'editado' }))
 
       const result = await service.updateComment('commenter-1', 'post-1', 'comment-1', 'editado')
@@ -131,6 +153,7 @@ describe('CommentsService', () => {
     it('deve listar comentários de post público sem cursor', async () => {
       vi.mocked(postsRepo.findById).mockResolvedValue(makePost({ visibility: 'public', userId: 'author-1' }))
       vi.mocked(friendsRepo.isBlockedEitherDirection).mockResolvedValue(false)
+      vi.mocked(friendsRepo.findAllBlockRelationUserIds).mockResolvedValue([])
       vi.mocked(commentsRepo.findByPostId).mockResolvedValue({
         comments: [makeComment()],
         nextCursor: null,
@@ -150,6 +173,7 @@ describe('CommentsService', () => {
 
       vi.mocked(postsRepo.findById).mockResolvedValue(makePost({ visibility: 'public', userId: 'author-1' }))
       vi.mocked(friendsRepo.isBlockedEitherDirection).mockResolvedValue(false)
+      vi.mocked(friendsRepo.findAllBlockRelationUserIds).mockResolvedValue([])
       vi.mocked(commentsRepo.findByPostId).mockResolvedValue({
         comments: [],
         nextCursor: { createdAt: cursorDate, id: 'next-comment' },
@@ -171,6 +195,37 @@ describe('CommentsService', () => {
       vi.mocked(friendsRepo.isBlockedEitherDirection).mockResolvedValue(true)
 
       await expect(service.listComments('viewer-1', 'post-1')).rejects.toThrow('NOT_FOUND')
+      expect(commentsRepo.findByPostId).not.toHaveBeenCalled()
+    })
+
+    it('deve lançar NOT_FOUND para post friends_only se viewer não é amigo', async () => {
+      vi.mocked(postsRepo.findById).mockResolvedValue(makePost({ userId: 'author-1', visibility: 'friends_only' }))
+      vi.mocked(friendsRepo.areFriends).mockResolvedValue(false)
+
+      await expect(service.listComments('viewer-1', 'post-1')).rejects.toThrow('NOT_FOUND')
+      expect(commentsRepo.findByPostId).not.toHaveBeenCalled()
+    })
+
+    it('deve permitir listar comentários de post friends_only se viewer é amigo', async () => {
+      vi.mocked(postsRepo.findById).mockResolvedValue(makePost({ userId: 'author-1', visibility: 'friends_only' }))
+      vi.mocked(friendsRepo.areFriends).mockResolvedValue(true)
+      vi.mocked(friendsRepo.isBlockedEitherDirection).mockResolvedValue(false)
+      vi.mocked(friendsRepo.findAllBlockRelationUserIds).mockResolvedValue([])
+      vi.mocked(commentsRepo.findByPostId).mockResolvedValue({
+        comments: [makeComment()],
+        nextCursor: null,
+      })
+
+      const result = await service.listComments('viewer-1', 'post-1', undefined, 20)
+
+      expect(friendsRepo.areFriends).toHaveBeenCalledWith('viewer-1', 'author-1')
+      expect(result.comments).toHaveLength(1)
+    })
+
+    it('deve lançar NOT_FOUND para post friends_only sem viewer autenticado', async () => {
+      vi.mocked(postsRepo.findById).mockResolvedValue(makePost({ userId: 'author-1', visibility: 'friends_only' }))
+
+      await expect(service.listComments(null, 'post-1')).rejects.toThrow('NOT_FOUND')
       expect(commentsRepo.findByPostId).not.toHaveBeenCalled()
     })
   })

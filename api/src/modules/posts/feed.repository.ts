@@ -1,6 +1,6 @@
-import { eq, and, or, inArray, notInArray, lt, desc, sql, isNull } from 'drizzle-orm'
+import { eq, and, or, inArray, notInArray, lt, desc, sql, isNull, exists, not } from 'drizzle-orm'
 import type { DatabaseClient } from '../../shared/infra/database/postgres.client.js'
-import { posts, postMedia, users } from '../../shared/infra/database/schema.js'
+import { posts, postMedia, users, postReactions, postComments, userBlocks } from '../../shared/infra/database/schema.js'
 import type { IFeedRepository, GetFeedParams, GetProfilePostsParams, FeedCursor, EnrichedPost } from '../../shared/contracts/feed.repository.contract.js'
 import type { PostMedia } from '../../shared/contracts/posts.repository.contract.js'
 
@@ -51,8 +51,12 @@ function enrichedSelect(viewerId: string | null) {
     collectionType: sql<string | null>`(SELECT type::text FROM collections WHERE id = ${posts.collectionId} LIMIT 1)`,
     createdAt: posts.createdAt,
     updatedAt: posts.updatedAt,
-    reactionCount: sql<number>`(SELECT COUNT(*) FROM post_reactions WHERE post_id = ${posts.id})::int`,
-    commentCount: sql<number>`(SELECT COUNT(*) FROM post_comments WHERE post_id = ${posts.id})::int`,
+    reactionCount: viewerId != null
+      ? sql<number>`(SELECT COUNT(*) FROM post_reactions WHERE post_id = ${posts.id} AND NOT EXISTS (SELECT 1 FROM user_blocks WHERE (blocker_id = ${viewerId} AND blocked_id = user_id) OR (blocker_id = user_id AND blocked_id = ${viewerId})))::int`
+      : sql<number>`(SELECT COUNT(*) FROM post_reactions WHERE post_id = ${posts.id})::int`,
+    commentCount: viewerId != null
+      ? sql<number>`(SELECT COUNT(*) FROM post_comments WHERE post_id = ${posts.id} AND NOT EXISTS (SELECT 1 FROM user_blocks WHERE (blocker_id = ${viewerId} AND blocked_id = user_id) OR (blocker_id = user_id AND blocked_id = ${viewerId})))::int`
+      : sql<number>`(SELECT COUNT(*) FROM post_comments WHERE post_id = ${posts.id})::int`,
     userReaction: viewerId != null
       ? sql<string | null>`(SELECT type::text FROM post_reactions WHERE post_id = ${posts.id} AND user_id = ${viewerId} LIMIT 1)`
       : sql<null>`NULL::text`,

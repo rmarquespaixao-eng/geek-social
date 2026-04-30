@@ -10,6 +10,7 @@ function createMockReactionsRepo(): IReactionsRepository {
     delete: vi.fn(),
     findByPostAndUser: vi.fn(),
     countsByPostId: vi.fn(),
+    countsByPostIdExcludingUsers: vi.fn(),
   }
 }
 
@@ -97,6 +98,34 @@ describe('ReactionsService', () => {
 
       await expect(service.react('user-2', 'post-1', 'epic')).rejects.toThrow('NOT_FOUND')
     })
+
+    it('deve lançar NOT_FOUND para post private', async () => {
+      vi.mocked(postsRepo.findById).mockResolvedValue(makePost({ userId: 'author-1', visibility: 'private' }))
+
+      await expect(service.react('user-2', 'post-1', 'epic')).rejects.toThrow('NOT_FOUND')
+      expect(reactionsRepo.upsert).not.toHaveBeenCalled()
+    })
+
+    it('deve permitir reação em post friends_only se viewer é amigo', async () => {
+      vi.mocked(postsRepo.findById).mockResolvedValue(makePost({ userId: 'author-1', visibility: 'friends_only' }))
+      vi.mocked(friendsRepo.areFriends).mockResolvedValue(true)
+      vi.mocked(friendsRepo.isBlockedEitherDirection).mockResolvedValue(false)
+      vi.mocked(reactionsRepo.upsert).mockResolvedValue(makeReaction())
+      vi.mocked(reactionsRepo.countsByPostId).mockResolvedValue({ ...emptyCounts, epic: 1 })
+
+      const result = await service.react('user-2', 'post-1', 'epic')
+
+      expect(friendsRepo.areFriends).toHaveBeenCalledWith('user-2', 'author-1')
+      expect(result.epic).toBe(1)
+    })
+
+    it('deve lançar NOT_FOUND para post friends_only se viewer não é amigo', async () => {
+      vi.mocked(postsRepo.findById).mockResolvedValue(makePost({ userId: 'author-1', visibility: 'friends_only' }))
+      vi.mocked(friendsRepo.areFriends).mockResolvedValue(false)
+
+      await expect(service.react('user-2', 'post-1', 'epic')).rejects.toThrow('NOT_FOUND')
+      expect(reactionsRepo.upsert).not.toHaveBeenCalled()
+    })
   })
 
   describe('removeReaction', () => {
@@ -113,7 +142,8 @@ describe('ReactionsService', () => {
   describe('getReactions', () => {
     it('deve retornar contagens e reação do viewer', async () => {
       vi.mocked(postsRepo.findById).mockResolvedValue(makePost())
-      vi.mocked(reactionsRepo.countsByPostId).mockResolvedValue({ ...emptyCounts, power_up: 3 })
+      vi.mocked(friendsRepo.findAllBlockRelationUserIds).mockResolvedValue([])
+      vi.mocked(reactionsRepo.countsByPostIdExcludingUsers).mockResolvedValue({ ...emptyCounts, power_up: 3 })
       vi.mocked(reactionsRepo.findByPostAndUser).mockResolvedValue(makeReaction({ type: 'power_up' }))
 
       const result = await service.getReactions('post-1', 'user-2')
@@ -130,6 +160,44 @@ describe('ReactionsService', () => {
 
       expect(result.myReaction).toBeNull()
       expect(reactionsRepo.findByPostAndUser).not.toHaveBeenCalled()
+    })
+
+    it('deve lançar NOT_FOUND para post private', async () => {
+      vi.mocked(postsRepo.findById).mockResolvedValue(makePost({ userId: 'author-1', visibility: 'private' }))
+
+      await expect(service.getReactions('post-1', 'user-2')).rejects.toThrow('NOT_FOUND')
+    })
+
+    it('deve lançar NOT_FOUND para post private sem viewer', async () => {
+      vi.mocked(postsRepo.findById).mockResolvedValue(makePost({ userId: 'author-1', visibility: 'private' }))
+
+      await expect(service.getReactions('post-1', null)).rejects.toThrow('NOT_FOUND')
+    })
+
+    it('deve permitir acessar reações de post friends_only se viewer é amigo', async () => {
+      vi.mocked(postsRepo.findById).mockResolvedValue(makePost({ userId: 'author-1', visibility: 'friends_only' }))
+      vi.mocked(friendsRepo.areFriends).mockResolvedValue(true)
+      vi.mocked(friendsRepo.findAllBlockRelationUserIds).mockResolvedValue([])
+      vi.mocked(reactionsRepo.countsByPostIdExcludingUsers).mockResolvedValue({ ...emptyCounts, epic: 2 })
+      vi.mocked(reactionsRepo.findByPostAndUser).mockResolvedValue(null)
+
+      const result = await service.getReactions('post-1', 'user-2')
+
+      expect(friendsRepo.areFriends).toHaveBeenCalledWith('user-2', 'author-1')
+      expect(result.counts.epic).toBe(2)
+    })
+
+    it('deve lançar NOT_FOUND para post friends_only se viewer não é amigo', async () => {
+      vi.mocked(postsRepo.findById).mockResolvedValue(makePost({ userId: 'author-1', visibility: 'friends_only' }))
+      vi.mocked(friendsRepo.areFriends).mockResolvedValue(false)
+
+      await expect(service.getReactions('post-1', 'user-2')).rejects.toThrow('NOT_FOUND')
+    })
+
+    it('deve lançar NOT_FOUND para post friends_only sem viewer autenticado', async () => {
+      vi.mocked(postsRepo.findById).mockResolvedValue(makePost({ userId: 'author-1', visibility: 'friends_only' }))
+
+      await expect(service.getReactions('post-1', null)).rejects.toThrow('NOT_FOUND')
     })
   })
 })

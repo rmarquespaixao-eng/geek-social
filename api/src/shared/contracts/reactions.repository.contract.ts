@@ -15,4 +15,5 @@ export interface IReactionsRepository {
   delete(postId: string, userId: string): Promise<void>
   findByPostAndUser(postId: string, userId: string): Promise<Reaction | null>
   countsByPostId(postId: string): Promise<ReactionCounts>
+  countsByPostIdExcludingUsers(postId: string, excludedUserIds: string[]): Promise<ReactionCounts>
 }

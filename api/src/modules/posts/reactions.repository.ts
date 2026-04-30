@@ -1,4 +1,4 @@
-import { eq, and, sql } from 'drizzle-orm'
+import { eq, and, notInArray, sql } from 'drizzle-orm'
 import type { DatabaseClient } from '../../shared/infra/database/postgres.client.js'
 import { postReactions } from '../../shared/infra/database/schema.js'
 import type { IReactionsRepository, Reaction, ReactionType, ReactionCounts } from '../../shared/contracts/reactions.repository.contract.js'
@@ -36,6 +36,24 @@ export class ReactionsRepository implements IReactionsRepository {
       .select({ type: postReactions.type, count: sql<number>`count(*)::int` })
       .from(postReactions)
       .where(eq(postReactions.postId, postId))
+      .groupBy(postReactions.type)
+
+    const counts = Object.fromEntries(ALL_REACTION_TYPES.map(t => [t, 0])) as ReactionCounts
+    for (const row of rows) {
+      counts[row.type as ReactionType] = row.count
+    }
+    return counts
+  }
+
+  async countsByPostIdExcludingUsers(postId: string, excludedUserIds: string[]): Promise<ReactionCounts> {
+    const conditions = [eq(postReactions.postId, postId)]
+    if (excludedUserIds.length > 0) {
+      conditions.push(notInArray(postReactions.userId, excludedUserIds))
+    }
+    const rows = await this.db
+      .select({ type: postReactions.type, count: sql<number>`count(*)::int` })
+      .from(postReactions)
+      .where(and(...conditions))
       .groupBy(postReactions.type)
 
     const counts = Object.fromEntries(ALL_REACTION_TYPES.map(t => [t, 0])) as ReactionCounts

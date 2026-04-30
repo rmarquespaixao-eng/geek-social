@@ -42,6 +42,19 @@ export class TopicsController {
     }
   }
 
+  async deleteTopic(
+    request: FastifyRequest<{ Params: { id: string; topicId: string } }>,
+    reply: FastifyReply,
+  ) {
+    const { userId } = request.user as AccessTokenClaims
+    try {
+      await this.service.deleteTopic(userId, request.params.id, request.params.topicId)
+      return reply.status(204).send()
+    } catch (e) {
+      return mapCommunitiesError(e, reply)
+    }
+  }
+
   async getTopicWithMeta(
     request: FastifyRequest<{ Params: { id: string; topicId: string } }>,
     reply: FastifyReply,

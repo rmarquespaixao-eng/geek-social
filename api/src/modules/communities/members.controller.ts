@@ -45,6 +45,57 @@ export class MembersController {
     }
   }
 
+  async promote(request: FastifyRequest<{ Params: { id: string; userId: string } }>, reply: FastifyReply) {
+    const { userId: viewerId } = request.user as AccessTokenClaims
+    try {
+      const member = await this.service.promoteMember(viewerId, request.params.id, request.params.userId)
+      return reply.send({ member: serializeMember(member) })
+    } catch (e) {
+      return mapCommunitiesError(e, reply)
+    }
+  }
+
+  async demote(request: FastifyRequest<{ Params: { id: string; userId: string } }>, reply: FastifyReply) {
+    const { userId: viewerId } = request.user as AccessTokenClaims
+    try {
+      const member = await this.service.demoteMember(viewerId, request.params.id, request.params.userId)
+      return reply.send({ member: serializeMember(member) })
+    } catch (e) {
+      return mapCommunitiesError(e, reply)
+    }
+  }
+
+  async ban(request: FastifyRequest<{ Params: { id: string; userId: string } }>, reply: FastifyReply) {
+    const { userId: viewerId } = request.user as AccessTokenClaims
+    try {
+      const reason = (request.body as Record<string, unknown> | null)?.reason as string | undefined
+      const member = await this.service.banMember(viewerId, request.params.id, request.params.userId, reason)
+      return reply.send({ member: serializeMember(member) })
+    } catch (e) {
+      return mapCommunitiesError(e, reply)
+    }
+  }
+
+  async unban(request: FastifyRequest<{ Params: { id: string; userId: string } }>, reply: FastifyReply) {
+    const { userId: viewerId } = request.user as AccessTokenClaims
+    try {
+      const member = await this.service.unbanMember(viewerId, request.params.id, request.params.userId)
+      return reply.send({ member: serializeMember(member) })
+    } catch (e) {
+      return mapCommunitiesError(e, reply)
+    }
+  }
+
+  async kick(request: FastifyRequest<{ Params: { id: string; userId: string } }>, reply: FastifyReply) {
+    const { userId: viewerId } = request.user as AccessTokenClaims
+    try {
+      await this.service.kickMember(viewerId, request.params.id, request.params.userId)
+      return reply.status(204).send()
+    } catch (e) {
+      return mapCommunitiesError(e, reply)
+    }
+  }
+
   async listMembers(request: FastifyRequest<{ Params: { id: string }; Querystring: { role?: string; status?: string; limit?: number; cursor?: string } }>, reply: FastifyReply) {
     const viewer = (request.user as AccessTokenClaims | undefined)
     const viewerId = viewer?.userId ?? null

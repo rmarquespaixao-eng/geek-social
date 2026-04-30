@@ -62,6 +62,31 @@ export class TopicsService {
     return { topics: result.topics, nextCursor }
   }
 
+  async deleteTopic(
+    viewerId: string,
+    communityId: string,
+    topicId: string,
+  ): Promise<void> {
+    const topic = await this.topicsRepo.findTopicById(topicId)
+    if (!topic || topic.communityId !== communityId) throw new CommunitiesError('TOPIC_NOT_FOUND')
+
+    const community = await this.communitiesService.getForViewer(communityId, viewerId)
+    await this.communitiesService.assertCanView(viewerId, community)
+
+    const isAuthor = topic.authorId === viewerId
+    if (!isAuthor) {
+      const membership = await this.communitiesService.getMembership(communityId, viewerId)
+      const canModerate = membership?.role === 'owner' || membership?.role === 'moderator'
+      if (!canModerate) throw new CommunitiesError('FORBIDDEN')
+    }
+
+    await this.db.transaction(async (tx) => {
+      const exec = tx as unknown as DatabaseClient
+      await this.postsRepo.softDelete(topicId, exec)
+      await this.communitiesService.decrementTopicCount(communityId, exec)
+    })
+  }
+
   async getTopicWithMeta(
     topicId: string,
     viewerId: string | null,

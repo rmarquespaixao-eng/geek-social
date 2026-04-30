@@ -18,6 +18,7 @@ import {
   createTopicSchema,
   listTopicsQuerySchema,
   listMembersQuerySchema,
+  memberParams,
 } from './communities.schema.js'
 
 const noContent = z.void()
@@ -237,5 +238,80 @@ export const communitiesRoutes: FastifyPluginAsyncZod<CommunitiesRoutesOptions> 
     },
     preHandler: [optionalAuthenticate],
     handler: topicsCtrl.getTopicWithMeta.bind(topicsCtrl),
+  })
+
+  app.delete('/:id/topics/:topicId', {
+    schema: {
+      operationId: 'communities_delete_topic',
+      tags: ['Communities'],
+      summary: 'Deletar tópico (autor, owner ou moderador)',
+      security: [{ accessToken: [] }],
+      params: topicParams,
+      response: { 204: noContent },
+    },
+    preHandler: [authenticate],
+    handler: topicsCtrl.deleteTopic.bind(topicsCtrl),
+  })
+
+  // ── Member management ──────────────────────────────────────────────
+  app.post('/:id/members/:userId/promote', {
+    schema: {
+      operationId: 'communities_promote_member',
+      tags: ['Communities'],
+      summary: 'Promover membro a moderador (somente owner)',
+      security: [{ accessToken: [] }],
+      params: memberParams,
+    },
+    preHandler: [authenticate],
+    handler: membersCtrl.promote.bind(membersCtrl),
+  })
+
+  app.post('/:id/members/:userId/demote', {
+    schema: {
+      operationId: 'communities_demote_member',
+      tags: ['Communities'],
+      summary: 'Rebaixar moderador a membro (somente owner)',
+      security: [{ accessToken: [] }],
+      params: memberParams,
+    },
+    preHandler: [authenticate],
+    handler: membersCtrl.demote.bind(membersCtrl),
+  })
+
+  app.post('/:id/members/:userId/ban', {
+    schema: {
+      operationId: 'communities_ban_member',
+      tags: ['Communities'],
+      summary: 'Banir membro (owner/moderador)',
+      security: [{ accessToken: [] }],
+      params: memberParams,
+    },
+    preHandler: [authenticate],
+    handler: membersCtrl.ban.bind(membersCtrl),
+  })
+
+  app.post('/:id/members/:userId/unban', {
+    schema: {
+      operationId: 'communities_unban_member',
+      tags: ['Communities'],
+      summary: 'Desbanir membro (owner/moderador)',
+      security: [{ accessToken: [] }],
+      params: memberParams,
+    },
+    preHandler: [authenticate],
+    handler: membersCtrl.unban.bind(membersCtrl),
+  })
+
+  app.delete('/:id/members/:userId', {
+    schema: {
+      operationId: 'communities_kick_member',
+      tags: ['Communities'],
+      summary: 'Remover membro da comunidade (owner/moderador)',
+      security: [{ accessToken: [] }],
+      params: memberParams,
+      response: { 204: noContent },
+    },
+    preHandler: [authenticate],
+    handler: membersCtrl.kick.bind(membersCtrl),
   })
 }

@@ -261,4 +261,12 @@ export class CommunitiesService {
   async incrementTopicCount(communityId: string, tx?: DatabaseClient): Promise<void> {
     return this.repo.incrementTopicCount(communityId, tx)
   }
+
+  async decrementTopicCount(communityId: string, tx?: DatabaseClient): Promise<void> {
+    return this.repo.decrementTopicCount(communityId, tx)
+  }
+
+  async getMembership(communityId: string, userId: string) {
+    return this.membersRepo.findByCommunityAndUser(communityId, userId)
+  }
 }

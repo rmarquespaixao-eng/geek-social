@@ -15,9 +15,11 @@ import {
 import type { AccessTokenClaims } from '../auth/auth.service.js'
 
 const STATUS_BY_CODE: Record<string, number> = {
+  FORBIDDEN: 403,
   NOT_OWNER: 403,
   NOT_MODERATOR: 403,
   NOT_MEMBER: 403,
+  MEMBER_NOT_FOUND: 404,
   BANNED: 403,
   COMMUNITY_DELETED: 403,
   COMMUNITY_NOT_FOUND: 404,

@@ -45,6 +45,7 @@ export interface IPostsRepository {
   findById(id: string): Promise<Post | null>
   update(id: string, data: UpdatePostData): Promise<Post>
   delete(id: string): Promise<void>
+  softDelete(id: string, tx?: unknown): Promise<void>
   addMedia(postId: string, url: string, displayOrder: number, thumbnailUrl?: string | null): Promise<PostMedia>
   removeMedia(mediaId: string): Promise<void>
   findMediaById(mediaId: string): Promise<PostMedia | null>

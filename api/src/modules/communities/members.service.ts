@@ -82,4 +82,82 @@ export class MembersService {
   async getMembership(communityId: string, userId: string): Promise<MemberRow | null> {
     return this.membersRepo.findByCommunityAndUser(communityId, userId)
   }
+
+  async promoteMember(viewerId: string, communityId: string, targetUserId: string): Promise<MemberRow> {
+    const viewer = await this.membersRepo.findByCommunityAndUser(communityId, viewerId)
+    if (!viewer || viewer.role !== 'owner') throw new CommunitiesError('FORBIDDEN')
+
+    const target = await this.membersRepo.findByCommunityAndUser(communityId, targetUserId)
+    if (!target) throw new CommunitiesError('MEMBER_NOT_FOUND')
+    if (target.status !== 'active' || target.role === 'moderator' || target.role === 'owner') {
+      throw new CommunitiesError('INVALID_MEMBER_STATE')
+    }
+
+    return this.membersRepo.setRole(target.id, 'moderator')
+  }
+
+  async demoteMember(viewerId: string, communityId: string, targetUserId: string): Promise<MemberRow> {
+    const viewer = await this.membersRepo.findByCommunityAndUser(communityId, viewerId)
+    if (!viewer || viewer.role !== 'owner') throw new CommunitiesError('FORBIDDEN')
+
+    const target = await this.membersRepo.findByCommunityAndUser(communityId, targetUserId)
+    if (!target) throw new CommunitiesError('MEMBER_NOT_FOUND')
+    if (target.role !== 'moderator') throw new CommunitiesError('INVALID_MEMBER_STATE')
+
+    return this.membersRepo.setRole(target.id, 'member')
+  }
+
+  async banMember(viewerId: string, communityId: string, targetUserId: string, reason?: string): Promise<MemberRow> {
+    const viewer = await this.membersRepo.findByCommunityAndUser(communityId, viewerId)
+    if (!viewer || (viewer.role !== 'owner' && viewer.role !== 'moderator')) throw new CommunitiesError('FORBIDDEN')
+
+    const target = await this.membersRepo.findByCommunityAndUser(communityId, targetUserId)
+    if (!target) throw new CommunitiesError('MEMBER_NOT_FOUND')
+    if (target.role === 'owner') throw new CommunitiesError('FORBIDDEN')
+    if (viewer.role === 'moderator' && target.role === 'moderator') throw new CommunitiesError('FORBIDDEN')
+    if (target.status === 'banned') throw new CommunitiesError('ALREADY_BANNED')
+
+    return this.db.transaction(async (tx) => {
+      const exec = tx as unknown as typeof this.db
+      const row = await this.membersRepo.setStatus(target.id, 'banned', reason ?? null, exec)
+      if (target.status === 'active') {
+        await this.communitiesRepo.decrementMemberCount(communityId, exec)
+      }
+      return row
+    })
+  }
+
+  async unbanMember(viewerId: string, communityId: string, targetUserId: string): Promise<MemberRow> {
+    const viewer = await this.membersRepo.findByCommunityAndUser(communityId, viewerId)
+    if (!viewer || (viewer.role !== 'owner' && viewer.role !== 'moderator')) throw new CommunitiesError('FORBIDDEN')
+
+    const target = await this.membersRepo.findByCommunityAndUser(communityId, targetUserId)
+    if (!target) throw new CommunitiesError('MEMBER_NOT_FOUND')
+    if (target.status !== 'banned') throw new CommunitiesError('INVALID_MEMBER_STATE')
+
+    return this.db.transaction(async (tx) => {
+      const exec = tx as unknown as typeof this.db
+      const row = await this.membersRepo.setStatus(target.id, 'active', null, exec)
+      await this.communitiesRepo.incrementMemberCount(communityId, exec)
+      return row
+    })
+  }
+
+  async kickMember(viewerId: string, communityId: string, targetUserId: string): Promise<void> {
+    const viewer = await this.membersRepo.findByCommunityAndUser(communityId, viewerId)
+    if (!viewer || (viewer.role !== 'owner' && viewer.role !== 'moderator')) throw new CommunitiesError('FORBIDDEN')
+
+    const target = await this.membersRepo.findByCommunityAndUser(communityId, targetUserId)
+    if (!target) throw new CommunitiesError('MEMBER_NOT_FOUND')
+    if (target.role === 'owner') throw new CommunitiesError('FORBIDDEN')
+    if (viewer.role === 'moderator' && target.role === 'moderator') throw new CommunitiesError('FORBIDDEN')
+
+    await this.db.transaction(async (tx) => {
+      const exec = tx as unknown as typeof this.db
+      await this.membersRepo.deleteByCommunityAndUser(communityId, targetUserId, exec)
+      if (target.status === 'active') {
+        await this.communitiesRepo.decrementMemberCount(communityId, exec)
+      }
+    })
+  }
 }

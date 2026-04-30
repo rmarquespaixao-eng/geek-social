@@ -328,6 +328,14 @@ export class CommunitiesRepository {
       .where(eq(communities.id, id))
   }
 
+  async decrementTopicCount(id: string, tx?: DatabaseClient): Promise<void> {
+    const exec = tx ?? this.db
+    await exec
+      .update(communities)
+      .set({ topicCount: sql`greatest(${communities.topicCount} - 1, 0)`, updatedAt: new Date() })
+      .where(eq(communities.id, id))
+  }
+
   async incrementMemberCount(id: string, tx?: DatabaseClient): Promise<void> {
     const exec = tx ?? this.db
     await exec

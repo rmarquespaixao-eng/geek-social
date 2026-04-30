@@ -22,7 +22,7 @@ export class PostsRepository implements IPostsRepository {
 
   async findById(id: string): Promise<Post | null> {
     const result = await this.db.select().from(posts)
-      .where(and(eq(posts.id, id), isNull(posts.communityId), isNull(posts.deletedAt)))
+      .where(and(eq(posts.id, id), isNull(posts.deletedAt)))
       .limit(1)
     if (!result[0]) return null
     const media = await this.db.select().from(postMedia)
@@ -45,6 +45,11 @@ export class PostsRepository implements IPostsRepository {
 
   async delete(id: string): Promise<void> {
     await this.db.delete(posts).where(eq(posts.id, id))
+  }
+
+  async softDelete(id: string, tx?: unknown): Promise<void> {
+    const exec = (tx as DatabaseClient | undefined) ?? this.db
+    await exec.update(posts).set({ deletedAt: new Date() }).where(eq(posts.id, id))
   }
 
   async addMedia(postId: string, url: string, displayOrder: number, thumbnailUrl?: string | null): Promise<PostMedia> {

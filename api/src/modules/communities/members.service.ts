@@ -68,10 +68,12 @@ export class MembersService {
   async listMembers(
     communityId: string,
     query: { role?: 'owner' | 'moderator' | 'member'; status?: 'pending' | 'active' | 'banned'; limit?: number; cursor?: string },
+    viewerCanSeePending = false,
   ): Promise<{ members: MemberWithUser[]; nextCursor: string | null }> {
+    const status = viewerCanSeePending ? query.status : (query.status ?? 'active')
     return this.membersRepo.listByCommunity(communityId, {
       role: query.role,
-      status: query.status,
+      status,
       limit: query.limit,
       cursor: query.cursor,
     })

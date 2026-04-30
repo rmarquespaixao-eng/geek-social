@@ -127,6 +127,7 @@ export class CommunitiesService {
       }
     }
 
+    if (!community) throw new CommunitiesError('COMMUNITY_NOT_FOUND')
     await this.auditLog.record('community_create', community.id, ownerId)
     return community
   }
@@ -211,7 +212,6 @@ export class CommunitiesService {
     if (!membership || membership.status !== 'active') {
       throw new CommunitiesError('NOT_MEMBER')
     }
-    if (membership.status === 'banned') throw new CommunitiesError('BANNED')
   }
 
   async assertNotBanned(viewerId: string, communityId: string): Promise<void> {

@@ -159,12 +159,14 @@ describe('CommunitiesService', () => {
     })
 
     it('auto-suffixes slug on collision (retry logic)', async () => {
-      const existingCommunity = makeCommunity({ slug: 'test' })
-      vi.mocked(repo.findBySlug)
-        .mockResolvedValueOnce(existingCommunity) // first call: collision
-        .mockResolvedValue(null) // second call: no collision
-
-      vi.mocked(repo.create).mockResolvedValue(makeCommunity({ slug: 'test-2' }))
+      // New atomic pattern: INSERT → catch 23505 → retry with suffix
+      const slugConflictError = Object.assign(new Error('unique_violation'), {
+        code: '23505',
+        constraint: 'communities_slug_unique',
+      })
+      vi.mocked(repo.create)
+        .mockRejectedValueOnce(slugConflictError) // first INSERT: slug collision
+        .mockResolvedValue(makeCommunity({ slug: 'test-2' })) // second INSERT: succeeds
 
       const result = await service.createCommunity(
         'owner-1',
@@ -173,7 +175,12 @@ describe('CommunitiesService', () => {
         iconFile,
       )
 
-      expect(repo.findBySlug).toHaveBeenCalledTimes(2)
+      expect(repo.create).toHaveBeenCalledTimes(2)
+      expect(repo.create).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({ slug: 'test-2' }),
+        expect.anything(),
+      )
       expect(result.slug).toBe('test-2')
     })
 

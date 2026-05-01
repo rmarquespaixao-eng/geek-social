@@ -8,7 +8,7 @@ import { CommunitiesController } from './communities.controller.js'
 import { MembersController } from './members.controller.js'
 import { JoinRequestsController } from './join-requests.controller.js'
 import { TopicsController } from './topics.controller.js'
-import { authenticate, optionalAuthenticate } from '../../shared/middleware/authenticate.js'
+import { authenticate } from '../../shared/middleware/authenticate.js'
 import {
   listCommunitiesQuerySchema,
   idOrSlugParam,
@@ -58,7 +58,7 @@ export const communitiesRoutes: FastifyPluginAsyncZod<CommunitiesRoutesOptions> 
       security: [{ accessToken: [] }],
       querystring: listCommunitiesQuerySchema,
     },
-    preHandler: [optionalAuthenticate],
+    preHandler: [authenticate],
     handler: commCtrl.list.bind(commCtrl),
   })
 
@@ -94,7 +94,7 @@ export const communitiesRoutes: FastifyPluginAsyncZod<CommunitiesRoutesOptions> 
       security: [{ accessToken: [] }],
       params: idOrSlugParam,
     },
-    preHandler: [optionalAuthenticate],
+    preHandler: [authenticate],
     handler: commCtrl.get.bind(commCtrl),
   })
 
@@ -159,7 +159,7 @@ export const communitiesRoutes: FastifyPluginAsyncZod<CommunitiesRoutesOptions> 
       params: uuidParam,
       querystring: listMembersQuerySchema,
     },
-    preHandler: [optionalAuthenticate],
+    preHandler: [authenticate],
     handler: membersCtrl.listMembers.bind(membersCtrl),
   })
 
@@ -211,7 +211,7 @@ export const communitiesRoutes: FastifyPluginAsyncZod<CommunitiesRoutesOptions> 
       params: uuidParam,
       querystring: listTopicsQuerySchema,
     },
-    preHandler: [optionalAuthenticate],
+    preHandler: [authenticate],
     handler: topicsCtrl.listTopics.bind(topicsCtrl),
   })
 
@@ -236,7 +236,7 @@ export const communitiesRoutes: FastifyPluginAsyncZod<CommunitiesRoutesOptions> 
       security: [{ accessToken: [] }],
       params: topicParams,
     },
-    preHandler: [optionalAuthenticate],
+    preHandler: [authenticate],
     handler: topicsCtrl.getTopicWithMeta.bind(topicsCtrl),
   })
 

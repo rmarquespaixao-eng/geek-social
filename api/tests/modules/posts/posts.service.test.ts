@@ -175,6 +175,23 @@ describe('PostsService', () => {
 
       await expect(service.getPost('post-1', 'user-1')).rejects.toThrow('NOT_FOUND')
     })
+
+    it('deve retornar post friends_only quando viewer é amigo do autor', async () => {
+      vi.mocked(repo.findById).mockResolvedValue(makePost({ userId: 'user-other', visibility: 'friends_only' }))
+      vi.mocked(friendsRepo.areFriends).mockResolvedValue(true)
+
+      const result = await service.getPost('post-1', 'user-1')
+
+      expect(result.id).toBe('post-1')
+      expect(friendsRepo.areFriends).toHaveBeenCalledWith('user-1', 'user-other')
+    })
+
+    it('deve lançar NOT_FOUND para post friends_only quando viewer não é amigo', async () => {
+      vi.mocked(repo.findById).mockResolvedValue(makePost({ userId: 'user-other', visibility: 'friends_only' }))
+      vi.mocked(friendsRepo.areFriends).mockResolvedValue(false)
+
+      await expect(service.getPost('post-1', 'user-1')).rejects.toThrow('NOT_FOUND')
+    })
   })
 
   describe('updatePost', () => {
@@ -228,8 +245,9 @@ describe('PostsService', () => {
       vi.mocked(storage.upload).mockResolvedValue('https://s3/img.webp')
       vi.mocked(repo.addMedia).mockResolvedValue({ id: 'm-1', postId: 'post-1', url: 'https://s3/img.webp', displayOrder: 0 })
 
-      const buf = Buffer.from('fake-image')
-      const result = await service.addMedia('user-1', 'post-1', [buf])
+      const result = await service.addMedia('user-1', 'post-1', [
+        { buffer: Buffer.from('fake-image'), mimeType: 'image/jpeg', filename: 'test.jpg' }
+      ])
 
       expect(storage.upload).toHaveBeenCalledTimes(1)
       expect(repo.addMedia).toHaveBeenCalledTimes(1)
@@ -237,14 +255,54 @@ describe('PostsService', () => {
     })
 
     it('deve lançar MEDIA_LIMIT_EXCEEDED ao tentar adicionar a 5ª imagem', async () => {
-      vi.mocked(repo.findById).mockResolvedValue(makePost({ userId: 'user-1' }))
-      vi.mocked(repo.countMedia).mockResolvedValue(4)
+      vi.mocked(repo.findById).mockResolvedValueOnce(makePost({ userId: 'user-1' }))
+      vi.mocked(repo.countMedia).mockResolvedValue(8)
 
       await expect(
-        service.addMedia('user-1', 'post-1', [Buffer.from('img')])
+        service.addMedia('user-1', 'post-1', [{ buffer: Buffer.from('img'), mimeType: 'image/jpeg', filename: 'test.jpg' }])
       ).rejects.toThrow('MEDIA_LIMIT_EXCEEDED')
 
       expect(storage.upload).not.toHaveBeenCalled()
+    })
+
+    it('deve rejeitar MIME type de imagem não suportado', async () => {
+      vi.mocked(repo.findById).mockResolvedValue(makePost({ userId: 'user-1' }))
+      vi.mocked(repo.countMedia).mockResolvedValue(0)
+
+      await expect(
+        service.addMedia('user-1', 'post-1', [{ buffer: Buffer.from('img'), mimeType: 'application/pdf', filename: 'test.pdf' }])
+      ).rejects.toThrow('UNSUPPORTED_MEDIA_FORMAT')
+
+      expect(storage.upload).not.toHaveBeenCalled()
+    })
+
+    it('deve rejeitar imagem acima de 5MB', async () => {
+      const largeBuffer = Buffer.alloc(6 * 1024 * 1024)
+      vi.mocked(repo.findById).mockResolvedValue(makePost({ userId: 'user-1' }))
+      vi.mocked(repo.countMedia).mockResolvedValue(0)
+
+      await expect(
+        service.addMedia('user-1', 'post-1', [{ buffer: largeBuffer, mimeType: 'image/jpeg', filename: 'large.jpg' }])
+      ).rejects.toThrow('MEDIA_TOO_LARGE')
+
+      expect(storage.upload).not.toHaveBeenCalled()
+    })
+
+    it('deve permitir imagens nos formatos: jpeg, png, gif, webp', async () => {
+      const mimeTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp']
+      for (const mimeType of mimeTypes) {
+        vi.mocked(repo.findById)
+          .mockResolvedValueOnce(makePost({ userId: 'user-1' }))
+          .mockResolvedValueOnce(makePost({ userId: 'user-1', media: [] }))
+        vi.mocked(repo.countMedia).mockResolvedValue(0)
+        vi.mocked(repo.maxMediaOrder).mockResolvedValue(-1)
+        vi.mocked(storage.upload).mockResolvedValue('https://s3/img.webp')
+        vi.mocked(repo.addMedia).mockResolvedValue({ id: 'm-1', postId: 'post-1', url: 'https://s3/img.webp', displayOrder: 0 })
+
+        await expect(
+          service.addMedia('user-1', 'post-1', [{ buffer: Buffer.from('img'), mimeType, filename: 'test' }])
+        ).resolves.toBeDefined()
+      }
     })
   })
 

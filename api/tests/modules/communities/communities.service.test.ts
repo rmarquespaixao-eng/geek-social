@@ -11,6 +11,7 @@ vi.mock('sharp', () => ({
 import { CommunitiesService } from '../../../src/modules/communities/communities.service.js'
 import type { CommunitiesRepository, CommunityRow } from '../../../src/modules/communities/communities.repository.js'
 import type { MembersRepository } from '../../../src/modules/communities/members.repository.js'
+import type { JoinRequestsRepository } from '../../../src/modules/communities/join-requests.repository.js'
 import type { AuditLogRepository } from '../../../src/modules/communities/audit-log.repository.js'
 import type { IStorageService } from '../../../src/shared/contracts/storage.service.contract.js'
 import { CommunitiesError } from '../../../src/modules/communities/communities.errors.js'
@@ -104,6 +105,18 @@ function mockMembersRepo(): MembersRepository {
   } as unknown as MembersRepository
 }
 
+function mockJoinRequestsRepo(): JoinRequestsRepository {
+  return {
+    create: vi.fn(),
+    findPending: vi.fn().mockResolvedValue(null),
+    findById: vi.fn().mockResolvedValue(null),
+    findByUserInCommunity: vi.fn().mockResolvedValue(null),
+    listPending: vi.fn().mockResolvedValue([]),
+    markDecided: vi.fn(),
+    rejectAllPending: vi.fn().mockResolvedValue(undefined),
+  } as unknown as JoinRequestsRepository
+}
+
 function mockAuditLog(): AuditLogRepository {
   return {
     record: vi.fn().mockResolvedValue({}),
@@ -125,6 +138,7 @@ const iconFile = { buffer: Buffer.from('icon'), mimeType: 'image/jpeg' }
 describe('CommunitiesService', () => {
   let repo: ReturnType<typeof mockCommunitiesRepo>
   let membersRepo: ReturnType<typeof mockMembersRepo>
+  let joinRequestsRepo: ReturnType<typeof mockJoinRequestsRepo>
   let auditLog: ReturnType<typeof mockAuditLog>
   let storage: ReturnType<typeof mockStorage>
   let db: ReturnType<typeof mockDb>
@@ -133,10 +147,11 @@ describe('CommunitiesService', () => {
   beforeEach(() => {
     repo = mockCommunitiesRepo()
     membersRepo = mockMembersRepo()
+    joinRequestsRepo = mockJoinRequestsRepo()
     auditLog = mockAuditLog()
     storage = mockStorage()
     db = mockDb()
-    service = new CommunitiesService(db as any, repo, membersRepo, auditLog, storage)
+    service = new CommunitiesService(db as any, repo, membersRepo, joinRequestsRepo, auditLog, storage)
   })
 
   describe('createCommunity', () => {
@@ -242,7 +257,8 @@ describe('CommunitiesService', () => {
 
       await service.softDeleteCommunity('owner-1', 'c1')
 
-      expect(repo.softDelete).toHaveBeenCalledWith('c1')
+      expect(repo.softDelete).toHaveBeenCalledWith('c1', expect.anything())
+      expect(joinRequestsRepo.rejectAllPending).toHaveBeenCalledWith('c1', 'owner-1', expect.anything())
       expect(auditLog.record).toHaveBeenCalledWith('community_delete', 'c1', 'owner-1')
     })
 
@@ -262,14 +278,6 @@ describe('CommunitiesService', () => {
       const result = await service.getForViewer(COMMUNITY_UUID, 'any-user')
 
       expect(result.id).toBe(COMMUNITY_UUID)
-    })
-
-    it('returns community for private visibility (non-member gets stripped by isPrivateNonMember)', async () => {
-      vi.mocked(repo.findById).mockResolvedValue(makeCommunity({ id: COMMUNITY_UUID, visibility: 'private' }))
-      vi.mocked(membersRepo.findByCommunityAndUser).mockResolvedValue(null)
-
-      const result = await service.getForViewer(COMMUNITY_UUID, 'viewer-1')
-      expect(result.visibility).toBe('private')
     })
 
     it('returns community for restricted visibility (metadata visible, topics gated by assertCanView)', async () => {

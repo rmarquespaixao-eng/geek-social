@@ -34,6 +34,13 @@ export class ReactionsService {
   async removeReaction(userId: string, postId: string): Promise<void> {
     const post = await this.postsRepo.findById(postId)
     if (!post) throw new ReactionsError('NOT_FOUND')
+    if (post.visibility === 'private') throw new ReactionsError('NOT_FOUND')
+    if (post.visibility === 'friends_only' && post.userId !== userId) {
+      const areFriends = await this.friendsRepo.areFriends(userId, post.userId)
+      if (!areFriends) throw new ReactionsError('NOT_FOUND')
+    }
+    const blocked = await this.friendsRepo.isBlockedEitherDirection(userId, post.userId)
+    if (blocked) throw new ReactionsError('NOT_FOUND')
     await this.reactionsRepo.delete(postId, userId)
   }
 

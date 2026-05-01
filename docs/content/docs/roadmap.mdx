@@ -103,6 +103,23 @@ Tudo que está rodando hoje (referências cruzadas com a documentação técnica
 - Cron horário finaliza eventos passados (`status=ended`)
 - 📖 [Módulo Events](/docs/modules/events)
 
+### ✅ Comunidades (estilo Orkut)
+
+Espaços temáticos que reúnem pessoas em torno de um interesse (gênero, jogo específico, hobby de colecionador).
+
+- Criar comunidade com nome, slug, descrição, capa, ícone, categoria (15 categorias) e visibilidade
+- Visibilidade: **pública** (entrar direto) ou **restrita** (requer aprovação)
+- Roles de membro: **owner**, **moderador**, **member**
+- Status de membro: **active**, **pending**, **banned**
+- Pedidos de entrada: aprovar / rejeitar (owner ou moderador)
+- Gestão de membros: promover/rebaixar moderador, banir/desbanir, kick
+- **Tópicos** — posts dentro da comunidade com reactions + comentários, pinned/locked (infra pronta no schema)
+- Slug auto-suffix atômico em colisão (transação)
+- Audit log de todas as ações de moderação (`community_audit_log`)
+- Soft delete de comunidade (somente owner)
+- Tópicos de comunidade **não aparecem no feed global**
+- 📖 [Módulo Communities](/docs/modules/communities)
+
 ### ✅ Reports
 - Denúncias em 5 superfícies (user, message, post, collection, conversation)
 - 5 razões (spam, harassment, nsfw, hate, other)
@@ -127,55 +144,6 @@ Tudo que está rodando hoje (referências cruzadas com a documentação técnica
 ## Próximas features
 
 Em ordem aproximada de prioridade.
-
-### 🚧 Comunidades (estilo Orkut)
-
-Espaço para reunir pessoas com **interesses comuns** (jogos específicos, gêneros, hobbies). Mecânica de **inscrição + aceite** + permissões granulares.
-
-**Funcionalidades planejadas:**
-- Criar comunidade com nome, descrição, capa, ícone, tópico/categoria
-- Visibilidade: pública (qualquer um vê e pode pedir entrada), privada (invisível na busca, só por convite)
-- Regras de entrada: aberta (entrar direto) ou com aceite (mod aprova)
-- Roles: owner, admin (moderar), membro
-- Posts dentro da comunidade (feed próprio + opção de cross-post no feed pessoal)
-- Tópicos/threads dentro da comunidade (estrutura mais leve que fórum)
-- Eventos da comunidade (encontros, raids, watch parties)
-- Tags pra descoberta
-- Sub-comunidades? (a decidir)
-
-**Decisões pendentes:**
-- Comunidade tem chat próprio (group chat já existe — reusar?) ou só feed estilo timeline?
-- Posts da comunidade aparecem no feed do membro? Default opt-in ou opt-out?
-- Limite de comunidades por usuário?
-- Quem pode banir membro? (owner sempre; admin sim/não)
-
-**Modelagem inicial (a refinar)**:
-
-```
-communities
-├── id, name, description, slug
-├── owner_id, created_at
-├── icon_url, cover_url
-├── visibility: public | private
-├── join_policy: open | approval | invite_only
-└── topic / category
-
-community_members
-├── community_id, user_id
-├── role: owner | admin | member
-├── joined_at, banned_at?
-└── permissions JSONB
-
-community_join_requests
-├── community_id, user_id
-├── status: pending | accepted | rejected
-└── message?
-
-community_posts
-└── (estende posts com community_id FK opcional)
-```
-
-📋 **Spec dedicada futura**: brainstorm completo antes de codar.
 
 ### 🚧 Recomendações no feed (algoritmo de ranking)
 
@@ -516,12 +484,12 @@ Ordem de execução proposta (cada bloco = sub-projeto com spec própria + plano
 
 ### Próximas 1-2 sessões (curto prazo)
 1. **Painel administrador básico + audit log** — fundação pra moderação
-2. **Comunidades** (sem aceite ainda — feature simples primeiro)
-3. **Lista de amigos melhorada** — UX win rápido
+2. **Lista de amigos melhorada** — UX win rápido
+3. **Comunidades: notificações + cross-post** — completar loop social das comunidades
 
 ### Médio prazo
 4. **Feature flags** — habilitador de features futuras com rollout gradual
-5. **Comunidades com aceite + admin de comunidade**
+5. **Comunidades: chat próprio + eventos da comunidade**
 6. **LGPD: portabilidade (export) + audit log self-service**
 7. **Verificação de idade (self-declaration + gate)**
 8. **Moderação AI básica** (texto via Detoxify open-source)
@@ -563,5 +531,6 @@ Tracking aproximado de quando cada bloco entrou:
 | Sessão 2026-04-27 | Chat temporário · Forward/share/download · Google OAuth · Coleção cross-user · Perfil expandido |
 | Sessão 2026-04-28 | Vitrine completa (listings + offer_proposals + ratings) · Keycloak removido · Cor sólida capa/fundo · Excluir conta |
 | Sessão 2026-04-29 | Portal de documentação completo (681 páginas) |
+| Sessão 2026-05-01 | Comunidades — CRUD, membros, moderação, tópicos, join-requests, audit log |
 
 Próximas sessões: este roadmap.

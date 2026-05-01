@@ -27,6 +27,7 @@ export async function truncateAll(): Promise<void> {
       user_blocks,
       refresh_tokens,
       password_reset_tokens,
+      email_verification_tokens,
       push_subscriptions,
       user_presence,
       dm_requests,

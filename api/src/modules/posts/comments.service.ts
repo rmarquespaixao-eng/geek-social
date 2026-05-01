@@ -46,14 +46,14 @@ export class CommentsService {
     let cursor: CommentCursor | undefined
     try {
       cursor = cursorToken ? decodeCursor(cursorToken) : undefined
-    } catch {
+    } catch (err) {
+      console.error({ err }, 'comments: invalid cursor token')
       throw new CommentsError('INVALID_CURSOR')
     }
-    const result = await this.commentsRepo.findByPostId(postId, cursor, limit)
     const blockedUserIds = await this.friendsRepo.findAllBlockRelationUserIds(userId)
-    const comments = result.comments.filter(c => !blockedUserIds.includes(c.authorId))
+    const result = await this.commentsRepo.findByPostId(postId, cursor, limit, blockedUserIds)
     return {
-      comments,
+      comments: result.comments,
       nextCursor: result.nextCursor ? encodeCursor(result.nextCursor) : null,
     }
   }

@@ -168,3 +168,4 @@ Thumbs.db
 
 # Drizzle migrations geradas (manter migrations versionadas → comentar se for o caso)
 # api/src/shared/infra/database/migrations/meta/
+.dev-pipe/runs/

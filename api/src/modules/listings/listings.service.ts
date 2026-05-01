@@ -1,5 +1,9 @@
+import { eq, and } from 'drizzle-orm'
+import { listings } from '../../shared/infra/database/schema.js'
+import type { DatabaseClient } from '../../shared/infra/database/postgres.client.js'
 import type { ListingsRepository } from './listings.repository.js'
 import type { ItemsRepository } from '../items/items.repository.js'
+import type { CollectionsRepository } from '../collections/collections.repository.js'
 import type { OffersRepository } from '../offers/offers.repository.js'
 import type { NotificationsService } from '../notifications/notifications.service.js'
 import type { IFriendsRepository } from '../../shared/contracts/friends.repository.contract.js'
@@ -18,12 +22,17 @@ export class ListingsError extends Error {
 export class ListingsService {
   private offersRepo?: OffersRepository
   private notificationsService?: NotificationsService
+  private collectionsRepo?: CollectionsRepository
 
   constructor(
+    private readonly db: DatabaseClient,
     private readonly repo: ListingsRepository,
     private readonly itemsRepo: ItemsRepository,
     private readonly friendsRepo?: IFriendsRepository,
-  ) {}
+    collectionsRepo?: CollectionsRepository,
+  ) {
+    this.collectionsRepo = collectionsRepo
+  }
 
   /** Setter para evitar dependência circular com OffersService/Repository. Chamado no app.ts. */
   setOffersIntegration(offersRepo: OffersRepository, notificationsService?: NotificationsService) {
@@ -50,18 +59,35 @@ export class ListingsService {
     const item = await this.itemsRepo.findById(input.itemId)
     if (!item) throw new ListingsError('ITEM_NOT_FOUND')
 
-    // Verifica posse via collectionId (join no service — simples)
-    const existing = await this.repo.findActiveByItemId(input.itemId)
-    if (existing) throw new ListingsError('ALREADY_LISTED')
+    if (this.collectionsRepo && item.collectionId) {
+      const collection = await this.collectionsRepo.findById(item.collectionId)
+      if (!collection || collection.userId !== userId) throw new ListingsError('NOT_AUTHORIZED')
+    }
 
-    return this.repo.create({
-      itemId: input.itemId,
-      ownerId: userId,
-      availability: input.availability,
-      askingPrice: input.askingPrice,
-      paymentMethods: input.paymentMethods,
-      disclaimerAcceptedAt: new Date(),
-    })
+    try {
+      return await this.db.transaction(async (tx) => {
+        const existing = await tx.select().from(listings).where(
+          and(eq(listings.itemId, input.itemId), eq(listings.status, 'active')),
+        ).limit(1)
+        if (existing[0]) throw new ListingsError('ALREADY_LISTED')
+
+        const [row] = await tx.insert(listings).values({
+          itemId: input.itemId,
+          ownerId: userId,
+          availability: input.availability,
+          askingPrice: input.askingPrice != null ? String(input.askingPrice) : null,
+          paymentMethods: input.paymentMethods,
+          disclaimerAcceptedAt: new Date(),
+        }).returning()
+        return row as unknown as Listing
+      })
+    } catch (e) {
+      if (e instanceof ListingsError) throw e
+      if (e instanceof Error && 'code' in e && (e as NodeJS.ErrnoException).code === '23505') {
+        throw new ListingsError('ALREADY_LISTED')
+      }
+      throw e
+    }
   }
 
   async pause(userId: string, listingId: string): Promise<Listing> {
@@ -78,11 +104,27 @@ export class ListingsService {
     if (listing.ownerId !== userId) throw new ListingsError('NOT_AUTHORIZED')
     if (listing.status !== 'paused') throw new ListingsError('INVALID_TRANSITION')
 
-    // Garante que não existe outro ativo para o mesmo item (pode ter sido recriado)
-    const existingActive = await this.repo.findActiveByItemId(listing.itemId)
-    if (existingActive && existingActive.id !== listingId) throw new ListingsError('ALREADY_LISTED')
+    try {
+      return await this.db.transaction(async (tx) => {
+        // Garante que não existe outro ativo para o mesmo item (pode ter sido recriado)
+        const existingActive = await tx.select().from(listings).where(
+          and(eq(listings.itemId, listing.itemId), eq(listings.status, 'active')),
+        ).limit(1)
+        if (existingActive[0] && existingActive[0].id !== listingId) throw new ListingsError('ALREADY_LISTED')
 
-    return this.repo.update(listingId, { status: 'active' })
+        const [row] = await tx.update(listings)
+          .set({ status: 'active', updatedAt: new Date() })
+          .where(eq(listings.id, listingId))
+          .returning()
+        return row as unknown as Listing
+      })
+    } catch (e) {
+      if (e instanceof ListingsError) throw e
+      if (e instanceof Error && 'code' in e && (e as NodeJS.ErrnoException).code === '23505') {
+        throw new ListingsError('ALREADY_LISTED')
+      }
+      throw e
+    }
   }
 
   async close(userId: string | null, listingId: string): Promise<Listing> {

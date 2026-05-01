@@ -160,14 +160,22 @@ export const useCommunitiesStore = defineStore('communities', () => {
   async function join(id: string) {
     const result = await communitiesApi.joinCommunity(id)
     const cached = byId.get(id)
-    if (cached && result.membership) {
-      cached.viewerMembership = {
-        role: result.membership.role,
-        status: result.membership.status,
-        joinedAt: result.membership.joinedAt,
-      }
-      if (result.status === 'active') {
-        cached.community.memberCount += 1
+    if (cached) {
+      if (result.membership) {
+        cached.viewerMembership = {
+          role: result.membership.role,
+          status: result.membership.status,
+          joinedAt: result.membership.joinedAt,
+        }
+        if (result.status === 'active') {
+          cached.community.memberCount += 1
+        }
+      } else if (result.status === 'pending' && result.request) {
+        cached.viewerMembership = {
+          role: 'member',
+          status: 'pending',
+          joinedAt: result.request.createdAt,
+        }
       }
     }
     return result

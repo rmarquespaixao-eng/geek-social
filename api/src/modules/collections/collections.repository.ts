@@ -73,7 +73,15 @@ export class CollectionsRepository implements ICollectionRepository {
 
   async update(id: string, data: UpdateCollectionData): Promise<Collection> {
     const result = await this.db.update(collections)
-      .set({ ...data, updatedAt: new Date() })
+      .set({
+        ...(data.name !== undefined && { name: data.name }),
+        ...(data.description !== undefined && { description: data.description }),
+        ...(data.visibility !== undefined && { visibility: data.visibility }),
+        ...(data.autoShareToFeed !== undefined && { autoShareToFeed: data.autoShareToFeed }),
+        ...(data.iconUrl !== undefined && { iconUrl: data.iconUrl }),
+        ...(data.coverUrl !== undefined && { coverUrl: data.coverUrl }),
+        updatedAt: new Date(),
+      })
       .where(eq(collections.id, id))
       .returning()
     const [withCount] = await this.attachCounts([result[0]])

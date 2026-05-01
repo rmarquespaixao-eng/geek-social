@@ -43,8 +43,8 @@ export type CreateOfferData = {
 export class OffersRepository {
   constructor(private readonly db: DatabaseClient) {}
 
-  async create(data: CreateOfferData): Promise<OfferRow> {
-    const [row] = await this.db.insert(itemOffers).values({
+  async create(data: CreateOfferData, exec: DatabaseClient = this.db): Promise<OfferRow> {
+    const [row] = await exec.insert(itemOffers).values({
       type: data.type,
       itemId: data.itemId,
       listingId: data.listingId,
@@ -157,6 +157,14 @@ export class OffersRepository {
     return (row as OfferRow | undefined) ?? null
   }
 
+  async findPendingByItemAndOffererForUpdate(itemId: string, offererId: string, exec: DatabaseClient): Promise<OfferRow | null> {
+    const result = await exec.execute(
+      sql`SELECT * FROM item_offers WHERE item_id = ${itemId} AND offerer_id = ${offererId} AND status = 'pending' LIMIT 1 FOR UPDATE`,
+    )
+    const rows = (result as { rows: unknown[] }).rows
+    return (rows[0] as OfferRow | undefined) ?? null
+  }
+
   /** Auto-rejeita outras ofertas pendentes do mesmo item. Retorna IDs rejeitados. */
   async autoRejectSiblings(itemId: string, exceptOfferId: string): Promise<string[]> {
     const rows = await this.db
@@ -184,8 +192,9 @@ export class OffersRepository {
     return rows
   }
 
-  async setStatus(id: string, status: OfferStatus): Promise<OfferRow> {
-    const [row] = await this.db
+  async setStatus(id: string, status: OfferStatus, tx?: DatabaseClient): Promise<OfferRow> {
+    const exec = tx ?? this.db
+    const [row] = await exec
       .update(itemOffers)
       .set({ status, updatedAt: new Date() })
       .where(eq(itemOffers.id, id))
@@ -248,8 +257,9 @@ export class OffersRepository {
   }
 
   /** Move um item para outra coleção (transferência de propriedade). */
-  async moveItemToCollection(itemId: string, destCollectionId: string): Promise<void> {
-    await this.db
+  async moveItemToCollection(itemId: string, destCollectionId: string, tx?: DatabaseClient): Promise<void> {
+    const exec = tx ?? this.db
+    await exec
       .update(items)
       .set({ collectionId: destCollectionId, updatedAt: new Date() })
       .where(eq(items.id, itemId))

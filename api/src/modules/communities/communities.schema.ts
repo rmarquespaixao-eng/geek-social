@@ -2,7 +2,7 @@ import { z } from 'zod'
 import { communityCategories } from './categories.js'
 
 // ── Constantes de domínio ───────────────────────────────────────────
-export const communityVisibilities = ['public', 'private', 'restricted'] as const
+export const communityVisibilities = ['public', 'restricted'] as const
 export const communityMemberRoles = ['owner', 'moderator', 'member'] as const
 export const communityMemberStatuses = ['pending', 'active', 'banned'] as const
 export const communityJoinRequestStatuses = ['pending', 'approved', 'rejected'] as const
@@ -20,6 +20,8 @@ export const updateCommunitySchema = z.object({
   description: z.string().trim().min(1).max(2000).optional(),
   category: z.enum(communityCategories).optional(),
   visibility: z.enum(communityVisibilities).optional(),
+  rules: z.string().max(5000).nullable().optional(),
+  welcomeMessage: z.string().max(1000).nullable().optional(),
 })
 
 // ── Listagem / filtros ──────────────────────────────────────────────

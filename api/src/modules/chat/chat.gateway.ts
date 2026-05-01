@@ -139,17 +139,18 @@ export class ChatGateway {
           const blocked = await this.messagesService.getBlockedRecipients(data.conversationId, userId)
           this.emitMessageNew(data.conversationId, message, blocked)
 
-          // Push para membros offline (também não notifica bloqueadores)
+          // Push para membros offline (também não notifica bloqueadores).
+          // Metadata-only: nunca incluir conteúdo da mensagem no payload (E2E).
           const members = await this.conversationsService.getConversationMembers(data.conversationId)
-          const conv = await this.conversationsService.getConversationType(data.conversationId)
-          const isTemporary = conv === 'dm' ? (await this.conversationsService.getConversation(data.conversationId, userId))?.isTemporary ?? false : false
           for (const member of members) {
             if (member.userId !== userId && !blocked.includes(member.userId) && !this.presenceService.isOnline(member.userId)) {
-              const pushBody = isTemporary || message.isEncrypted ? 'Nova mensagem' : (message.content ?? '📎 Anexo')
               await this.pushService.notify(member.userId, {
                 title: 'Nova mensagem',
-                body: pushBody,
-                conversationId: data.conversationId,
+                body: '',
+                data: {
+                  conversationId: data.conversationId,
+                  messageId: message.id,
+                },
               }).catch(() => {})
             }
           }
@@ -373,8 +374,12 @@ export class ChatGateway {
     this.io.to(`conv:${conversationId}`).emit('member:added', { conversationId, member })
   }
 
-  emitMemberRemoved(conversationId: string, userId: string): void {
-    this.io.to(`conv:${conversationId}`).emit('member:removed', { conversationId, userId })
+  emitMemberRemoved(conversationId: string, userId: string, senderKeyId: string): void {
+    this.io.to(`conv:${conversationId}`).emit('member:removed', { conversationId, userId, senderKeyId })
+  }
+
+  emitMemberLeft(conversationId: string, userId: string, senderKeyId: string): void {
+    this.io.to(`conv:${conversationId}`).emit('member:left', { conversationId, userId, senderKeyId })
   }
 
   emitConversationUpdated(conversationId: string, conversation: unknown): void {

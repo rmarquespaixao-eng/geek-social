@@ -153,12 +153,6 @@ describe('MembersService', () => {
       expect(joinReqService.requestJoin).toHaveBeenCalledWith('user-1', 'c1')
     })
 
-    it('private community → throws NOT_MEMBER', async () => {
-      vi.mocked(commRepo.findById).mockResolvedValue(makeCommunity({ visibility: 'private' }))
-
-      await expect(service.joinCommunity('user-1', 'c1')).rejects.toMatchObject({ code: 'NOT_MEMBER' })
-    })
-
     it('throws ALREADY_MEMBER if user is already active', async () => {
       vi.mocked(commRepo.findById).mockResolvedValue(makeCommunity({ visibility: 'public' }))
       vi.mocked(membersRepo.findByCommunityAndUser).mockResolvedValue(makeMember({ status: 'active' }))
@@ -198,7 +192,7 @@ describe('MembersService', () => {
 
   describe('listMembers', () => {
     it('excludes banned members by default (status=active)', async () => {
-      await service.listMembers('c1', {})
+      await service.listMembers('c1', {}, null)
 
       expect(membersRepo.listByCommunity).toHaveBeenCalledWith(
         'c1',
@@ -206,13 +200,28 @@ describe('MembersService', () => {
       )
     })
 
-    it('includes all statuses when viewerCanSeePending=true and no status filter', async () => {
-      await service.listMembers('c1', {}, true)
+    it('includes pending status when viewer is owner', async () => {
+      const ownerMembership = makeMember({ role: 'owner' })
+      await service.listMembers('c1', { status: 'pending' }, ownerMembership)
 
       expect(membersRepo.listByCommunity).toHaveBeenCalledWith(
         'c1',
-        expect.objectContaining({ status: undefined }),
+        expect.objectContaining({ status: 'pending' }),
       )
+    })
+
+    it('throws FORBIDDEN when non-owner tries to list pending members', async () => {
+      const memberMembership = makeMember({ role: 'member' })
+      await expect(service.listMembers('c1', { status: 'pending' }, memberMembership)).rejects.toMatchObject({
+        code: 'FORBIDDEN',
+      })
+    })
+
+    it('throws FORBIDDEN when non-owner tries to list banned members', async () => {
+      const memberMembership = makeMember({ role: 'member' })
+      await expect(service.listMembers('c1', { status: 'banned' }, memberMembership)).rejects.toMatchObject({
+        code: 'FORBIDDEN',
+      })
     })
   })
 })

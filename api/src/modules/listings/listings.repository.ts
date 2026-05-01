@@ -130,7 +130,8 @@ export class ListingsRepository implements IListingsRepository {
     )`)
     conds.push(sql`NOT EXISTS (
       SELECT 1 FROM user_blocks ub
-      WHERE ub.blocker_id = ${listings.ownerId} AND ub.blocked_id = ${viewerId}
+      WHERE (ub.blocker_id = ${listings.ownerId} AND ub.blocked_id = ${viewerId})
+        OR (ub.blocker_id = ${viewerId} AND ub.blocked_id = ${listings.ownerId})
     )`)
 
     const rows = await this.db

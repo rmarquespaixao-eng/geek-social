@@ -6,6 +6,7 @@ import { usePresence } from '@/modules/chat/composables/usePresence'
 import { useChat } from '@/modules/chat/composables/useChat'
 import { useCall } from '@/modules/chat/composables/useCall'
 import { useSteam } from '@/modules/integrations/steam/composables/useSteam'
+import { initCrypto } from './cryptoBootstrap'
 import type { User } from '@/shared/types/auth.types'
 
 export async function initializeAuth(): Promise<void> {
@@ -16,6 +17,7 @@ export async function initializeAuth(): Promise<void> {
     const { data: userData } = await api.get<User>('/users/me')
     store.setUser(userData)
     connectSocket(refreshData.accessToken)
+    await initCrypto(userData.id)
     const notificationsStore = useNotifications()
     const presenceStore = usePresence()
     const chatStore = useChat()

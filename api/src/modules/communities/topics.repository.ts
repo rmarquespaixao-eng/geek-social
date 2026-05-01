@@ -194,4 +194,14 @@ export class TopicsRepository {
       .set({ deletedAt: new Date(), updatedAt: new Date() })
       .where(eq(posts.id, postId))
   }
+
+  async softDeleteIfNotDeleted(postId: string, tx?: DatabaseClient): Promise<boolean> {
+    const exec = tx ?? this.db
+    const result = await exec
+      .update(posts)
+      .set({ deletedAt: new Date(), updatedAt: new Date() })
+      .where(and(eq(posts.id, postId), isNull(posts.deletedAt)))
+      .returning()
+    return result.length > 0
+  }
 }

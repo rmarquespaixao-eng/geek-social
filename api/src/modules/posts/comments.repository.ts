@@ -1,4 +1,4 @@
-import { eq, and, or, lt, desc } from 'drizzle-orm'
+import { eq, and, or, lt, desc, notInArray } from 'drizzle-orm'
 import type { DatabaseClient } from '../../shared/infra/database/postgres.client.js'
 import { postComments, users } from '../../shared/infra/database/schema.js'
 import type { ICommentsRepository, Comment, EnrichedComment, CommentCursor } from '../../shared/contracts/comments.repository.contract.js'
@@ -50,7 +50,7 @@ export class CommentsRepository implements ICommentsRepository {
     await this.db.delete(postComments).where(eq(postComments.id, id))
   }
 
-  async findByPostId(postId: string, cursor?: CommentCursor, limit = 20): Promise<{ comments: EnrichedComment[]; nextCursor: CommentCursor | null }> {
+  async findByPostId(postId: string, cursor?: CommentCursor, limit = 20, excludedUserIds?: string[]): Promise<{ comments: EnrichedComment[]; nextCursor: CommentCursor | null }> {
     const cursorCondition = cursor
       ? or(
           lt(postComments.createdAt, cursor.createdAt),
@@ -61,6 +61,7 @@ export class CommentsRepository implements ICommentsRepository {
     const conditions = [
       eq(postComments.postId, postId),
       ...(cursorCondition ? [cursorCondition] : []),
+      ...(excludedUserIds && excludedUserIds.length > 0 ? [notInArray(postComments.userId, excludedUserIds)] : []),
     ]
 
     const rows = await this.db.select(enrichedSelect)

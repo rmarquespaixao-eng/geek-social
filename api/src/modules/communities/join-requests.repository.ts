@@ -1,4 +1,4 @@
-import { and, eq } from 'drizzle-orm'
+import { and, desc, eq } from 'drizzle-orm'
 import type { DatabaseClient } from '../../shared/infra/database/postgres.client.js'
 import { communityJoinRequests, users } from '../../shared/infra/database/schema.js'
 import type { JoinRequestRow } from './communities.repository.js'
@@ -108,5 +108,30 @@ export class JoinRequestsRepository {
       .where(eq(communityJoinRequests.id, id))
       .returning()
     return row as JoinRequestRow
+  }
+
+  async findLastRejected(communityId: string, userId: string, tx?: DatabaseClient): Promise<JoinRequestRow | null> {
+    const exec = tx ?? this.db
+    const [row] = await exec
+      .select()
+      .from(communityJoinRequests)
+      .where(
+        and(
+          eq(communityJoinRequests.communityId, communityId),
+          eq(communityJoinRequests.userId, userId),
+          eq(communityJoinRequests.status, 'rejected'),
+        ),
+      )
+      .orderBy(desc(communityJoinRequests.decidedAt))
+      .limit(1)
+    return (row as JoinRequestRow | undefined) ?? null
+  }
+
+  async rejectAllPending(communityId: string, decidedBy: string, tx?: DatabaseClient): Promise<void> {
+    const exec = tx ?? this.db
+    await exec
+      .update(communityJoinRequests)
+      .set({ status: 'rejected', decidedBy, decidedAt: new Date() })
+      .where(and(eq(communityJoinRequests.communityId, communityId), eq(communityJoinRequests.status, 'pending')))
   }
 }

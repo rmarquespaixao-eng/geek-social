@@ -17,7 +17,7 @@ export type ParticipantRow = {
 }
 
 export type ParticipantWithUser = ParticipantRow & {
-  user: { id: string; displayName: string; avatarUrl: string | null }
+  user: { id: string; displayName: string; avatarUrl: string | null; privacy?: string }
 }
 
 /**
@@ -186,6 +186,7 @@ export class ParticipantsRepository {
         updatedAt: eventParticipants.updatedAt,
         userName: users.displayName,
         userAvatar: users.avatarUrl,
+        userPrivacy: users.privacy,
       })
       .from(eventParticipants)
       .innerJoin(users, eq(users.id, eventParticipants.userId))
@@ -204,7 +205,7 @@ export class ParticipantsRepository {
       leftAt: r.leftAt,
       createdAt: r.createdAt,
       updatedAt: r.updatedAt,
-      user: { id: r.userId, displayName: r.userName, avatarUrl: r.userAvatar ?? null },
+      user: { id: r.userId, displayName: r.userName, avatarUrl: r.userAvatar ?? null, privacy: r.userPrivacy },
     }))
   }
 
@@ -284,7 +285,9 @@ export class ParticipantsRepository {
     from: Date,
     to: Date,
     excludeEventId?: string,
+    tx?: DatabaseClient,
   ): Promise<{ eventId: string }[]> {
+    const exec = tx ?? this.db
     const conds = [
       eq(eventParticipants.userId, userId),
       inArray(eventParticipants.status, ['subscribed', 'confirmed'] as ParticipantStatus[]),
@@ -292,7 +295,7 @@ export class ParticipantsRepository {
       sql`tstzrange(${events.startsAt}, ${events.endsAt}, '[)') && tstzrange(${from}, ${to}, '[)')`,
     ]
     if (excludeEventId) conds.push(sql`${events.id} <> ${excludeEventId}`)
-    const rows = await this.db
+    const rows = await exec
       .select({ eventId: events.id })
       .from(eventParticipants)
       .innerJoin(events, eq(events.id, eventParticipants.eventId))

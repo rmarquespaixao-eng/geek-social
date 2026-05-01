@@ -54,20 +54,23 @@ export class PgBossAdapter implements IJobsQueue {
   async getBatchStats(importBatchId: string): Promise<BatchStats> {
     const db = this.boss.getDb()
     const { rows } = await db.executeSql(
-      `SELECT state, count(*)::int AS c
+      `SELECT state, count(*)::int AS c, data->>'userId' AS userId
        FROM pgboss.job
        WHERE name = 'steam.import-game'
          AND data->>'importBatchId' = $1
-       GROUP BY state`,
+       GROUP BY state, userId`,
       [importBatchId],
     )
     const stats: BatchStats = { totalImports: 0, completedImports: 0, failedImports: 0 }
-    for (const row of rows as Array<{ state: string; c: number }>) {
+    let userId: string | undefined
+    for (const row of rows as Array<{ state: string; c: number; userId: string }>) {
       const c = Number(row.c)
       stats.totalImports += c
       if (row.state === 'completed') stats.completedImports += c
       if (row.state === 'failed' || row.state === 'cancelled') stats.failedImports += c
+      userId = row.userId
     }
+    if (userId) stats.userId = userId
     return stats
   }
 

@@ -1,7 +1,7 @@
 import type { FastifyRequest, FastifyReply } from 'fastify'
 import type { AuthService, AccessTokenClaims } from './auth.service.js'
 import { AuthError } from './auth.service.js'
-import type { RegisterInput, LoginInput, ForgotPasswordInput, ResetPasswordInput, ChangePasswordInput, SetPasswordInput } from './auth.schema.js'
+import type { RegisterInput, LoginInput, ForgotPasswordInput, ResetPasswordInput, ChangePasswordInput, SetPasswordInput, VerifyEmailBody, ResendVerificationInput } from './auth.schema.js'
 import crypto from 'node:crypto'
 
 export class AuthController {
@@ -57,12 +57,15 @@ export class AuthController {
       const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex')
       await this.authService.logout(tokenHash)
     }
-    reply.clearCookie('refreshToken')
+    reply.clearCookie('refreshToken', { path: '/auth' })
     return reply.status(204).send()
   }
 
   async forgotPassword(request: FastifyRequest<{ Body: ForgotPasswordInput }>, reply: FastifyReply) {
-    await this.authService.forgotPassword(request.body)
+    // Fire-and-forget pra não vazar timing oracle de enumeração (auditoria #10).
+    // Resposta retorna em ~1ms independente de o e-mail existir.
+    this.authService.forgotPassword(request.body)
+      .catch(err => request.log.warn({ err }, 'forgotPassword background failed'))
     return reply.send({ message: 'Se o e-mail existir, você receberá as instruções em breve.' })
   }
 
@@ -91,6 +94,25 @@ export class AuthController {
     }
   }
 
+  async verifyEmail(request: FastifyRequest<{ Body: VerifyEmailBody }>, reply: FastifyReply) {
+    try {
+      await this.authService.confirmEmailVerification(request.body.token)
+      return reply.send({ message: 'E-mail verificado com sucesso.' })
+    } catch (error) {
+      if (error instanceof AuthError && error.code === 'INVALID_VERIFICATION_TOKEN') {
+        return reply.status(400).send({ error: 'Token inválido ou expirado' })
+      }
+      throw error
+    }
+  }
+
+  async resendVerification(request: FastifyRequest<{ Body: ResendVerificationInput }>, reply: FastifyReply) {
+    // Fire-and-forget — mesma razão de forgotPassword (auditoria #10).
+    this.authService.resendEmailVerification(request.body.email)
+      .catch(err => request.log.warn({ err }, 'resendEmailVerification background failed'))
+    return reply.send({ message: 'Se o e-mail existir e ainda não estiver verificado, você receberá novas instruções em breve.' })
+  }
+
   async setPassword(request: FastifyRequest<{ Body: SetPasswordInput }>, reply: FastifyReply) {
     const { userId } = request.user as AccessTokenClaims
     try {
@@ -98,24 +120,39 @@ export class AuthController {
       return reply.status(204).send()
     } catch (error) {
       if (error instanceof AuthError) {
-        if (error.code === 'PASSWORD_ALREADY_SET') {
-          return reply.status(409).send({ error: 'PASSWORD_ALREADY_SET' })
-        }
-        if (error.code === 'USER_NOT_FOUND') {
-          return reply.status(404).send({ error: 'USER_NOT_FOUND' })
-        }
+        // Log the specific code server-side but return a generic error to avoid leaking account state
+        request.log.warn({ code: error.code, userId }, 'setPassword failed')
+        return reply.status(400).send({ error: 'SET_PASSWORD_FAILED' })
       }
       throw error
     }
   }
 
+  async logoutAll(request: FastifyRequest, reply: FastifyReply) {
+    const { userId } = request.user as AccessTokenClaims
+    await this.authService.logoutAllSessions(userId)
+    reply.clearCookie('refreshToken', { path: '/auth' })
+    return reply.status(204).send()
+  }
+
   private setRefreshCookie(reply: FastifyReply, token: string, expires: Date) {
-    reply.setCookie('refreshToken', token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax',
-      expires,
-      path: '/',
-    })
+    reply.setCookie('refreshToken', token, buildRefreshCookieOpts(expires))
+  }
+}
+
+// Reaproveitado pelo controller e pela google.strategy: cookie só serve em /auth/*,
+// secure controlado por env (não NODE_ENV) pra cobrir staging via HTTPS, e sameSite
+// strict em produção.
+export function buildRefreshCookieOpts(expires: Date) {
+  const isProd = process.env.NODE_ENV === 'production'
+  // COOKIE_SECURE override permite forçar secure também em staging com HTTPS sem
+  // depender de NODE_ENV='production'.
+  const secure = process.env.COOKIE_SECURE === 'true' || isProd
+  return {
+    httpOnly: true,
+    secure,
+    sameSite: (isProd ? 'strict' : 'lax') as 'strict' | 'lax',
+    expires,
+    path: '/auth',
   }
 }

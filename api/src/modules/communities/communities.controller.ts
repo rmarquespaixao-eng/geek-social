@@ -9,8 +9,6 @@ import {
 } from './communities.schema.js'
 import {
   serializeCommunitySummary,
-  serializeCommunityPrivate,
-  serializeMemberWithUser,
 } from './communities.serializer.js'
 import type { AccessTokenClaims } from '../auth/auth.service.js'
 
@@ -31,6 +29,8 @@ const STATUS_BY_CODE: Record<string, number> = {
   ALREADY_MEMBER: 409,
   ALREADY_PENDING: 409,
   ALREADY_BANNED: 409,
+  MEMBER_BANNED: 403,
+  COOLDOWN_ACTIVE: 429,
   ALREADY_INVITED: 409,
   OWNER_CANNOT_LEAVE: 409,
   OWNER_CANNOT_BE_BANNED: 409,
@@ -165,26 +165,22 @@ export class CommunitiesController {
   }
 
   async get(request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) {
-    const viewer = (request.user as AccessTokenClaims | undefined)
-    const viewerId = viewer?.userId ?? null
+    const { userId: viewerId } = request.user as AccessTokenClaims
     try {
       const community = await this.service.getForViewer(request.params.id, viewerId)
-      const isPrivateNonMember = await this.service.isPrivateNonMember(community, viewerId)
+      const membership = await this.membersService.getMembership(community.id, viewerId)
+      const isActiveMember = membership?.status === 'active'
 
-      if (isPrivateNonMember) {
-        return reply.send({ community: serializeCommunityPrivate(community), viewerMembership: null, moderators: [] })
+      // Restricted non-members (no membership or pending): show summary + their status, hide moderators list
+      if (community.visibility === 'restricted' && !isActiveMember) {
+        return reply.send({
+          community: serializeCommunitySummary(community),
+          viewerMembership: membership ? { role: membership.role, status: membership.status, joinedAt: membership.joinedAt.toISOString() } : null,
+          moderators: [],
+        })
       }
 
-      const isRestrictedNonMember = await this.service.isRestrictedNonMember(community, viewerId)
-      if (isRestrictedNonMember) {
-        return reply.send({ community: serializeCommunityPrivate(community), viewerMembership: null, moderators: [] })
-      }
-
-      const [membership, moderators] = await Promise.all([
-        viewerId ? this.membersService.getMembership(community.id, viewerId) : null,
-        this.service.findModerators(community.id),
-      ])
-
+      const moderators = await this.service.findModerators(community.id)
       return reply.send({
         community: serializeCommunitySummary(community),
         viewerMembership: membership ? {

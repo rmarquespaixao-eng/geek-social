@@ -20,6 +20,7 @@ export type BatchStats = {
   totalImports: number
   completedImports: number
   failedImports: number
+  userId?: string
 }
 
 export interface IJobsQueue {

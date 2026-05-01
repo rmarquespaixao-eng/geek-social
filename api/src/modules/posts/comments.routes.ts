@@ -34,8 +34,9 @@ export const commentsRoutes: FastifyPluginAsyncZod<{ commentsService: CommentsSe
       description: 'Cursor pagination cronológica crescente. Inclui dados do autor.',
       params: postIdParam,
       querystring: z.object({ cursor: z.string().optional(), limit: z.coerce.number().int().min(1).max(50).optional() }),
+      security: [{ accessToken: [] }],
     },
-    preHandler: [optionalAuthenticate],
+    preHandler: [authenticate],
     handler: controller.listComments.bind(controller),
   })
 

@@ -1,3 +1,4 @@
+import { sql } from 'drizzle-orm'
 import type { DatabaseClient } from '../../shared/infra/database/postgres.client.js'
 import type { EventsRepository, EventRow } from './events.repository.js'
 import {
@@ -63,18 +64,31 @@ export class ParticipantsService {
     const ev = await this.eventsRepo.findById(eventId)
     if (!ev) throw new EventsError('EVENT_NOT_FOUND')
     await this.assertCanSubscribe(userId, ev)
-
-    // Conflito de horário (verificação fora da transação — se outro user inscrever em paralelo, não há colisão)
-    const overlaps = await this.repo.findUserActiveEventsInRange(
-      userId,
-      ev.startsAt,
-      ev.endsAt,
-      eventId,
-    )
-    if (overlaps.length > 0) throw new EventsError('TIME_CONFLICT')
+    const isBlocked = await this.friendsRepo.isBlockedEitherDirection(userId, ev.hostUserId)
+    if (isBlocked) throw new EventsError('NOT_INVITED')
 
     return this.db.transaction(async (tx) => {
       const exec = tx as unknown as DatabaseClient
+
+      const lockedRows = await exec.execute(sql`
+        SELECT capacity FROM events WHERE id = ${eventId} FOR UPDATE
+      `)
+      const lockedRowsArr = (lockedRows as unknown as { rows?: { capacity: number | null }[] }).rows
+        ?? (lockedRows as unknown as { capacity: number | null }[])
+      const lockedEvent = Array.isArray(lockedRowsArr) ? lockedRowsArr[0] : undefined
+      if (!lockedEvent) throw new EventsError('EVENT_NOT_FOUND')
+      const capacity: number | null = lockedEvent.capacity ?? null
+
+      // Conflito de horário verificado DENTRO da transação, após SELECT FOR UPDATE,
+      // garantindo consistência com os dados bloqueados (Fix G2-04 / NA3-03).
+      const overlaps = await this.repo.findUserActiveEventsInRange(
+        userId,
+        ev.startsAt,
+        ev.endsAt,
+        eventId,
+        exec,
+      )
+      if (overlaps.length > 0) throw new EventsError('TIME_CONFLICT')
 
       const existing = await this.repo.findByEventAndUser(eventId, userId, exec)
       if (existing && existing.status !== 'left') {
@@ -83,7 +97,7 @@ export class ParticipantsService {
 
       const counts =
         (await this.repo.countByEvents([eventId], exec)).get(eventId) ?? zeroCounts()
-      const hasCapacity = ev.capacity == null || activeFromCounts(counts) < ev.capacity
+      const hasCapacity = capacity == null || activeFromCounts(counts) < capacity
 
       let participation: ParticipantRow
       if (existing && existing.status === 'left') {
@@ -100,19 +114,27 @@ export class ParticipantsService {
         }
       }
 
-      if (hasCapacity) {
-        participation = await this.repo.insert(
-          { eventId, userId, status: 'subscribed', waitlistPosition: null },
-          exec,
-        )
-        return { status: 'subscribed' as const, participation }
-      } else {
-        const position = await this.repo.nextWaitlistPosition(eventId, exec)
-        participation = await this.repo.insert(
-          { eventId, userId, status: 'waitlist', waitlistPosition: position },
-          exec,
-        )
-        return { status: 'waitlist' as const, position, participation }
+      try {
+        if (hasCapacity) {
+          participation = await this.repo.insert(
+            { eventId, userId, status: 'subscribed', waitlistPosition: null },
+            exec,
+          )
+          return { status: 'subscribed' as const, participation }
+        } else {
+          const position = await this.repo.nextWaitlistPosition(eventId, exec)
+          participation = await this.repo.insert(
+            { eventId, userId, status: 'waitlist', waitlistPosition: position },
+            exec,
+          )
+          return { status: 'waitlist' as const, position, participation }
+        }
+      } catch (err: unknown) {
+        // Fix G2-03: unique_violation do Postgres — race condition absorvida como erro de domínio
+        if (typeof err === 'object' && err !== null && (err as { code?: string }).code === '23505') {
+          throw new EventsError('ALREADY_SUBSCRIBED')
+        }
+        throw err
       }
     })
   }
@@ -187,10 +209,19 @@ export class ParticipantsService {
   // Confirm
   // ─────────────────────────────────────────────────────────────
   async confirm(userId: string, eventId: string): Promise<ParticipantRow> {
-    const part = await this.repo.findByEventAndUser(eventId, userId)
+    const [part, ev] = await Promise.all([
+      this.repo.findByEventAndUser(eventId, userId),
+      this.eventsRepo.findById(eventId),
+    ])
     if (!part) throw new EventsError('PARTICIPATION_NOT_FOUND')
+    if (!ev) throw new EventsError('EVENT_NOT_FOUND')
     if (part.status === 'confirmed') return part
     if (part.status !== 'subscribed') throw new EventsError('INVALID_PARTICIPATION_STATE')
+
+    // Fix NA3-04: revalida bloqueio host↔participante no momento do confirm
+    const isBlocked = await this.friendsRepo.isBlockedEitherDirection(userId, ev.hostUserId)
+    if (isBlocked) throw new EventsError('NOT_INVITED')
+
     return this.repo.setStatus(part.id, 'confirmed')
   }
 
@@ -217,6 +248,26 @@ export class ParticipantsService {
     }
     const status: ParticipantStatus | undefined = query.status
     const list = await this.repo.listByEvent(eventId, status, query.limit)
+
+    // Filtra participantes privados para viewers que não são host
+    if (ev.hostUserId !== viewerId) {
+      for (const p of list) {
+        // Se o participante é privado, o viewer não é amigo dele, e não é o próprio participante
+        // anonimiza os dados
+        if (p.user) {
+          const isPrivate = p.user.privacy === 'private'
+          const isOwnUser = p.user.id === viewerId
+          if (isPrivate && !isOwnUser) {
+            const isFriend = await this.friendsRepo.areFriends(viewerId, p.user.id)
+            if (!isFriend) {
+              p.user.displayName = 'Usuário'
+              p.user.avatarUrl = null
+            }
+          }
+        }
+      }
+    }
+
     return { participants: list, nextCursor: null }
   }
 }

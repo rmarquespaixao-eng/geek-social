@@ -46,6 +46,9 @@ export const users = pgTable('users', {
   pronouns: varchar('pronouns', { length: 50 }),
   location: varchar('location', { length: 120 }),
   website: varchar('website', { length: 255 }),
+  // Incrementado em deleteAccount/changePassword/setInitialPassword para invalidar JWTs já emitidos.
+  // O middleware authenticate compara contra a claim do token.
+  tokenVersion: integer('token_version').notNull().default(0),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 })
@@ -54,9 +57,13 @@ export const refreshTokens = pgTable('refresh_tokens', {
   id: uuid('id').defaultRandom().primaryKey(),
   userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   tokenHash: varchar('token_hash').notNull(),
+  familyId: uuid('family_id').defaultRandom().notNull(),
+  used: boolean('used').notNull().default(false),
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-})
+}, (table) => ({
+  familyIdIdx: index('refresh_tokens_family_id_idx').on(table.familyId),
+}))
 
 export const passwordResetTokens = pgTable('password_reset_tokens', {
   id: uuid('id').defaultRandom().primaryKey(),
@@ -64,6 +71,15 @@ export const passwordResetTokens = pgTable('password_reset_tokens', {
   tokenHash: varchar('token_hash').notNull(),
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
   usedAt: timestamp('used_at', { withTimezone: true }),
+})
+
+export const emailVerificationTokens = pgTable('email_verification_tokens', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  tokenHash: varchar('token_hash').notNull(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  usedAt: timestamp('used_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 })
 
 export const fieldDefinitions = pgTable('field_definitions', {
@@ -258,6 +274,7 @@ export const conversations = pgTable('conversations', {
   coverUrl: varchar('cover_url'),
   createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
   isTemporary: boolean('is_temporary').notNull().default(false),
+  senderKeyId: uuid('sender_key_id').notNull().default(sql`gen_random_uuid()`),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 })
@@ -302,6 +319,7 @@ export const messages = pgTable('messages', {
     endedAt: string
     initiatorId: string
   }>(),
+  isEncrypted: boolean('is_encrypted').notNull().default(false),
   isTemporary: boolean('is_temporary').notNull().default(false),
   temporaryEvent: jsonb('temporary_event').$type<{ enabled: boolean; byUserId: string }>(),
   hiddenForUserIds: jsonb('hidden_for_user_ids').$type<string[]>().notNull().default([]),
@@ -532,7 +550,7 @@ export const eventInvites = pgTable('event_invites', {
 }))
 
 // ── Comunidades ───────────────────────────────────────────────────
-export const communityVisibilityEnum = pgEnum('community_visibility', ['public', 'private', 'restricted'])
+export const communityVisibilityEnum = pgEnum('community_visibility', ['public', 'restricted'])
 export const communityMemberRoleEnum = pgEnum('community_member_role', ['owner', 'moderator', 'member'])
 export const communityMemberStatusEnum = pgEnum('community_member_status', ['pending', 'active', 'banned'])
 export const communityCategoryEnum = pgEnum('community_category', communityCategories)

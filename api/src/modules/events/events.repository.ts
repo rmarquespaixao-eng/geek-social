@@ -83,7 +83,8 @@ function decodeCursor(token: string | undefined): EventCursor | null {
     const raw = Buffer.from(token, 'base64url').toString('utf-8')
     const parsed = JSON.parse(raw) as { s: string; i: string }
     return { startsAt: new Date(parsed.s), id: parsed.i }
-  } catch {
+  } catch (err) {
+    console.error({ err }, 'events: invalid cursor token')
     return null
   }
 }
@@ -205,6 +206,9 @@ export class EventsRepository {
       .where(eq(users.id, ev.hostUserId))
       .limit(1)
 
+    if (!hostRow) {
+      console.warn({ eventId: id, hostUserId: ev.hostUserId }, 'events: host user not found — orphaned FK')
+    }
     return {
       ...ev,
       address,
@@ -217,7 +221,18 @@ export class EventsRepository {
     const exec = tx ?? this.db
     const [row] = await exec
       .update(events)
-      .set({ ...data, updatedAt: new Date() })
+      .set({
+        ...(data.name !== undefined && { name: data.name }),
+        ...(data.description !== undefined && { description: data.description }),
+        ...(data.coverUrl !== undefined && { coverUrl: data.coverUrl }),
+        ...(data.startsAt !== undefined && { startsAt: data.startsAt }),
+        ...(data.durationMinutes !== undefined && { durationMinutes: data.durationMinutes }),
+        ...(data.endsAt !== undefined && { endsAt: data.endsAt }),
+        ...(data.type !== undefined && { type: data.type }),
+        ...(data.visibility !== undefined && { visibility: data.visibility }),
+        ...(data.capacity !== undefined && { capacity: data.capacity }),
+        updatedAt: new Date(),
+      })
       .where(eq(events.id, id))
       .returning()
     return row as EventRow

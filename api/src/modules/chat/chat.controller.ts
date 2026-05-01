@@ -328,8 +328,8 @@ export class ChatController {
   async removeMember(req: FastifyRequest<{ Params: { id: string; userId: string } }>, reply: FastifyReply) {
     const callerId = (req.user as any).userId as string
     try {
-      await this.conversationsService.removeMember(req.params.id, callerId, req.params.userId)
-      this.chatGateway.emitMemberRemoved(req.params.id, req.params.userId)
+      const newSenderKeyId = await this.conversationsService.removeMember(req.params.id, callerId, req.params.userId)
+      this.chatGateway.emitMemberRemoved(req.params.id, req.params.userId, newSenderKeyId)
       return reply.status(204).send()
     } catch (e) { return handleChatError(e, reply) }
   }
@@ -355,7 +355,10 @@ export class ChatController {
   async leaveConversation(req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) {
     const userId = (req.user as any).userId as string
     try {
-      await this.conversationsService.leaveConversation(req.params.id, userId)
+      const result = await this.conversationsService.leaveConversation(req.params.id, userId)
+      if (!('deleted' in result)) {
+        this.chatGateway.emitMemberLeft(req.params.id, userId, result.senderKeyId)
+      }
       return reply.status(204).send()
     } catch (e) { return handleChatError(e, reply) }
   }

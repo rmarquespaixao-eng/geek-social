@@ -105,20 +105,15 @@ export class MembersController {
 
       const { role, status, limit, cursor } = request.query as { role?: 'owner' | 'moderator' | 'member'; status?: 'pending' | 'active' | 'banned'; limit?: number; cursor?: string }
 
-      let viewerCanSeeSensitive = false
+      let viewerMembership: Awaited<ReturnType<typeof this.service.getMembership>> = null
       if (viewerId) {
-        const viewerMembership = await this.service.getMembership(community.id, viewerId)
-        viewerCanSeeSensitive = viewerMembership?.role === 'owner' || viewerMembership?.role === 'moderator'
+        viewerMembership = await this.service.getMembership(community.id, viewerId)
       }
-
-      const requestedStatus = status
-      const effectiveStatus = (requestedStatus === 'banned' || requestedStatus === 'pending')
-        ? (viewerCanSeeSensitive ? requestedStatus : undefined)
-        : requestedStatus
 
       const { members, nextCursor } = await this.service.listMembers(
         request.params.id,
-        { role, status: effectiveStatus, limit: limit ?? 50, cursor },
+        { role, status, limit: limit ?? 50, cursor },
+        viewerMembership,
       )
       return reply.send({ members: members.map(serializeMemberWithUser), nextCursor })
     } catch (e) {

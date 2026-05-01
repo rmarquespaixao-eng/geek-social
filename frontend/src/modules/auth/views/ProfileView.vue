@@ -354,22 +354,32 @@
 
           <!-- Aba Amigos -->
           <div v-else-if="activeTab === 'friends'">
-            <div v-if="profileFriendsLoading" class="text-center py-8 text-(--color-text-muted) text-sm">
-              Carregando amigos...
+            <!-- Skeleton -->
+            <div v-if="profileFriendsLoading" class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3">
+              <div
+                v-for="i in 6"
+                :key="i"
+                class="flex flex-col items-center gap-2 p-3 rounded-xl bg-[#1e2038] animate-pulse"
+              >
+                <div class="h-14 w-14 rounded-full bg-[#252640]" />
+                <div class="h-2.5 w-3/4 rounded bg-[#252640]" />
+              </div>
             </div>
-            <div v-else-if="profileFriends.length === 0" class="text-center py-12 text-(--color-text-muted) text-sm">
-              Nenhum amigo para exibir.
+            <!-- Empty state -->
+            <div
+              v-else-if="profileFriends.length === 0"
+              class="flex flex-col items-center justify-center py-16 text-center"
+            >
+              <Users class="mb-3 h-10 w-10 text-[#475569]" />
+              <p class="text-sm font-medium text-[#94a3b8]">Nenhum amigo para exibir.</p>
             </div>
-            <div v-else class="grid grid-cols-2 sm:grid-cols-3 gap-3">
-              <RouterLink
+            <!-- Grid de tiles -->
+            <div v-else class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3">
+              <ProfileFriendTile
                 v-for="friend in profileFriends"
                 :key="friend.id"
-                :to="`/profile/${friend.id}`"
-                class="flex flex-col items-center gap-2 p-4 rounded-xl bg-(--color-bg-elevated) border border-transparent hover:border-(--color-accent-amber)/30 transition-all"
-              >
-                <AppAvatar :src="friend.avatarUrl" :name="friend.displayName" :size="56" />
-                <p class="text-xs font-medium text-(--color-text-primary) text-center truncate w-full">{{ friend.displayName }}</p>
-              </RouterLink>
+                :friend="friend"
+              />
             </div>
           </div>
         </div>
@@ -492,6 +502,7 @@ import AppButton from '@/shared/ui/AppButton.vue'
 import AppModal from '@/shared/ui/AppModal.vue'
 import { useProfile } from '../composables/useProfile'
 import SendRequestButton from '@/modules/friends/components/SendRequestButton.vue'
+import ProfileFriendTile from '@/modules/friends/components/ProfileFriendTile.vue'
 import { useFriends } from '@/modules/friends/composables/useFriends'
 import { useFeed } from '@/modules/feed/composables/useFeed'
 import { useChat } from '@/modules/chat/composables/useChat'

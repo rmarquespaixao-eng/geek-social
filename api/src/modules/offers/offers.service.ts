@@ -1,3 +1,6 @@
+import { sql, eq } from 'drizzle-orm'
+import { collections } from '../../shared/infra/database/schema.js'
+import type { DatabaseClient } from '../../shared/infra/database/postgres.client.js'
 import type { OffersRepository, OfferRow, OfferWithDetails } from './offers.repository.js'
 import type { ItemsRepository } from '../items/items.repository.js'
 import type { CollectionsRepository } from '../collections/collections.repository.js'
@@ -15,6 +18,10 @@ export class OffersError extends Error {
   }
 }
 
+function toExec(tx: unknown): DatabaseClient {
+  return tx as unknown as DatabaseClient
+}
+
 export type TransferResult = {
   offer: OfferRow
   movedItems: { itemId: string; toCollectionId: string }[]
@@ -22,6 +29,7 @@ export type TransferResult = {
 
 export class OffersService {
   constructor(
+    private readonly db: DatabaseClient,
     private readonly repo: OffersRepository,
     private readonly itemsRepo: ItemsRepository,
     private readonly collectionsRepo: CollectionsRepository,
@@ -62,7 +70,9 @@ export class OffersService {
     entityId?: string
   }): void {
     if (!this.notificationsService) return
-    this.notificationsService.notify(data).catch(() => {})
+    this.notificationsService.notify(data).catch((err: unknown) => {
+      console.error({ err }, 'offers: notification failed')
+    })
   }
 
   async create(offererId: string, input: CreateOfferInput): Promise<OfferRow> {
@@ -81,71 +91,63 @@ export class OffersService {
     // Checa visibilidade da coleção do item
     if (itemCollection.visibility === 'private') throw new OffersError('ITEM_NOT_AVAILABLE')
     if (itemCollection.visibility === 'friends_only') {
+      const blocked = await this.friendsRepo.isBlockedEitherDirection(listingRecord.ownerId, offererId)
+      if (blocked) throw new OffersError('ITEM_NOT_AVAILABLE')
       const isFriend = await this.friendsRepo.areFriends(listingRecord.ownerId, offererId)
       if (!isFriend) throw new OffersError('ITEM_NOT_AVAILABLE')
     }
-
-    // Bloqueia múltiplas ofertas pendentes do mesmo usuário no mesmo item
-    const existingPending = await this.repo.findPendingByItemAndOfferer(listingRecord.itemId, offererId)
-    if (existingPending) throw new OffersError('DUPLICATE_PENDING_OFFER')
 
     if (input.type === 'buy') {
       if (!(listingRecord.availability === 'sale' || listingRecord.availability === 'both')) {
         throw new OffersError('ITEM_NOT_FOR_SALE')
       }
-      const created = await this.repo.create({
-        type: 'buy',
+    } else {
+      if (!(listingRecord.availability === 'trade' || listingRecord.availability === 'both')) {
+        throw new OffersError('ITEM_NOT_FOR_TRADE')
+      }
+    }
+
+    // Pre-validate trade item before entering the transaction
+    let offeredItemId: string | null = null
+    if (input.type === 'trade') {
+      const offered = await this.itemsRepo.findById(input.offeredItemId)
+      if (!offered) throw new OffersError('OFFERED_ITEM_NOT_FOUND')
+      const offeredCollection = await this.collectionsRepo.findById(offered.collectionId)
+      if (!offeredCollection || offeredCollection.userId !== offererId) {
+        throw new OffersError('OFFERED_ITEM_NOT_OWNED')
+      }
+      if (offeredCollection.visibility === 'private') {
+        throw new OffersError('OFFERED_COLLECTION_PRIVATE')
+      }
+      if (offeredCollection.visibility === 'friends_only') {
+        const isFriend = await this.friendsRepo.areFriends(listingRecord.ownerId, offererId)
+        if (!isFriend) throw new OffersError('OFFERED_COLLECTION_REQUIRES_FRIENDSHIP')
+      }
+      offeredItemId = offered.id
+    }
+
+    // Transação com FOR UPDATE para evitar race condition na criação de oferta duplicada
+    const created = await this.db.transaction(async (tx) => {
+      const exec = toExec(tx)
+      const existingPending = await this.repo.findPendingByItemAndOffererForUpdate(listingRecord.itemId, offererId, exec)
+      if (existingPending) throw new OffersError('DUPLICATE_PENDING_OFFER')
+
+      return this.repo.create({
+        type: input.type,
         itemId: listingRecord.itemId,
         listingId: listingRecord.id,
         ownerId: listingRecord.ownerId,
         offererId,
-        offeredItemId: null,
-        offeredPrice: String(input.offeredPrice),
+        offeredItemId,
+        offeredPrice: input.type === 'buy' ? String(input.offeredPrice) : null,
         message: input.message?.trim() || null,
-      })
-      await this.proposalsRepo?.create({
-        offerId: created.id,
-        proposerId: offererId,
-        offeredPrice: created.offeredPrice,
-        offeredItemId: null,
-        message: created.message,
-      })
-      this.notifySafe({ recipientId: created.ownerId, actorId: offererId, type: 'offer_received', entityId: created.id })
-      return created
-    }
-
-    // type === 'trade'
-    if (!(listingRecord.availability === 'trade' || listingRecord.availability === 'both')) {
-      throw new OffersError('ITEM_NOT_FOR_TRADE')
-    }
-    const offered = await this.itemsRepo.findById(input.offeredItemId)
-    if (!offered) throw new OffersError('OFFERED_ITEM_NOT_FOUND')
-    const offeredCollection = await this.collectionsRepo.findById(offered.collectionId)
-    if (!offeredCollection || offeredCollection.userId !== offererId) {
-      throw new OffersError('OFFERED_ITEM_NOT_OWNED')
-    }
-    if (offeredCollection.visibility === 'private') {
-      throw new OffersError('OFFERED_COLLECTION_PRIVATE')
-    }
-    if (offeredCollection.visibility === 'friends_only') {
-      const isFriend = await this.friendsRepo.areFriends(listingRecord.ownerId, offererId)
-      if (!isFriend) throw new OffersError('OFFERED_COLLECTION_REQUIRES_FRIENDSHIP')
-    }
-
-    const created = await this.repo.create({
-      type: 'trade',
-      itemId: listingRecord.itemId,
-      listingId: listingRecord.id,
-      ownerId: listingRecord.ownerId,
-      offererId,
-      offeredItemId: offered.id,
-      offeredPrice: null,
-      message: input.message?.trim() || null,
+      }, exec)
     })
+
     await this.proposalsRepo?.create({
       offerId: created.id,
       proposerId: offererId,
-      offeredPrice: null,
+      offeredPrice: created.offeredPrice,
       offeredItemId: created.offeredItemId,
       message: created.message,
     })
@@ -171,6 +173,8 @@ export class OffersService {
         offeredItemId: pending.offeredItemId,
         message: pending.message,
       })
+    } else {
+      if (offer.ownerId !== userId) throw new OffersError('NOT_AUTHORIZED')
     }
 
     const updated = await this.repo.setStatus(offerId, 'accepted')
@@ -275,17 +279,26 @@ export class OffersService {
   }
 
   async cancel(userId: string, offerId: string): Promise<OfferRow> {
-    const offer = await this.repo.findById(offerId)
-    if (!offer) throw new OffersError('OFFER_NOT_FOUND')
-    if (offer.offererId !== userId && offer.ownerId !== userId) throw new OffersError('NOT_AUTHORIZED')
-    if (offer.status !== 'pending' && offer.status !== 'accepted') throw new OffersError('INVALID_TRANSITION')
-    const wasAccepted = offer.status === 'accepted'
-    const updated = await this.repo.setStatus(offerId, 'cancelled')
-    if (wasAccepted) {
-      const otherParty = userId === offer.ownerId ? offer.offererId : offer.ownerId
-      this.notifySafe({ recipientId: otherParty, actorId: userId, type: 'offer_cancelled', entityId: offer.id })
-    }
-    return updated
+    // Pré-check sem lock (rápido, evita abrir tx desnecessariamente)
+    const pre = await this.repo.findById(offerId)
+    if (!pre) throw new OffersError('OFFER_NOT_FOUND')
+    if (pre.offererId !== userId && pre.ownerId !== userId) throw new OffersError('NOT_AUTHORIZED')
+
+    return this.db.transaction(async (tx) => {
+      // SELECT FOR UPDATE garante exclusividade contra corrida com confirm
+      const cancelRes = await tx.execute(
+        sql`SELECT id, status, owner_id, offerer_id FROM item_offers WHERE id = ${offerId} FOR UPDATE`,
+      )
+      const [locked] = (cancelRes as { rows: Record<string, unknown>[] }).rows
+      if (!locked) throw new OffersError('OFFER_NOT_FOUND')
+      if (locked.status !== 'pending' && locked.status !== 'accepted') throw new OffersError('INVALID_TRANSITION')
+
+      const exec = toExec(tx)
+      const updated = await this.repo.setStatus(offerId, 'cancelled', exec)
+      const otherParty = userId === pre.ownerId ? pre.offererId : pre.ownerId
+      this.notifySafe({ recipientId: otherParty, actorId: userId, type: 'offer_cancelled', entityId: pre.id })
+      return updated
+    })
   }
 
   async expireOldAccepted(olderThanDays: number): Promise<{ expired: number }> {
@@ -299,25 +312,35 @@ export class OffersService {
   }
 
   async confirm(userId: string, offerId: string): Promise<TransferResult> {
-    const offer = await this.repo.findById(offerId)
-    if (!offer) throw new OffersError('OFFER_NOT_FOUND')
-    if (offer.status !== 'accepted') throw new OffersError('INVALID_TRANSITION')
-    if (userId !== offer.ownerId && userId !== offer.offererId) throw new OffersError('NOT_AUTHORIZED')
+    // Pré-check sem lock (rápido, evita abrir tx desnecessariamente)
+    const pre = await this.repo.findById(offerId)
+    if (!pre) throw new OffersError('OFFER_NOT_FOUND')
+    if (pre.status !== 'accepted') throw new OffersError('INVALID_TRANSITION')
+    if (userId !== pre.ownerId && userId !== pre.offererId) throw new OffersError('NOT_AUTHORIZED')
 
     // Caso especial: ambos já confirmaram mas a transferência falhou (ex: faltava coleção destino).
     // Permite re-tentar executeTransfer sem disparar ALREADY_CONFIRMED.
-    if (offer.offererConfirmedAt && offer.ownerConfirmedAt) {
-      return this.executeTransfer(offer)
+    if (pre.offererConfirmedAt && pre.ownerConfirmedAt) {
+      return this.executeTransfer(pre)
     }
 
-    let updated = offer
-    if (userId === offer.offererId) {
-      if (offer.offererConfirmedAt) throw new OffersError('ALREADY_CONFIRMED')
-      updated = await this.repo.setOffererConfirmed(offerId)
-    } else {
-      if (offer.ownerConfirmedAt) throw new OffersError('ALREADY_CONFIRMED')
-      updated = await this.repo.setOwnerConfirmed(offerId)
-    }
+    const updated = await this.db.transaction(async (tx) => {
+      // SELECT FOR UPDATE garante exclusividade contra corrida com cancel
+      const confirmRes = await tx.execute(
+        sql`SELECT id, status, offerer_confirmed_at, owner_confirmed_at FROM item_offers WHERE id = ${offerId} FOR UPDATE`,
+      )
+      const [locked] = (confirmRes as { rows: Record<string, unknown>[] }).rows
+      if (!locked) throw new OffersError('OFFER_NOT_FOUND')
+      if (locked.status !== 'accepted') throw new OffersError('INVALID_TRANSITION')
+
+      if (userId === pre.offererId) {
+        if (locked.offerer_confirmed_at) throw new OffersError('ALREADY_CONFIRMED')
+        return this.repo.setOffererConfirmed(offerId)
+      } else {
+        if (locked.owner_confirmed_at) throw new OffersError('ALREADY_CONFIRMED')
+        return this.repo.setOwnerConfirmed(offerId)
+      }
+    })
 
     if (!updated.offererConfirmedAt || !updated.ownerConfirmedAt) {
       return { offer: updated, movedItems: [] }
@@ -346,23 +369,54 @@ export class OffersService {
       offered = { id: offeredItem.id, collectionId: offeredItem.collectionId, type: offeredColl.type }
     }
 
+    const offererDest = await this.ensureDestinationCollection(offer.offererId, itemCollection.type)
+    const ownerDest = offer.type === 'trade' && offered
+      ? await this.ensureDestinationCollection(offer.ownerId, offered.type)
+      : null
+
     const moved: { itemId: string; toCollectionId: string }[] = []
 
-    const offererDest = await this.ensureDestinationCollection(offer.offererId, itemCollection.type)
-    await this.repo.moveItemToCollection(offer.itemId, offererDest.id)
-    moved.push({ itemId: offer.itemId, toCollectionId: offererDest.id })
+    const completed = await this.db.transaction(async (tx) => {
+      const exec = toExec(tx)
 
-    if (offer.type === 'trade' && offered) {
-      const ownerDest = await this.ensureDestinationCollection(offer.ownerId, offered.type)
-      await this.repo.moveItemToCollection(offered.id, ownerDest.id)
-      moved.push({ itemId: offered.id, toCollectionId: ownerDest.id })
-    }
+      // SELECT FOR UPDATE no item principal — impede double-spend em confirmações concorrentes
+      const itemRes = await tx.execute(
+        sql`SELECT id, collection_id FROM items WHERE id = ${offer.itemId} FOR UPDATE`,
+      )
+      const [lockedItem] = (itemRes as { rows: Record<string, unknown>[] }).rows
+      if (!lockedItem) throw new OffersError('ITEM_GONE')
+      // Re-valida ownership após obter o lock
+      const ownerColRows = await tx.select().from(collections).where(eq(collections.id, lockedItem.collection_id as string)).limit(1)
+      if (!ownerColRows[0] || ownerColRows[0].userId !== offer.ownerId) {
+        throw new OffersError('ITEM_ALREADY_MOVED')
+      }
 
-    const completed = await this.repo.setStatus(offer.id, 'completed')
+      // Para trades, também bloqueia o item ofertado
+      if (offer.type === 'trade' && offered) {
+        const offeredRes = await tx.execute(
+          sql`SELECT id, collection_id FROM items WHERE id = ${offered.id} FOR UPDATE`,
+        )
+        const [lockedOffered] = (offeredRes as { rows: Record<string, unknown>[] }).rows
+        if (!lockedOffered) throw new OffersError('OFFERED_ITEM_GONE')
+        const offeredColRows = await tx.select().from(collections).where(eq(collections.id, lockedOffered.collection_id as string)).limit(1)
+        if (!offeredColRows[0] || offeredColRows[0].userId !== offer.offererId) {
+          throw new OffersError('OFFERED_ITEM_GONE')
+        }
+      }
 
-    // Close the listing associated with this offer so it no longer appears in Vitrine
+      await this.repo.moveItemToCollection(offer.itemId, offererDest.id, exec)
+      moved.push({ itemId: offer.itemId, toCollectionId: offererDest.id })
+
+      if (offer.type === 'trade' && offered && ownerDest) {
+        await this.repo.moveItemToCollection(offered.id, ownerDest.id, exec)
+        moved.push({ itemId: offered.id, toCollectionId: ownerDest.id })
+      }
+
+      return this.repo.setStatus(offer.id, 'completed', exec)
+    })
+
     if (offer.listingId && this.listingsService) {
-      this.listingsService.close(null, offer.listingId).catch(() => {})
+      this.listingsService.close(offer.ownerId, offer.listingId).catch(() => {})
     }
 
     this.notifySafe({ recipientId: offer.ownerId,   actorId: offer.offererId, type: 'offer_completed', entityId: offer.id })

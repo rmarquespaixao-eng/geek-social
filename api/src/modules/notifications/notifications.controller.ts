@@ -4,10 +4,13 @@ import type { NotificationsService } from './notifications.service.js'
 export class NotificationsController {
   constructor(private readonly service: NotificationsService) {}
 
-  async list(req: FastifyRequest, reply: FastifyReply) {
+  async list(req: FastifyRequest<{ Querystring: { cursor?: string; limit?: number } }>, reply: FastifyReply) {
     const userId = (req.user as { userId: string }).userId
-    const items = await this.service.list(userId)
-    return reply.send({ notifications: items })
+    const result = await this.service.list(userId, {
+      cursor: req.query.cursor,
+      limit: req.query.limit,
+    })
+    return reply.send(result)
   }
 
   async countUnread(req: FastifyRequest, reply: FastifyReply) {

@@ -269,9 +269,51 @@
       "breakpoints": true
     },
     {
-      "idx": 44,
+      "idx": 38,
       "version": "7",
       "when": 1777452000000,
+      "tag": "0039_email_verification_tokens",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1777453000000,
+      "tag": "0043_users_token_version",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1777453100000,
+      "tag": "0038_drop_private_visibility",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1777453200000,
+      "tag": "0040_event_participants_unique",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1777453300000,
+      "tag": "0041_listings_item_active_unique",
+      "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1777453400000,
+      "tag": "0042_refresh_token_family",
+      "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1746403200000,
       "tag": "0044_e2e_encryption",
       "breakpoints": true
     },
@@ -280,6 +322,13 @@
       "version": "7",
       "when": 1777454000000,
       "tag": "0045_signal_protocol",
+      "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1746490000000,
+      "tag": "0046_conv_sender_key_id",
       "breakpoints": true
     }
   ]

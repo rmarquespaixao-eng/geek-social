@@ -3,6 +3,11 @@ import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod'
 import type { NotificationsService } from './notifications.service.js'
 import { NotificationsController } from './notifications.controller.js'
 import { authenticate } from '../../shared/middleware/authenticate.js'
+import { createUserRateLimiter } from '../../shared/middleware/rate-limit.js'
+
+// deleteAll é irreversível e pode limpar histórico de notificações via JWT roubado (NEW-25).
+const deleteAllRateLimiter = createUserRateLimiter(5, 60 * 60 * 1000)
+const deleteOneRateLimiter = createUserRateLimiter(20, 60 * 60 * 1000)
 
 const noContent = z.void()
 const idParam = z.object({ id: z.string().uuid() })
@@ -71,11 +76,11 @@ export const notificationsRoutes: FastifyPluginAsyncZod<{ notificationsService: 
       operationId: 'notifications_delete_all',
       tags: ['Notifications'],
       summary: 'Apagar todas as notificações',
-      description: 'DELETE FROM notifications WHERE recipient_id=?. Limpa caixa do user.',
+      description: 'DELETE FROM notifications WHERE recipient_id=?. Limpa caixa do user. Rate-limit: 5/hora por userId.',
       security: [{ accessToken: [] }],
       response: { 204: noContent },
     },
-    preHandler: [authenticate],
+    preHandler: [authenticate, deleteAllRateLimiter],
     handler: ctrl.deleteAll.bind(ctrl),
   })
 
@@ -89,7 +94,7 @@ export const notificationsRoutes: FastifyPluginAsyncZod<{ notificationsService: 
       params: idParam,
       response: { 204: noContent },
     },
-    preHandler: [authenticate],
+    preHandler: [authenticate, deleteOneRateLimiter],
     handler: ctrl.deleteOne.bind(ctrl),
   })
 }

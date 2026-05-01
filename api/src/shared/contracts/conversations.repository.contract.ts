@@ -14,6 +14,7 @@ export type Conversation = {
   coverUrl: string | null
   createdBy: string | null
   isTemporary: boolean
+  senderKeyId: string
   createdAt: Date
   updatedAt: Date
 }
@@ -84,4 +85,5 @@ export interface IConversationsRepository {
   setTemporary(conversationId: string, value: boolean): Promise<void>
   findTemporaryDms(): Promise<Conversation[]>
   findMembersWithReceiptsFlag(conversationId: string): Promise<Array<{ userId: string; lastReadAt: Date | null; showReadReceipts: boolean }>>
+  rotateSenderKey(conversationId: string): Promise<string>
 }

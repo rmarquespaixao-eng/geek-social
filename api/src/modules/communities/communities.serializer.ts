@@ -10,7 +10,7 @@ export type ApiCommunitySummary = {
   category: string
   iconUrl: string
   coverUrl: string
-  visibility: 'public' | 'private' | 'restricted'
+  visibility: 'public' | 'restricted'
   ownerId: string | null
   memberCount: number
   topicCount: number

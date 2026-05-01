@@ -1,7 +1,7 @@
 import type { FastifyRequest, FastifyReply } from 'fastify'
 import type { ListingsService } from './listings.service.js'
 import { ListingsError } from './listings.service.js'
-import { createListingSchema, updateListingSchema } from './listings.schema.js'
+import { createListingSchema, updateListingSchema, listMarketplaceQuerySchema } from './listings.schema.js'
 import type { AccessTokenClaims } from '../auth/auth.service.js'
 
 const STATUS_BY_CODE: Record<string, number> = {
@@ -50,14 +50,15 @@ export class ListingsController {
     reply: FastifyReply,
   ) {
     const { userId } = request.user as AccessTokenClaims
-    const q = request.query
-    const type = (q.type === 'sale' || q.type === 'trade' || q.type === 'both') ? q.type : undefined
+    const parsed = listMarketplaceQuerySchema.safeParse(request.query)
+    if (!parsed.success) return reply.status(400).send({ error: 'INVALID_INPUT', details: parsed.error.flatten() })
+    const q = parsed.data
     return reply.send(await this.service.listMarketplace(userId, {
-      type,
+      type: q.type as 'sale' | 'trade' | 'both' | undefined,
       collectionType: q.collection_type,
-      minPrice: q.min_price ? Number(q.min_price) : undefined,
-      maxPrice: q.max_price ? Number(q.max_price) : undefined,
-      limit: q.limit ? Number(q.limit) : 60,
+      minPrice: q.min_price,
+      maxPrice: q.max_price,
+      limit: q.limit ?? 60,
     }))
   }
 

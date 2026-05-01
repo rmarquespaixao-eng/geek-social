@@ -32,9 +32,9 @@ export class ReactionsController {
   }
 
   async getReactions(request: FastifyRequest<{ Params: { postId: string } }>, reply: FastifyReply) {
-    const viewerId = (request.user as AccessTokenClaims | undefined)?.userId ?? null
+    const { userId } = request.user as AccessTokenClaims
     try {
-      const result = await this.service.getReactions(request.params.postId, viewerId)
+      const result = await this.service.getReactions(request.params.postId, userId)
       return reply.send(result)
     } catch (error) { return this.handleError(error, reply) }
   }

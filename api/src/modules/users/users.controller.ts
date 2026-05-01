@@ -71,8 +71,19 @@ export class UsersController {
     const data = await request.file()
     if (!data) return reply.status(400).send({ error: 'Nenhum arquivo enviado' })
 
+    const MAX_SIZE = 5 * 1024 * 1024
+    const ALLOWED_MIMES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp']
+
+    if (!ALLOWED_MIMES.includes(data.mimetype)) {
+      return reply.status(400).send({ error: 'Tipo de arquivo não permitido. Use JPEG, PNG, GIF ou WebP' })
+    }
+
     const buffer = await data.toBuffer()
-    const result = await this.usersService.uploadAvatar(userId, buffer, data.mimetype)
+    if (buffer.length > MAX_SIZE) {
+      return reply.status(413).send({ error: 'Arquivo muito grande. Máximo 5MB' })
+    }
+
+    const result = await this.usersService.uploadAvatar(userId, buffer)
     return reply.send({ avatarUrl: result.avatarUrl })
   }
 
@@ -87,8 +98,19 @@ export class UsersController {
     const data = await request.file()
     if (!data) return reply.status(400).send({ error: 'Nenhum arquivo enviado' })
 
+    const MAX_SIZE = 5 * 1024 * 1024
+    const ALLOWED_MIMES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp']
+
+    if (!ALLOWED_MIMES.includes(data.mimetype)) {
+      return reply.status(400).send({ error: 'Tipo de arquivo não permitido. Use JPEG, PNG, GIF ou WebP' })
+    }
+
     const buffer = await data.toBuffer()
-    const result = await this.usersService.uploadCover(userId, buffer, data.mimetype)
+    if (buffer.length > MAX_SIZE) {
+      return reply.status(413).send({ error: 'Arquivo muito grande. Máximo 5MB' })
+    }
+
+    const result = await this.usersService.uploadCover(userId, buffer)
     return reply.send({ coverUrl: result.coverUrl })
   }
 
@@ -103,8 +125,19 @@ export class UsersController {
     const data = await request.file()
     if (!data) return reply.status(400).send({ error: 'Nenhum arquivo enviado' })
 
+    const MAX_SIZE = 5 * 1024 * 1024
+    const ALLOWED_MIMES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp']
+
+    if (!ALLOWED_MIMES.includes(data.mimetype)) {
+      return reply.status(400).send({ error: 'Tipo de arquivo não permitido. Use JPEG, PNG, GIF ou WebP' })
+    }
+
     const buffer = await data.toBuffer()
-    const result = await this.usersService.uploadProfileBackground(userId, buffer, data.mimetype)
+    if (buffer.length > MAX_SIZE) {
+      return reply.status(413).send({ error: 'Arquivo muito grande. Máximo 5MB' })
+    }
+
+    const result = await this.usersService.uploadProfileBackground(userId, buffer)
     return reply.send({ profileBackgroundUrl: result.profileBackgroundUrl })
   }
 
@@ -130,10 +163,25 @@ export class UsersController {
     return reply.send({ profileBackgroundUrl: result.profileBackgroundUrl, profileBackgroundColor: result.profileBackgroundColor })
   }
 
-  async deleteAccount(request: FastifyRequest, reply: FastifyReply) {
+  async deleteAccount(request: FastifyRequest<{ Body: { password?: string } }>, reply: FastifyReply) {
     const { userId } = request.user as AccessTokenClaims
-    await this.usersService.deleteAccount(userId)
-    reply.clearCookie('refreshToken', { path: '/' })
-    return reply.status(204).send()
+    try {
+      await this.usersService.deleteAccount(userId, request.body?.password)
+      reply.clearCookie('refreshToken', { path: '/' })
+      return reply.status(204).send()
+    } catch (error) {
+      if (error instanceof UsersError) {
+        if (error.code === 'PASSWORD_REQUIRED') {
+          return reply.status(400).send({ error: 'PASSWORD_REQUIRED' })
+        }
+        if (error.code === 'INVALID_CREDENTIALS') {
+          return reply.status(401).send({ error: 'INVALID_CREDENTIALS' })
+        }
+        if (error.code === 'USER_NOT_FOUND') {
+          return reply.status(404).send({ error: 'USER_NOT_FOUND' })
+        }
+      }
+      throw error
+    }
   }
 }

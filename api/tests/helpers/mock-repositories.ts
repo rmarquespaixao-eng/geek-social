@@ -7,7 +7,6 @@ export function createMockUserRepository(): IUserRepository {
   return {
     findById: vi.fn(),
     findByEmail: vi.fn(),
-    findByKeycloakId: vi.fn(),
     findByGoogleId: vi.fn(),
     linkGoogle: vi.fn(),
     unlinkGoogle: vi.fn(),
@@ -17,11 +16,19 @@ export function createMockUserRepository(): IUserRepository {
     verifyEmail: vi.fn(),
     createRefreshToken: vi.fn(),
     findRefreshToken: vi.fn(),
+    markRefreshTokenAsUsed: vi.fn(),
+    revokeAllByFamilyId: vi.fn(),
     deleteRefreshToken: vi.fn(),
     deleteAllRefreshTokensByUserId: vi.fn(),
     createPasswordResetToken: vi.fn(),
     findPasswordResetToken: vi.fn(),
     markPasswordResetTokenAsUsed: vi.fn(),
+    createEmailVerificationToken: vi.fn(),
+    findEmailVerificationToken: vi.fn(),
+    markEmailVerificationTokenAsUsed: vi.fn(),
+    deleteEmailVerificationTokensByUserId: vi.fn(),
+    deleteUser: vi.fn(),
+    incrementTokenVersion: vi.fn(),
   }
 }
 
@@ -65,6 +72,9 @@ export function createMockUser(overrides = {}) {
     location: null,
     website: null,
     profileBackgroundUrl: null,
+    profileBackgroundColor: null,
+    coverColor: null,
+    tokenVersion: 0,
     createdAt: new Date('2026-01-01'),
     updatedAt: new Date('2026-01-01'),
     ...overrides,

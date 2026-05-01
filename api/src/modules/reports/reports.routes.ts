@@ -12,7 +12,7 @@ export const reportsRoutes: FastifyPluginAsyncZod<{ reportsService: ReportsServi
       operationId: 'reports_create',
       tags: ['Reports'],
       summary: 'Denunciar conteúdo',
-      description: 'Cria denúncia com targetType polimórfico (user/message/post/collection/conversation). Unique por (reporter, target_type, target_id) — denúncia duplicada retorna conflict.',
+      description: 'Cria denúncia com targetType polimórfico (user/message/post/collection/conversation/community_topic/community_comment). Unique por (reporter, target_type, target_id) — denúncia duplicada retorna conflict.',
       security: [{ accessToken: [] }],
       body: createReportSchema,
     },

@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm'
+import { eq, and } from 'drizzle-orm'
 import type { DatabaseClient } from '../../shared/infra/database/postgres.client.js'
 import { pushSubscriptions } from '../../shared/infra/database/schema.js'
 import type { IPushRepository, PushSubscription } from '../../shared/contracts/push.repository.contract.js'
@@ -11,7 +11,7 @@ export class PushRepository implements IPushRepository {
       .values({ userId, endpoint: data.endpoint, p256dh: data.p256dh, auth: data.auth })
       .onConflictDoUpdate({
         target: pushSubscriptions.endpoint,
-        set: { p256dh: data.p256dh, auth: data.auth },
+        set: { userId, p256dh: data.p256dh, auth: data.auth },
       })
       .returning()
     return this.map(row)
@@ -24,6 +24,10 @@ export class PushRepository implements IPushRepository {
 
   async delete(id: string): Promise<void> {
     await this.db.delete(pushSubscriptions).where(eq(pushSubscriptions.id, id))
+  }
+
+  async deleteForUser(id: string, userId: string): Promise<void> {
+    await this.db.delete(pushSubscriptions).where(and(eq(pushSubscriptions.id, id), eq(pushSubscriptions.userId, userId)))
   }
 
   private map(row: typeof pushSubscriptions.$inferSelect): PushSubscription {

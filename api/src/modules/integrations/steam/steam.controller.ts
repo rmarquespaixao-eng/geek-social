@@ -144,9 +144,13 @@ export class SteamController {
   }
 
   async getImportStatus(request: FastifyRequest<{ Params: { batchId: string } }>, reply: FastifyReply) {
+    const { userId } = request.user as AccessTokenClaims
     const { batchId } = request.params
     const finalized = await this.finalizationRepo.findByBatchId(batchId)
     if (finalized) {
+      if (finalized.userId !== userId) {
+        return reply.status(403).send({ error: 'FORBIDDEN' })
+      }
       return reply.send({
         batchId, total: finalized.total,
         completed: finalized.imported + finalized.updated,
@@ -159,8 +163,9 @@ export class SteamController {
     if (stats.totalImports === 0) {
       return reply.status(404).send({ error: 'BATCH_NOT_FOUND' })
     }
-    // Pipeline unificado: cada job já enriquece o item antes de marcar como
-    // completed. Não existe mais fase 'enriching' separada.
+    if (stats.userId && stats.userId !== userId) {
+      return reply.status(403).send({ error: 'FORBIDDEN' })
+    }
     const totalDone = stats.completedImports + stats.failedImports
     const stillImporting = totalDone < stats.totalImports
     return reply.send({

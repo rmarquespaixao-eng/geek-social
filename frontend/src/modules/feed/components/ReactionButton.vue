@@ -21,6 +21,10 @@ const props = defineProps<{
   userReaction: string | null
 }>()
 
+const emit = defineEmits<{
+  reactionChanged: [type: string | null]
+}>()
+
 const feed = useFeed()
 const showPicker = ref(false)
 const pending = ref(false)
@@ -49,6 +53,7 @@ async function select(type: ReactionType) {
 
   pending.value = true
   feed.updatePostReaction(props.postId, newType)
+  emit('reactionChanged', newType)
 
   try {
     if (isSame) {
@@ -58,6 +63,7 @@ async function select(type: ReactionType) {
     }
   } catch {
     feed.updatePostReaction(props.postId, prevReaction)
+    emit('reactionChanged', prevReaction)
   } finally {
     pending.value = false
   }

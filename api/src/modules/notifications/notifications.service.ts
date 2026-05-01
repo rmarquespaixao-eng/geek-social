@@ -40,8 +40,11 @@ export class NotificationsService {
     this.emitFn?.(data.userId, notification)
   }
 
-  async list(recipientId: string): Promise<Notification[]> {
-    return this.repo.findByRecipient(recipientId)
+  async list(
+    recipientId: string,
+    opts: { cursor?: string; limit?: number } = {},
+  ): Promise<{ notifications: Notification[]; nextCursor: string | null }> {
+    return this.repo.findByRecipient(recipientId, opts)
   }
 
   async countUnread(recipientId: string): Promise<number> {

@@ -4,7 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import CommunityForm from '../components/CommunityForm.vue'
 import { useCommunity } from '../composables/useCommunity'
 import { useCommunityActions } from '../composables/useCommunityActions'
-import type { CreateCommunityPayload } from '../types'
+import type { CreateCommunityPayload, UpdateCommunityPayload } from '../types'
 
 const route = useRoute()
 const router = useRouter()
@@ -16,7 +16,7 @@ const actions = useCommunityActions()
 // Guard: only owner may access this view. Router does not enforce role — we do it here.
 const isOwner = computed(() => viewerMembership.value?.role === 'owner')
 
-async function onSubmit(payload: CreateCommunityPayload, cover: File | null, icon: File | null) {
+async function onSubmit(payload: CreateCommunityPayload & UpdateCommunityPayload, cover: File | null, icon: File | null) {
   if (!community.value) return
   const slug = community.value.slug
   try {

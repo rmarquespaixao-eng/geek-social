@@ -301,9 +301,19 @@ export class ConversationsRepository implements IConversationsRepository {
       coverUrl: row.coverUrl,
       createdBy: row.createdBy,
       isTemporary: row.isTemporary,
+      senderKeyId: row.senderKeyId,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     }
+  }
+
+  async rotateSenderKey(conversationId: string): Promise<string> {
+    const [row] = await this.db
+      .update(conversations)
+      .set({ senderKeyId: sql`gen_random_uuid()` })
+      .where(eq(conversations.id, conversationId))
+      .returning({ senderKeyId: conversations.senderKeyId })
+    return row.senderKeyId
   }
 
   private mapMember(row: typeof conversationMembers.$inferSelect): ConversationMember {

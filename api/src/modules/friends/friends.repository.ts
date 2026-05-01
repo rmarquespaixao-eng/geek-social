@@ -1,4 +1,5 @@
-import { eq, and, or, sql } from 'drizzle-orm'
+import { eq, and, or } from 'drizzle-orm'
+import { alias } from 'drizzle-orm/pg-core'
 import type { DatabaseClient } from '../../shared/infra/database/postgres.client.js'
 import { friendships, userBlocks, users, userPresence } from '../../shared/infra/database/schema.js'
 import type {
@@ -94,6 +95,8 @@ export class FriendsRepository implements IFriendsRepository {
   }
 
   async findReceivedRequestsWithUser(receiverId: string): Promise<FriendRequestWithUser[]> {
+    const senderUser = alias(users, 'sender')
+    const receiverUser = alias(users, 'receiver')
     const rows = await this.db
       .select({
         id: friendships.id,
@@ -101,27 +104,31 @@ export class FriendsRepository implements IFriendsRepository {
         receiverId: friendships.receiverId,
         status: friendships.status,
         createdAt: friendships.createdAt,
-        senderName: sql<string>`(SELECT display_name FROM users WHERE id = ${friendships.requesterId})`,
-        senderAvatarUrl: sql<string | null>`(SELECT avatar_url FROM users WHERE id = ${friendships.requesterId})`,
-        receiverName: sql<string>`(SELECT display_name FROM users WHERE id = ${friendships.receiverId})`,
-        receiverAvatarUrl: sql<string | null>`(SELECT avatar_url FROM users WHERE id = ${friendships.receiverId})`,
+        senderName: senderUser.displayName,
+        senderAvatarUrl: senderUser.avatarUrl,
+        receiverName: receiverUser.displayName,
+        receiverAvatarUrl: receiverUser.avatarUrl,
       })
       .from(friendships)
+      .innerJoin(senderUser, eq(senderUser.id, friendships.requesterId))
+      .innerJoin(receiverUser, eq(receiverUser.id, friendships.receiverId))
       .where(and(eq(friendships.receiverId, receiverId), eq(friendships.status, 'pending')))
     return rows.map(r => ({
       id: r.id,
       senderId: r.senderId,
       senderName: r.senderName,
-      senderAvatarUrl: r.senderAvatarUrl,
+      senderAvatarUrl: r.senderAvatarUrl ?? null,
       receiverId: r.receiverId,
       receiverName: r.receiverName,
-      receiverAvatarUrl: r.receiverAvatarUrl,
+      receiverAvatarUrl: r.receiverAvatarUrl ?? null,
       status: r.status as FriendshipStatus,
       createdAt: r.createdAt,
     }))
   }
 
   async findSentRequestsWithUser(requesterId: string): Promise<FriendRequestWithUser[]> {
+    const senderUser = alias(users, 'sender')
+    const receiverUser = alias(users, 'receiver')
     const rows = await this.db
       .select({
         id: friendships.id,
@@ -129,21 +136,23 @@ export class FriendsRepository implements IFriendsRepository {
         receiverId: friendships.receiverId,
         status: friendships.status,
         createdAt: friendships.createdAt,
-        senderName: sql<string>`(SELECT display_name FROM users WHERE id = ${friendships.requesterId})`,
-        senderAvatarUrl: sql<string | null>`(SELECT avatar_url FROM users WHERE id = ${friendships.requesterId})`,
-        receiverName: sql<string>`(SELECT display_name FROM users WHERE id = ${friendships.receiverId})`,
-        receiverAvatarUrl: sql<string | null>`(SELECT avatar_url FROM users WHERE id = ${friendships.receiverId})`,
+        senderName: senderUser.displayName,
+        senderAvatarUrl: senderUser.avatarUrl,
+        receiverName: receiverUser.displayName,
+        receiverAvatarUrl: receiverUser.avatarUrl,
       })
       .from(friendships)
+      .innerJoin(senderUser, eq(senderUser.id, friendships.requesterId))
+      .innerJoin(receiverUser, eq(receiverUser.id, friendships.receiverId))
       .where(and(eq(friendships.requesterId, requesterId), eq(friendships.status, 'pending')))
     return rows.map(r => ({
       id: r.id,
       senderId: r.senderId,
       senderName: r.senderName,
-      senderAvatarUrl: r.senderAvatarUrl,
+      senderAvatarUrl: r.senderAvatarUrl ?? null,
       receiverId: r.receiverId,
       receiverName: r.receiverName,
-      receiverAvatarUrl: r.receiverAvatarUrl,
+      receiverAvatarUrl: r.receiverAvatarUrl ?? null,
       status: r.status as FriendshipStatus,
       createdAt: r.createdAt,
     }))
@@ -168,6 +177,10 @@ export class FriendsRepository implements IFriendsRepository {
         and(eq(friendships.requesterId, userId1), eq(friendships.receiverId, userId2)),
         and(eq(friendships.requesterId, userId2), eq(friendships.receiverId, userId1)),
       ))
+  }
+
+  async deleteById(id: string): Promise<void> {
+    await this.db.delete(friendships).where(eq(friendships.id, id))
   }
 
   async createBlock(blockerId: string, blockedId: string): Promise<void> {
@@ -223,5 +236,19 @@ export class FriendsRepository implements IFriendsRepository {
         eq(userBlocks.blockedId, userId),
       ))
     return rows.map(row => row.blockerId === userId ? row.blockedId : row.blockerId)
+  }
+
+  async block(blockerId: string, blockedId: string): Promise<void> {
+    await this.db.transaction(async (tx) => {
+      await tx.delete(friendships)
+        .where(or(
+          and(eq(friendships.requesterId, blockerId), eq(friendships.receiverId, blockedId)),
+          and(eq(friendships.requesterId, blockedId), eq(friendships.receiverId, blockerId)),
+        ))
+
+      await tx.insert(userBlocks)
+        .values({ blockerId, blockedId })
+        .onConflictDoNothing()
+    })
   }
 }

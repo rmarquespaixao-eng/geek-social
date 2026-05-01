@@ -4,6 +4,7 @@ import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { Paperclip, Send, X, Ban, Unlock, Mic } from 'lucide-vue-next'
 import { useAuthStore } from '@/shared/auth/authStore'
 import { useChat } from '../composables/useChat'
+import { CryptoNotReadyError, PeerHasNoKeysError } from '../services/chatCrypto'
 import { useFriends } from '@/modules/friends/composables/useFriends'
 import { uploadAttachment } from '../services/chatService'
 import { useAudioRecorder, isRecorderSupported } from '../composables/useAudioRecorder'
@@ -198,13 +199,19 @@ async function send() {
       chat.emitStopTyping(props.conversation.id)
     }
   } catch (e: any) {
-    const code = e?.response?.data?.error
-    if (code === 'BLOCKED') {
-      sendError.value = 'Não é possível enviar mensagens neste chat.'
-    } else if (code === 'FORBIDDEN') {
-      sendError.value = 'Você não tem permissão para enviar mensagens nesta conversa.'
+    if (e instanceof CryptoNotReadyError) {
+      sendError.value = 'Criptografia ainda iniciando. Aguarde alguns segundos e tente novamente.'
+    } else if (e instanceof PeerHasNoKeysError) {
+      sendError.value = 'Esse usuário ainda não está pronto para mensagens criptografadas. Peça para ele abrir o app.'
     } else {
-      sendError.value = 'Erro ao enviar mensagem. Tente novamente.'
+      const code = e?.response?.data?.error
+      if (code === 'BLOCKED') {
+        sendError.value = 'Não é possível enviar mensagens neste chat.'
+      } else if (code === 'FORBIDDEN') {
+        sendError.value = 'Você não tem permissão para enviar mensagens nesta conversa.'
+      } else {
+        sendError.value = 'Erro ao enviar mensagem. Tente novamente.'
+      }
     }
   } finally {
     sending.value = false
@@ -245,15 +252,21 @@ async function sendRecording() {
     await chat.sendMessage({ attachmentIds: [att.id] })
     recorder.discard()
   } catch (e: any) {
-    const code = e?.response?.data?.error
-    if (code === 'BLOCKED') {
-      sendError.value = 'Não é possível enviar áudios neste chat.'
-    } else if (code === 'AUDIO_TOO_LONG') {
-      sendError.value = 'Áudio muito longo (máximo 3 minutos).'
-    } else if (code === 'ATTACHMENT_TOO_LARGE') {
-      sendError.value = 'Áudio muito grande para envio.'
+    if (e instanceof CryptoNotReadyError) {
+      sendError.value = 'Criptografia ainda iniciando. Aguarde alguns segundos e tente novamente.'
+    } else if (e instanceof PeerHasNoKeysError) {
+      sendError.value = 'Esse usuário ainda não está pronto para mensagens criptografadas. Peça para ele abrir o app.'
     } else {
-      sendError.value = 'Falha ao enviar áudio. Tente de novo.'
+      const code = e?.response?.data?.error
+      if (code === 'BLOCKED') {
+        sendError.value = 'Não é possível enviar áudios neste chat.'
+      } else if (code === 'AUDIO_TOO_LONG') {
+        sendError.value = 'Áudio muito longo (máximo 3 minutos).'
+      } else if (code === 'ATTACHMENT_TOO_LARGE') {
+        sendError.value = 'Áudio muito grande para envio.'
+      } else {
+        sendError.value = 'Falha ao enviar áudio. Tente de novo.'
+      }
     }
     recorder.state.value = 'preview'
   }
@@ -428,31 +441,30 @@ function onDmRejected() {
           @keydown="onKeydown"
         />
 
-        <!-- Mic button (só aparece quando vazio e MediaRecorder suportado) -->
-        <button
-          v-if="recorderSupported && !content.trim() && pendingFiles.length === 0"
-          :disabled="isInputBlocked"
-          @click="startRecording"
-          title="Gravar áudio"
-          class="flex-shrink-0 p-1.5 rounded-lg text-(--color-text-muted) hover:text-(--color-accent-amber) transition-colors disabled:cursor-not-allowed"
-        >
-          <Mic :size="18" />
-        </button>
-
-        <!-- Send button -->
-        <button
-          v-else
-          :disabled="isInputBlocked || sending || (!content.trim() && pendingFiles.length === 0)"
-          @click="send"
-          :class="[
-            'flex-shrink-0 p-1.5 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed',
-            content.trim() || pendingFiles.length > 0
-              ? 'text-(--color-accent-amber) hover:bg-(--color-accent-amber)/10'
-              : 'text-(--color-text-muted)',
-          ]"
-        >
-          <Send :size="18" />
-        </button>
+        <!-- Mic / Send toggle (estilo WhatsApp) -->
+        <div class="flex-shrink-0 relative w-8 h-8">
+          <Transition name="chat-action-btn">
+            <button
+              v-if="recorderSupported && !content.trim() && pendingFiles.length === 0"
+              key="mic"
+              :disabled="isInputBlocked"
+              @click="startRecording"
+              title="Gravar áudio"
+              class="absolute inset-0 flex items-center justify-center rounded-lg text-(--color-text-muted) hover:text-(--color-accent-amber) transition-colors disabled:cursor-not-allowed"
+            >
+              <Mic :size="18" />
+            </button>
+            <button
+              v-else
+              key="send"
+              :disabled="isInputBlocked || sending || (!content.trim() && pendingFiles.length === 0)"
+              @click="send"
+              class="absolute inset-0 flex items-center justify-center rounded-lg text-(--color-accent-amber) hover:bg-(--color-accent-amber)/10 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <Send :size="18" />
+            </button>
+          </Transition>
+        </div>
       </div>
       <p v-if="isInputBlocked" class="text-xs text-(--color-text-muted) text-center mt-1">
         Aceite ou recuse a solicitação para enviar mensagens
@@ -463,3 +475,18 @@ function onDmRejected() {
     </div>
   </div>
 </template>
+
+<style scoped>
+.chat-action-btn-enter-active,
+.chat-action-btn-leave-active {
+  transition: transform 0.18s ease, opacity 0.18s ease;
+}
+.chat-action-btn-enter-from {
+  transform: scale(0.4) rotate(25deg);
+  opacity: 0;
+}
+.chat-action-btn-leave-to {
+  transform: scale(0.4) rotate(-25deg);
+  opacity: 0;
+}
+</style>

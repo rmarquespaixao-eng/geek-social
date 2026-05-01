@@ -28,5 +28,5 @@ export interface ICommentsRepository {
   findById(id: string): Promise<Comment | null>
   update(id: string, content: string): Promise<EnrichedComment>
   delete(id: string): Promise<void>
-  findByPostId(postId: string, cursor?: CommentCursor, limit?: number): Promise<{ comments: EnrichedComment[]; nextCursor: CommentCursor | null }>
+  findByPostId(postId: string, cursor?: CommentCursor, limit?: number, excludedUserIds?: string[]): Promise<{ comments: EnrichedComment[]; nextCursor: CommentCursor | null }>
 }

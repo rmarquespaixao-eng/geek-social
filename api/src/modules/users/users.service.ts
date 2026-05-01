@@ -1,10 +1,11 @@
 // src/modules/users/users.service.ts
+import bcrypt from 'bcrypt'
 import sharp from 'sharp'
 import type { UsersRepository } from './users.repository.js'
 import type { IStorageService } from '../../shared/contracts/storage.service.contract.js'
 import type { IFriendsRepository } from '../../shared/contracts/friends.repository.contract.js'
 import type { UpdateProfileInput } from './users.schema.js'
-import type { User } from '../../shared/contracts/user.repository.contract.js'
+import type { User, IUserRepository } from '../../shared/contracts/user.repository.contract.js'
 
 export class UsersError extends Error {
   constructor(public readonly code: string) {
@@ -52,6 +53,9 @@ export class UsersService {
     private readonly storageService: IStorageService,
     private readonly friendsRepository?: IFriendsRepository,
     private readonly presenceService?: import('../chat/presence.service.js').PresenceService,
+    // Necessário para revogar refresh tokens em deleteAccount. Opcional para manter
+    // compatibilidade com testes que constroem o serviço sem auth.
+    private readonly authRepository?: IUserRepository,
   ) {}
 
   async getProfile(userId: string, viewerId: string | null): Promise<PublicProfile> {
@@ -125,10 +129,11 @@ export class UsersService {
     }
   }
 
-  async searchUsers(query: string, viewerId?: string): Promise<{ id: string; displayName: string; avatarUrl: string | null }[]> {
+  async searchUsers(query: string, viewerId: string): Promise<{ id: string; displayName: string; avatarUrl: string | null }[]> {
     if (!query || query.trim().length < 2) return []
-    const results = await this.usersRepository.searchUsers(query.trim())
-    return viewerId ? results.filter(u => u.id !== viewerId) : results
+    // Filtros de privacy, bloqueio e escape de wildcards são aplicados no repositório (NEW-01/02/03).
+    const results = await this.usersRepository.searchUsers(query.trim(), viewerId)
+    return results.map(u => ({ id: u.id, displayName: u.displayName, avatarUrl: u.avatarUrl }))
   }
 
   async getPublicFriends(userId: string, viewerId: string | null): Promise<{ id: string; displayName: string; avatarUrl: string | null }[]> {
@@ -141,7 +146,14 @@ export class UsersService {
       const isFriend = await this.friendsRepository.areFriends(userId, viewerId)
       if (!isFriend) return []
     }
-    return this.usersRepository.getPublicFriends(userId)
+    const friends = await this.usersRepository.getPublicFriends(userId)
+
+    if (viewerId && this.friendsRepository) {
+      const blockedIds = await this.friendsRepository.findAllBlockRelationUserIds(viewerId)
+      return friends.filter(friend => !blockedIds.includes(friend.id))
+    }
+
+    return friends
   }
 
   async updateProfile(userId: string, input: UpdateProfileInput): Promise<User> {
@@ -152,7 +164,7 @@ export class UsersService {
     return this.usersRepository.updateSettings(userId, patch)
   }
 
-  async uploadAvatar(userId: string, buffer: Buffer, _mimeType: string): Promise<User> {
+  async uploadAvatar(userId: string, buffer: Buffer): Promise<User> {
     const webpBuffer = await sharp(buffer)
       .resize(400, 400, { fit: 'cover' })
       .webp({ quality: 85 })
@@ -162,7 +174,7 @@ export class UsersService {
     return this.usersRepository.updateProfile(userId, { avatarUrl })
   }
 
-  async uploadCover(userId: string, buffer: Buffer, _mimeType: string): Promise<User> {
+  async uploadCover(userId: string, buffer: Buffer): Promise<User> {
     const webpBuffer = await sharp(buffer)
       .resize(1200, 400, { fit: 'cover' })
       .webp({ quality: 85 })
@@ -191,7 +203,7 @@ export class UsersService {
     return this.usersRepository.updateProfile(userId, { coverUrl: null })
   }
 
-  async uploadProfileBackground(userId: string, buffer: Buffer, _mimeType: string): Promise<User> {
+  async uploadProfileBackground(userId: string, buffer: Buffer): Promise<User> {
     const webpBuffer = await sharp(buffer)
       .resize(1920, 1920, { fit: 'inside', withoutEnlargement: true })
       .webp({ quality: 80 })
@@ -214,8 +226,35 @@ export class UsersService {
     return this.usersRepository.updateProfile(userId, { profileBackgroundColor: null })
   }
 
-  /** Apaga conta + arquivos conhecidos do usuário. Cascades de FK removem dados relacionados. */
-  async deleteAccount(userId: string): Promise<void> {
+  /**
+   * Apaga conta + arquivos conhecidos do usuário. Cascades de FK removem dados relacionados.
+   * Requer confirmação de senha para contas com senha local (NEW-10).
+   * Contas Google-only aceitam exclusão sem senha — o Google já atua como fator implícito.
+   */
+  async deleteAccount(userId: string, password?: string): Promise<void> {
+    const user = await this.usersRepository.findById(userId)
+    if (!user) throw new UsersError('USER_NOT_FOUND')
+
+    if (user.passwordHash) {
+      // Conta com senha: exige confirmação para evitar exclusão por JWT vazado.
+      if (!password) throw new UsersError('PASSWORD_REQUIRED')
+      const isValid = await bcrypt.compare(password, user.passwordHash)
+      if (!isValid) throw new UsersError('INVALID_CREDENTIALS')
+    }
+    // Conta Google-only: sem senha local, o Google OAuth é o fator implícito.
+    // Risco residual aceito: JWT vazado permite exclusão. Rate-limit de 1/24h mitiga força bruta.
+    else {
+      console.warn({ userId }, 'google-only account deletion requested — no password confirmation')
+    }
+
+    // Invalida JWTs já emitidos ANTES de deletar (G1-22). Caso o DELETE CASCADE em
+    // refresh_tokens demore ou falhe, os JWTs de até 15 min de TTL ainda assim
+    // passam a falhar no middleware authenticate (token_version mismatch).
+    await this.usersRepository.incrementTokenVersion(userId)
+    if (this.authRepository) {
+      await this.authRepository.deleteAllRefreshTokensByUserId(userId)
+    }
+
     // Best-effort: limpa arquivos conhecidos (avatar, cover, background) do storage.
     // Outros arquivos (items, posts, chat) ficarão órfãos mas não causam erro.
     const keys = [

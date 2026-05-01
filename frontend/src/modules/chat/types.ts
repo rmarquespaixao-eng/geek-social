@@ -53,6 +53,7 @@ export interface Conversation {
   avatarUrl: string | null
   coverUrl?: string | null
   createdBy?: string | null
+  senderKeyId: string
   participants: ConversationMember[]
   lastMessage: LastMessage | null
   unreadCount: number
@@ -203,6 +204,13 @@ export interface SocketMemberAdded {
 export interface SocketMemberRemoved {
   conversationId: string
   userId: string
+  senderKeyId: string
+}
+
+export interface SocketMemberLeft {
+  conversationId: string
+  userId: string
+  senderKeyId: string
 }
 
 export interface SocketConversationUpdated {

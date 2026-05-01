@@ -47,7 +47,7 @@ export class ItemsService {
 
       switch (fieldDefinition.fieldType) {
         case 'number':
-          if (typeof value !== 'number') throw new ItemsError('INVALID_FIELD_TYPE')
+          if (typeof value !== 'number' || !Number.isFinite(value)) throw new ItemsError('INVALID_FIELD_TYPE')
           break
         case 'date':
           if (typeof value !== 'string' || isNaN(Date.parse(value as string))) throw new ItemsError('INVALID_FIELD_TYPE')
@@ -226,10 +226,13 @@ export class ItemsService {
       this.validateFields(mergedFields, collection.fieldSchema)
     }
 
-    return this.itemRepo.update(itemId, {
-      ...input,
-      ...(mergedFields !== undefined ? { fields: mergedFields } : {}),
-    })
+    const allowlistedUpdate: Record<string, unknown> = {}
+    if (input.name !== undefined) allowlistedUpdate.name = input.name
+    if (input.rating !== undefined) allowlistedUpdate.rating = input.rating
+    if (input.comment !== undefined) allowlistedUpdate.comment = input.comment
+    if (mergedFields !== undefined) allowlistedUpdate.fields = mergedFields
+
+    return this.itemRepo.update(itemId, allowlistedUpdate)
   }
 
   async delete(userId: string, collectionId: string, itemId: string): Promise<void> {

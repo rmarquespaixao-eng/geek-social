@@ -55,6 +55,11 @@ export class PostsService implements IPostsService {
     const post = await this.repo.findById(id)
     if (!post) throw new PostsError('NOT_FOUND')
     if (post.visibility === 'private' && post.userId !== viewerId) throw new PostsError('NOT_FOUND')
+    if (post.visibility === 'friends_only' && post.userId !== viewerId) {
+      if (!this.friendsRepo) throw new PostsError('NOT_FOUND')
+      const areFriends = await this.friendsRepo.areFriends(viewerId, post.userId)
+      if (!areFriends) throw new PostsError('NOT_FOUND')
+    }
     if (this.friendsRepo && post.userId !== viewerId) {
       const blocked = await this.friendsRepo.isBlockedEitherDirection(viewerId, post.userId)
       if (blocked) throw new PostsError('NOT_FOUND')
@@ -94,21 +99,24 @@ export class PostsService implements IPostsService {
     if (currentCount + files.length > 8) throw new PostsError('MEDIA_LIMIT_EXCEEDED')
     const maxOrder = await this.repo.maxMediaOrder(postId)
 
+    const ALLOWED_IMAGE = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp'])
     const ALLOWED_VIDEO = new Set(['video/mp4', 'video/webm', 'video/quicktime'])
     const VIDEO_EXT: Record<string, string> = {
       'video/mp4': 'mp4',
       'video/webm': 'webm',
       'video/quicktime': 'mov',
     }
+    const IMAGE_MAX = 5 * 1024 * 1024
     const VIDEO_MAX = 50 * 1024 * 1024
 
     for (let i = 0; i < files.length; i++) {
       const f = files[i]
-      const isImage = f.mimeType.startsWith('image/')
-      const isVideo = f.mimeType.startsWith('video/')
+      const isImage = ALLOWED_IMAGE.has(f.mimeType)
+      const isVideo = ALLOWED_VIDEO.has(f.mimeType)
 
       let url: string
       if (isImage) {
+        if (f.buffer.length > IMAGE_MAX) throw new PostsError('MEDIA_TOO_LARGE')
         const webp = await sharp(f.buffer)
           .resize(1200, 1200, { fit: 'inside', withoutEnlargement: true })
           .webp({ quality: 85 })
@@ -116,7 +124,6 @@ export class PostsService implements IPostsService {
         const key = `posts/${postId}/media/${randomUUID()}.webp`
         url = await this.storageService.upload(key, webp, 'image/webp')
       } else if (isVideo) {
-        if (!ALLOWED_VIDEO.has(f.mimeType)) throw new PostsError('UNSUPPORTED_VIDEO_FORMAT')
         if (f.buffer.length > VIDEO_MAX) throw new PostsError('MEDIA_TOO_LARGE')
         const ext = VIDEO_EXT[f.mimeType]
         const key = `posts/${postId}/media/${randomUUID()}.${ext}`

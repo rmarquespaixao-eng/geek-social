@@ -2,15 +2,15 @@
 import { computed, ref, onMounted, onUnmounted } from 'vue'
 import {
   X, Camera, Crown, Shield, User as UserIcon, MoreVertical,
-  UserPlus, LogOut, Trash2, Pencil, Check,
+  UserPlus, LogOut, Trash2, Pencil, Check, ShieldCheck,
 } from 'lucide-vue-next'
 import { useAuthStore } from '@/shared/auth/authStore'
 import { useFriends } from '@/modules/friends/composables/useFriends'
 import { useChat } from '../composables/useChat'
 import * as chatService from '../services/chatService'
-import * as cryptoSvc from '../services/cryptoService'
 import AppModal from '@/shared/ui/AppModal.vue'
 import AppConfirmDialog from '@/shared/ui/AppConfirmDialog.vue'
+import SafetyNumberDialog from './SafetyNumberDialog.vue'
 import type { Conversation, ConversationMember, MemberRole } from '../types'
 
 const props = defineProps<{ conversation: Conversation }>()
@@ -42,6 +42,13 @@ const removeTarget = ref<ConversationMember | null>(null)
 const showLeaveConfirm = ref(false)
 const showDeleteConfirm = ref(false)
 const performing = ref(false)
+
+// Safety number
+const safetyTargetId = ref<string | null>(null)
+
+function openSafetyFor(memberId: string) {
+  safetyTargetId.value = memberId
+}
 
 function roleBadge(role: MemberRole) {
   if (role === 'owner') return { label: 'Dono', icon: Crown, cls: 'text-amber-400 bg-amber-500/15' }
@@ -166,7 +173,6 @@ const friendsAvailableToAdd = computed(() => {
 async function addFriend(friendId: string) {
   try {
     await chatService.inviteMember(props.conversation.id, friendId)
-    cryptoSvc.distributeGroupKeyToMember(me.value, props.conversation.id, friendId).catch(() => {})
     await chat.fetchConversations()
   } catch (e: any) {
     error.value = e?.response?.data?.error ?? 'Erro ao adicionar amigo'
@@ -374,6 +380,17 @@ const sortedParticipants = computed(() => {
                   </span>
                 </div>
 
+                <!-- Verificar identidade (todos podem verificar qualquer outro membro) -->
+                <button
+                  v-if="p.userId !== me"
+                  type="button"
+                  @click="openSafetyFor(p.userId)"
+                  class="p-1.5 rounded-lg text-(--color-text-muted) hover:text-(--color-accent-amber) hover:bg-(--color-bg-surface)"
+                  title="Verificar identidade"
+                >
+                  <ShieldCheck :size="16" />
+                </button>
+
                 <!-- Menu owner-only para outros membros -->
                 <div
                   v-if="isOwner && p.userId !== me"
@@ -468,5 +485,12 @@ const sortedParticipants = computed(() => {
     :loading="performing"
     @cancel="showDeleteConfirm = false"
     @confirm="confirmDelete"
+  />
+
+  <SafetyNumberDialog
+    v-if="safetyTargetId"
+    :conversation="conversation"
+    :initial-peer-id="safetyTargetId"
+    @close="safetyTargetId = null"
   />
 </template>

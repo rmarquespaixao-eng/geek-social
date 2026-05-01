@@ -176,6 +176,12 @@ const router = createRouter({
       meta: { requiresAuth: true },
     },
     {
+      path: '/comunidades/:slug/topicos/:topicId',
+      name: 'community-topic',
+      component: () => import('@/modules/communities/views/CommunityTopicView.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
       path: '/minhas-comunidades',
       name: 'my-communities',
       component: () => import('@/modules/communities/views/MyCommunitiesView.vue'),

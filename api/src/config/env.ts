@@ -23,6 +23,13 @@ const envSchema = z.object({
   VAPID_PRIVATE_KEY: z.string(),
   VAPID_CONTACT: z.string().email(),
   JOBS_DATABASE_URL: z.string().url().optional(),
+  // Auditoria #3: confiança em proxies upstream (load balancer, ingress, CDN).
+  // Aceita boolean ('true'/'false'), número (hops) ou CIDR/lista (ex: '10.0.0.0/8,192.168.0.0/16').
+  // Em prod com proxy reverso, configure como o número de hops ou o CIDR exato.
+  TRUST_PROXY: z.string().default('false'),
+  // Auditoria #5: store distribuído pra rate-limit. Sem fallback in-memory:
+  // rate-limit é controle de segurança, exige a infraestrutura definida.
+  REDIS_URL: z.string().url(),
 })
 
 const parsed = envSchema.safeParse(process.env)

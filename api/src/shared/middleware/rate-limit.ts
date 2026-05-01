@@ -1,81 +1,79 @@
 import type { FastifyRequest, FastifyReply } from 'fastify'
+import type { RedisClient } from '../infra/redis/redis.client.js'
 
-type RateLimitEntry = {
-  count: number
-  resetAt: number
+// Auditoria #5: rate-limit em Redis. Sem fallback in-memory — em deploy multi-pod
+// um fallback levaria a N×limit e mascararia falhas de infra. Se Redis está down,
+// o middleware fail-closes (bloqueia a requisição com 503), forçando o operador
+// a tratar a indisponibilidade.
+
+let redisClient: RedisClient | null = null
+
+export function setRateLimitRedis(client: RedisClient) {
+  redisClient = client
 }
 
-// ATENÇÃO: estado em memória do processo. Implicações conhecidas:
-// (1) Em deploy multi-instância (>1 réplica), o limite efetivo é N×limit.
-// (2) Restart zera os contadores.
-// (3) Sem cleanup, entries com chaves únicas (ex: IPs rotativos) acumulariam.
-// O cleanup periódico abaixo mitiga (3); (1) e (2) só são resolvidos com store
-// distribuído (Redis). Documentado em docs/security/2026-04-30-auth-audit.md (#5).
-const ipLimits = new Map<string, RateLimitEntry>()
-const userLimits = new Map<string, RateLimitEntry>()
+function getRedis(): RedisClient {
+  if (!redisClient) {
+    throw new Error('rate-limit: Redis client não inicializado (chame setRateLimitRedis em buildApp)')
+  }
+  return redisClient
+}
 
-const CLEANUP_INTERVAL_MS = 5 * 60 * 1000
-
-function pruneExpired(map: Map<string, RateLimitEntry>) {
-  const now = Date.now()
-  for (const [key, entry] of map.entries()) {
-    if (entry.resetAt <= now) map.delete(key)
+class RateLimitError extends Error {
+  statusCode = 429
+  constructor() {
+    super('RATE_LIMIT_EXCEEDED')
+    this.name = 'RateLimitError'
   }
 }
 
-const cleanupHandle = setInterval(() => {
-  pruneExpired(ipLimits)
-  pruneExpired(userLimits)
-}, CLEANUP_INTERVAL_MS)
-// Não bloquear o event loop em teste/serverless.
-if (typeof cleanupHandle.unref === 'function') cleanupHandle.unref()
+class RateLimitUnavailableError extends Error {
+  statusCode = 503
+  constructor() {
+    super('RATE_LIMIT_UNAVAILABLE')
+    this.name = 'RateLimitUnavailableError'
+  }
+}
 
-// Exposto para testes/teardown — chamar em onClose se quiser determinismo.
-export function stopRateLimitCleanup() {
-  clearInterval(cleanupHandle)
+// INCR + PEXPIRE atômico via pipeline. O bucket é fixo por janela (Math.floor),
+// então o EXPIRE só tem efeito na primeira request da janela; nas subsequentes
+// o TTL já está setado. Aceitamos a borda de janela (até 2× limit no instante
+// do rollover) — algoritmo "fixed window counter" clássico.
+async function incrementBucket(key: string, windowMs: number): Promise<number> {
+  const redis = getRedis()
+  let result: Array<[Error | null, unknown]> | null
+  try {
+    result = await redis.multi().incr(key).pexpire(key, windowMs).exec()
+  } catch {
+    throw new RateLimitUnavailableError()
+  }
+  if (!result || result[0][0]) {
+    throw new RateLimitUnavailableError()
+  }
+  return Number(result[0][1])
 }
 
 export function createIpRateLimiter(maxRequests: number, windowMs: number) {
-  return (request: FastifyRequest, _reply: FastifyReply, done: (err?: Error) => void) => {
+  return async (request: FastifyRequest, _reply: FastifyReply): Promise<void> => {
     const ip = request.ip
-    const now = Date.now()
-
-    let entry = ipLimits.get(ip)
-    if (!entry || now >= entry.resetAt) {
-      entry = { count: 0, resetAt: now + windowMs }
-      ipLimits.set(ip, entry)
-    }
-
-    entry.count++
-    if (entry.count > maxRequests) {
-      return done(new Error('RATE_LIMIT_EXCEEDED'))
-    }
-
-    done()
+    const bucket = Math.floor(Date.now() / windowMs)
+    const key = `rl:ip:${ip}:${bucket}`
+    const count = await incrementBucket(key, windowMs)
+    if (count > maxRequests) throw new RateLimitError()
   }
 }
 
 export function createUserRateLimiter(maxRequests: number, windowMs: number) {
-  return (request: FastifyRequest, _reply: FastifyReply, done: (err?: Error) => void) => {
+  return async (request: FastifyRequest, _reply: FastifyReply): Promise<void> => {
     const user = request.user as { userId: string } | undefined
     if (!user) {
-      return done(new Error('UNAUTHORIZED'))
+      const err = new Error('UNAUTHORIZED') as Error & { statusCode: number }
+      err.statusCode = 401
+      throw err
     }
-
-    const userId = user.userId
-    const now = Date.now()
-
-    let entry = userLimits.get(userId)
-    if (!entry || now >= entry.resetAt) {
-      entry = { count: 0, resetAt: now + windowMs }
-      userLimits.set(userId, entry)
-    }
-
-    entry.count++
-    if (entry.count > maxRequests) {
-      return done(new Error('RATE_LIMIT_EXCEEDED'))
-    }
-
-    done()
+    const bucket = Math.floor(Date.now() / windowMs)
+    const key = `rl:user:${user.userId}:${bucket}`
+    const count = await incrementBucket(key, windowMs)
+    if (count > maxRequests) throw new RateLimitError()
   }
 }

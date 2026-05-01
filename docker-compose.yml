@@ -25,6 +25,18 @@ services:
       retries: 10
     restart: unless-stopped
 
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly no --save ""
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
   minio:
     image: minio/minio:latest
     command: server /data --console-address ":9001"
@@ -80,6 +92,8 @@ services:
       PORT: 3000
       DATABASE_URL: postgresql://${POSTGRES_USER:-dev}:${POSTGRES_PASSWORD:-dev}@db:5432/${POSTGRES_DB:-geek_social}
       JOBS_DATABASE_URL: postgresql://${POSTGRES_USER:-dev}:${POSTGRES_PASSWORD:-dev}@db:5432/geek_social_jobs
+      REDIS_URL: redis://redis:6379
+      TRUST_PROXY: ${TRUST_PROXY:-false}
       JWT_SECRET: ${JWT_SECRET:-dev-only-secret-change-me-in-production-please-32}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-15m}
       REFRESH_TOKEN_EXPIRES_DAYS: ${REFRESH_TOKEN_EXPIRES_DAYS:-7}
@@ -102,6 +116,8 @@ services:
       - "${API_PORT:-3000}:3000"
     depends_on:
       db:
+        condition: service_healthy
+      redis:
         condition: service_healthy
       minio-init:
         condition: service_completed_successfully

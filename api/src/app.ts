@@ -3,6 +3,7 @@ import fastifyJwt from '@fastify/jwt'
 import fastifyCookie from '@fastify/cookie'
 import fastifyMultipart from '@fastify/multipart'
 import fastifyCors from '@fastify/cors'
+import fastifyHelmet from '@fastify/helmet'
 import fastifySwagger from '@fastify/swagger'
 import {
   hasZodFastifySchemaValidationErrors,
@@ -14,6 +15,8 @@ import {
 import { migrate } from 'drizzle-orm/node-postgres/migrator'
 import { env } from './config/env.js'
 import { createDatabaseClient } from './shared/infra/database/postgres.client.js'
+import { createRedisClient } from './shared/infra/redis/redis.client.js'
+import { setRateLimitRedis } from './shared/middleware/rate-limit.js'
 import { UserRepository } from './modules/auth/auth.repository.js'
 import { UsersRepository } from './modules/users/users.repository.js'
 import { FieldDefinitionRepository } from './modules/field-definitions/field-definitions.repository.js'
@@ -114,8 +117,22 @@ import { dirname, join } from 'node:path'
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
 
+// Auditoria #3: parseia TRUST_PROXY pro formato esperado pelo Fastify.
+// Aceita: 'true'/'false', número (hops) ou CIDR/lista (ex: '10.0.0.0/8,192.168.0.0/16').
+function parseTrustProxy(raw: string): boolean | number | string[] {
+  if (raw === 'true') return true
+  if (raw === 'false') return false
+  const asNumber = Number(raw)
+  if (Number.isInteger(asNumber) && asNumber >= 0) return asNumber
+  return raw.split(',').map(s => s.trim()).filter(Boolean)
+}
+
 export async function buildApp() {
-  const app = Fastify({ logger: true, bodyLimit: 30 * 1024 * 1024 }).withTypeProvider<ZodTypeProvider>()
+  const app = Fastify({
+    logger: true,
+    bodyLimit: 30 * 1024 * 1024,
+    trustProxy: parseTrustProxy(env.TRUST_PROXY),
+  }).withTypeProvider<ZodTypeProvider>()
 
   app.setValidatorCompiler(validatorCompiler)
   app.setSerializerCompiler(serializerCompiler)
@@ -142,7 +159,10 @@ export async function buildApp() {
     }
     request.log.error({ err: error, url: request.url }, 'Unhandled error')
     const err = error as { statusCode?: number; message?: string }
-    if (err.statusCode && err.statusCode >= 400 && err.statusCode < 500) {
+    // statusCode explicitamente setado (4xx ou 5xx intencionais — ex: 429
+    // RATE_LIMIT_EXCEEDED, 503 RATE_LIMIT_UNAVAILABLE) propaga com a mensagem.
+    // Sem statusCode = erro inesperado, mascarado como 500 INTERNAL_ERROR.
+    if (err.statusCode && err.statusCode >= 400 && err.statusCode < 600) {
       return reply.status(err.statusCode).send({ error: err.message ?? 'ERROR' })
     }
     return reply.status(500).send({ error: 'INTERNAL_ERROR' })
@@ -191,6 +211,30 @@ export async function buildApp() {
     credentials: true,
     methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   })
+  // Auditoria #4: helmet com CSP estrita + HSTS. API serve apenas JSON (e Swagger
+  // em dev), então o CSP pode ser bem restritivo: nenhum script/style/img/conexão
+  // por padrão, exceto 'self' pra UI do Swagger não quebrar em dev.
+  await app.register(fastifyHelmet, {
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'none'"],
+        baseUri: ["'self'"],
+        frameAncestors: ["'none'"],
+        formAction: ["'self'"],
+        scriptSrc: ["'self'"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        imgSrc: ["'self'", 'data:'],
+        connectSrc: ["'self'"],
+        fontSrc: ["'self'", 'data:'],
+        objectSrc: ["'none'"],
+      },
+    },
+    crossOriginEmbedderPolicy: false,
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
+    hsts: env.NODE_ENV === 'production'
+      ? { maxAge: 31536000, includeSubDomains: true, preload: true }
+      : false,
+  })
   // Algoritmo HS256 fixado explicitamente em sign + verify pra prevenir confusão
   // de algoritmo (alg=none, ataques de cross-algorithm) caso a config evolua para
   // chaves assimétricas no futuro. Auditoria #16.
@@ -203,6 +247,15 @@ export async function buildApp() {
   await app.register(fastifyMultipart, { limits: { fileSize: 5 * 1024 * 1024, files: 10 } })
 
   const db = createDatabaseClient(env.DATABASE_URL)
+
+  // Auditoria #5: Redis pra rate-limit distribuído. Conecta antes da migração
+  // pra falhar cedo se a infra estiver incompleta.
+  const redis = createRedisClient(env.REDIS_URL)
+  redis.on('error', (err: Error) => {
+    app.log.error({ err }, 'redis: connection error (rate-limit fail-closes até reconectar)')
+  })
+  setRateLimitRedis(redis)
+  app.addHook('onClose', async () => { await redis.quit().catch(() => {}) })
 
   await migrate(db, { migrationsFolder: join(__dirname, 'shared/infra/database/migrations') })
 

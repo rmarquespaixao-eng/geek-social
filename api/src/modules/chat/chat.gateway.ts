@@ -1,5 +1,6 @@
-import { Server as SocketIOServer } from 'socket.io'
+import { Server as SocketIOServer, type Socket } from 'socket.io'
 import type { Server as HttpServer } from 'node:http'
+import type { z } from 'zod'
 import type { ConversationsService } from './conversations.service.js'
 import type { MessagesService } from './messages.service.js'
 import type { PresenceService } from './presence.service.js'
@@ -8,6 +9,28 @@ import type { ConversationMember } from '../../shared/contracts/conversations.re
 import type { IFriendsRepository } from '../../shared/contracts/friends.repository.contract.js'
 import type { UsersRepository } from '../users/users.repository.js'
 import { env } from '../../config/env.js'
+import {
+  gwMessageSendSchema,
+  gwConversationIdSchema,
+  gwCallInviteSchema,
+  gwCallIdSchema,
+  gwCallEndSchema,
+  gwCallSignalSchema,
+} from './chat.schema.js'
+
+function parsePayload<T extends z.ZodTypeAny>(
+  socket: Socket,
+  schema: T,
+  data: unknown,
+  event: string,
+): z.infer<T> | null {
+  const result = schema.safeParse(data)
+  if (!result.success) {
+    socket.emit('error', { code: 'INVALID_PAYLOAD', event })
+    return null
+  }
+  return result.data
+}
 
 type JwtVerifyFn = (token: string) => { userId: string; tokenVersion?: number; [key: string]: unknown }
 
@@ -125,7 +148,9 @@ export class ChatGateway {
       })
 
       // message:send
-      socket.on('message:send', async (data: { conversationId: string; content?: string; attachmentIds?: string[]; isEncrypted?: boolean }) => {
+      socket.on('message:send', async (raw: unknown) => {
+        const data = parsePayload(socket, gwMessageSendSchema, raw, 'message:send')
+        if (!data) return
         if (!this.checkMessageRateLimit(userId)) {
           socket.emit('error', { code: 'RATE_LIMIT_EXCEEDED' })
           return
@@ -160,7 +185,9 @@ export class ChatGateway {
       })
 
       // conversation:read
-      socket.on('conversation:read', async (data: { conversationId: string }) => {
+      socket.on('conversation:read', async (raw: unknown) => {
+        const data = parsePayload(socket, gwConversationIdSchema, raw, 'conversation:read')
+        if (!data) return
         const member = await this.conversationsService.findMember(data.conversationId, userId)
         if (!member) return
         await this.conversationsService.markAsRead(data.conversationId, userId).catch(() => {})
@@ -178,7 +205,9 @@ export class ChatGateway {
       })
 
       // typing
-      socket.on('typing:start', async (data: { conversationId: string }) => {
+      socket.on('typing:start', async (raw: unknown) => {
+        const data = parsePayload(socket, gwConversationIdSchema, raw, 'typing:start')
+        if (!data) return
         const member = await this.conversationsService.findMember(data.conversationId, userId)
         if (!member) return
         const blocked = await this.messagesService.getBlockedRecipients(data.conversationId, userId)
@@ -188,7 +217,9 @@ export class ChatGateway {
         })
       })
 
-      socket.on('typing:stop', async (data: { conversationId: string }) => {
+      socket.on('typing:stop', async (raw: unknown) => {
+        const data = parsePayload(socket, gwConversationIdSchema, raw, 'typing:stop')
+        if (!data) return
         const member = await this.conversationsService.findMember(data.conversationId, userId)
         if (!member) return
         const blocked = await this.messagesService.getBlockedRecipients(data.conversationId, userId)
@@ -200,8 +231,9 @@ export class ChatGateway {
 
       // ──────── Chat temporário ────────
       // Frontend marca a DM ativa ao entrar
-      socket.on('chat:dm:enter', async (data: { conversationId: string }) => {
-        if (!data?.conversationId) return
+      socket.on('chat:dm:enter', async (raw: unknown) => {
+        const data = parsePayload(socket, gwConversationIdSchema, raw, 'chat:dm:enter')
+        if (!data) return
         const member = await this.conversationsService.findMember(data.conversationId, userId)
         if (!member) return
         this.markDmActive(userId, data.conversationId)
@@ -211,8 +243,9 @@ export class ChatGateway {
       })
 
       // Frontend sinaliza saída da DM → dispara cleanup imediato de mensagens lidas
-      socket.on('chat:dm:leave', async (data: { conversationId: string }) => {
-        if (!data?.conversationId) return
+      socket.on('chat:dm:leave', async (raw: unknown) => {
+        const data = parsePayload(socket, gwConversationIdSchema, raw, 'chat:dm:leave')
+        if (!data) return
         const member = await this.conversationsService.findMember(data.conversationId, userId)
         if (!member) return
         const opened: Set<string> | undefined = socket.data.openedDms
@@ -224,9 +257,10 @@ export class ChatGateway {
       })
 
       // ──────── WebRTC signaling ────────
-      socket.on('call:invite', async (data: { conversationId: string; callId: string }) => {
+      socket.on('call:invite', async (raw: unknown) => {
+        const data = parsePayload(socket, gwCallInviteSchema, raw, 'call:invite')
+        if (!data) return
         try {
-          if (!data?.callId || !data?.conversationId) return
           if (this.callSessions.has(data.callId)) return
 
           const conv = await this.conversationsService.getConversation(data.conversationId, userId).catch(() => null)
@@ -266,12 +300,14 @@ export class ChatGateway {
             fromAvatar: callerInfo?.avatarUrl ?? null,
           })
         } catch {
-          socket.emit('call:failed', { callId: data?.callId, code: 'NOT_FOUND' })
+          socket.emit('call:failed', { callId: data.callId, code: 'NOT_FOUND' })
         }
       })
 
-      socket.on('call:accept', async (data: { callId: string }) => {
-        const session = this.callSessions.get(data?.callId)
+      socket.on('call:accept', async (raw: unknown) => {
+        const data = parsePayload(socket, gwCallIdSchema, raw, 'call:accept')
+        if (!data) return
+        const session = this.callSessions.get(data.callId)
         if (!session) return
         if (session.calleeId !== userId) return
         const member = await this.conversationsService.findMember(session.conversationId, userId)
@@ -279,8 +315,10 @@ export class ChatGateway {
         this.io.to(`user:${session.initiatorId}`).emit('call:accepted', { callId: session.callId })
       })
 
-      socket.on('call:reject', async (data: { callId: string }) => {
-        const session = this.callSessions.get(data?.callId)
+      socket.on('call:reject', async (raw: unknown) => {
+        const data = parsePayload(socket, gwCallIdSchema, raw, 'call:reject')
+        if (!data) return
+        const session = this.callSessions.get(data.callId)
         if (!session) return
         if (session.calleeId !== userId) return
         const member = await this.conversationsService.findMember(session.conversationId, userId)
@@ -289,8 +327,10 @@ export class ChatGateway {
         this.callSessions.delete(session.callId)
       })
 
-      socket.on('call:cancel', async (data: { callId: string }) => {
-        const session = this.callSessions.get(data?.callId)
+      socket.on('call:cancel', async (raw: unknown) => {
+        const data = parsePayload(socket, gwCallIdSchema, raw, 'call:cancel')
+        if (!data) return
+        const session = this.callSessions.get(data.callId)
         if (!session) return
         if (session.initiatorId !== userId) return
         const member = await this.conversationsService.findMember(session.conversationId, userId)
@@ -299,8 +339,10 @@ export class ChatGateway {
         this.callSessions.delete(session.callId)
       })
 
-      socket.on('call:end', async (data: { callId: string; durationSec?: number }) => {
-        const session = this.callSessions.get(data?.callId)
+      socket.on('call:end', async (raw: unknown) => {
+        const data = parsePayload(socket, gwCallEndSchema, raw, 'call:end')
+        if (!data) return
+        const session = this.callSessions.get(data.callId)
         if (!session) return
         if (session.initiatorId !== userId && session.calleeId !== userId) return
         const member = await this.conversationsService.findMember(session.conversationId, userId)
@@ -310,8 +352,10 @@ export class ChatGateway {
         this.callSessions.delete(session.callId)
       })
 
-      socket.on('call:signal', async (data: { callId: string; type: 'offer' | 'answer' | 'ice'; payload: unknown }) => {
-        const session = this.callSessions.get(data?.callId)
+      socket.on('call:signal', async (raw: unknown) => {
+        const data = parsePayload(socket, gwCallSignalSchema, raw, 'call:signal')
+        if (!data) return
+        const session = this.callSessions.get(data.callId)
         if (!session) return
         if (session.initiatorId !== userId && session.calleeId !== userId) return
         const member = await this.conversationsService.findMember(session.conversationId, userId)

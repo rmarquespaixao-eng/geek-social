@@ -11,7 +11,7 @@ const PREKEY_BATCH = 100
 const ROTATION_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000
 const OTP_REFILL_THRESHOLD = 20
 const DB_NAME = 'geek-signal-v1'
-const DB_VERSION = 2
+const DB_VERSION = 3
 
 const STORE_META = 'meta'
 const STORE_PREKEYS = 'prekeys'
@@ -20,6 +20,7 @@ const STORE_KYBER_PREKEYS = 'kyberPrekeys'
 const STORE_SESSIONS = 'sessions'
 const STORE_SENDER_KEYS = 'senderKeys'
 const STORE_IDENTITIES = 'identities'
+const STORE_DM_PLAINTEXTS = 'dmPlaintexts'
 
 const ALL_STORES = [
   STORE_META,
@@ -29,6 +30,7 @@ const ALL_STORES = [
   STORE_SESSIONS,
   STORE_SENDER_KEYS,
   STORE_IDENTITIES,
+  STORE_DM_PLAINTEXTS,
 ] as const
 
 // ── b64 helpers ───────────────────────────────────────────────────────────
@@ -66,6 +68,7 @@ function openDb(): Promise<IDBDatabase> {
         STORE_SESSIONS,
         STORE_SENDER_KEYS,
         STORE_IDENTITIES,
+        STORE_DM_PLAINTEXTS,
       ]) {
         if (!db.objectStoreNames.contains(s)) {
           db.createObjectStore(s, { keyPath: 'key' })
@@ -125,6 +128,14 @@ interface IdentityRow {
   status: 'trusted' | 'pending'
   pendingNewKey?: Uint8Array
   pendingDetectedAt?: number
+}
+
+interface DmPlaintextRow {
+  key: string
+  userId: string
+  messageId: string
+  plaintext: string
+  cachedAt: number
 }
 
 function txGet<T = unknown>(store: string, key: IDBValidKey): Promise<T | null> {
@@ -898,4 +909,33 @@ export async function clearSignalLocalKeys(userId: string): Promise<void> {
 
 export async function adoptRestoredSession(session: SignalSession): Promise<void> {
   _activeSession = session
+}
+
+// ── DM plaintext cache ───────────────────────────────────────────────────
+//
+// Why: Signal DM ratchets advance on every decrypt — a ciphertext decrypted
+// once cannot be decrypted again from the same session state. After a reload,
+// the in-memory message list is gone but the server still returns ciphertext;
+// trying to decrypt it would fail (ratchet has consumed that OTP / advanced
+// chains). Plus, sender's own outgoing ciphertext is never decryptable locally
+// (asymmetric session). We persist successful plaintexts here, indexed by
+// messageId, so reloads can render the history without re-decrypting.
+
+export async function cacheDmPlaintext(userId: string, messageId: string, plaintext: string): Promise<void> {
+  await txPut(STORE_DM_PLAINTEXTS, {
+    key: `${userId}:${messageId}`,
+    userId,
+    messageId,
+    plaintext,
+    cachedAt: Date.now(),
+  } satisfies DmPlaintextRow)
+}
+
+export async function getDmPlaintext(userId: string, messageId: string): Promise<string | null> {
+  const row = await txGet<DmPlaintextRow>(STORE_DM_PLAINTEXTS, `${userId}:${messageId}`)
+  return row?.plaintext ?? null
+}
+
+export async function deleteDmPlaintext(userId: string, messageId: string): Promise<void> {
+  await txDelete(STORE_DM_PLAINTEXTS, `${userId}:${messageId}`)
 }

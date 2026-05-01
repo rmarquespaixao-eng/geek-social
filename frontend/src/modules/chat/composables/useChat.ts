@@ -4,6 +4,11 @@ import { ref, computed } from 'vue'
 import * as chatService from '../services/chatService'
 import * as chatCrypto from '../services/chatCrypto'
 import { CryptoNotReadyError, PeerHasNoKeysError } from '../services/chatCrypto'
+import {
+  cacheDmPlaintext,
+  getDmPlaintext,
+  deleteDmPlaintext,
+} from '@/shared/crypto/signal/SignalClient'
 import type {
   Conversation,
   Message,
@@ -40,12 +45,13 @@ export const useChat = defineStore('chat', () => {
   const messagesLoading = ref(false)
   const error = ref<string | null>(null)
 
-  // Plaintexts of outgoing encrypted messages, keyed by message id.
-  // Why: Signal DM sessions are asymmetric — the sender cannot decrypt the
-  // wire ciphertext of their own outgoing message (the receiving chain belongs
-  // to the peer). Cached at send time so the local UI (immediate echo, socket
-  // round-trip, replies that quote it) renders the plaintext. Lost on reload.
-  const _ownPlaintexts = new Map<string, string>()
+  // Plaintexts are persisted in IndexedDB (STORE_DM_PLAINTEXTS) keyed by
+  // messageId. Why: Signal ratchets advance on every decrypt — a reload
+  // wipes the in-memory message list, then the server replays the same
+  // ciphertext, but the ratchet has already moved past it. Without a
+  // persistent cache, every history fetch after F5 would render `[Mensagem
+  // criptografada]`. Outgoing messages are stored too (own ciphertext is
+  // never decryptable — sessions are asymmetric).
 
   // ── Computed ────────────────────────────────────────────────────────────────
   const activeConversation = computed(() =>
@@ -282,7 +288,9 @@ export const useChat = defineStore('chat', () => {
     }
     try {
       const message = await chatService.sendMessage(convId, finalPayload)
-      if (isEncrypted && payload.content) _ownPlaintexts.set(message.id, payload.content)
+      if (isEncrypted && payload.content && myId) {
+        await cacheDmPlaintext(myId, message.id, payload.content)
+      }
       const decrypted = await _decryptMessage(message, conv ?? undefined)
       handleNewMessage({ conversationId: convId, message: decrypted })
       replyingTo.value = null
@@ -314,7 +322,9 @@ export const useChat = defineStore('chat', () => {
     }
 
     const updated = await chatService.editMessage(conversationId, messageId, finalContent)
-    if (finalContent !== content) _ownPlaintexts.set(updated.id, content)
+    if (finalContent !== content && myId) {
+      await cacheDmPlaintext(myId, updated.id, content)
+    }
     const decrypted = await _decryptMessage(updated, conv ?? undefined)
     const list = messages.value.get(conversationId)
     if (list) {
@@ -364,7 +374,9 @@ export const useChat = defineStore('chat', () => {
           content: encContent,
           isEncrypted,
         })
-        if (isEncrypted && sourceMessage.content) _ownPlaintexts.set(sent.id, sourceMessage.content)
+        if (isEncrypted && sourceMessage.content && myId) {
+          await cacheDmPlaintext(myId, sent.id, sourceMessage.content)
+        }
         const decrypted = await _decryptMessage(sent, targetConv)
         const existing = messages.value.get(targetConvId)
         if (existing) {
@@ -401,12 +413,11 @@ export const useChat = defineStore('chat', () => {
 
     const resolvedConv = conv ?? conversations.value.find(c => c.id === msg.conversationId)
 
-    // Own message: Signal DM sessions are asymmetric (sender can't decrypt own
-    // ciphertext). Use the plaintext cached at send time. Historical own
-    // messages from previous sessions miss the cache and stay encrypted.
-    if (msg.senderId === myId) {
-      const cached = _ownPlaintexts.get(msg.id)
-      if (cached === undefined) return { ...msg, decryptError: true }
+    // IDB cache hit: bypasses ratchet entirely. Used for own messages (cached
+    // at send time) and for peer messages already decrypted at least once
+    // (cached on first successful decrypt below).
+    const cachedPlaintext = await getDmPlaintext(myId, msg.id)
+    if (cachedPlaintext !== null) {
       let decryptedReplyTo = msg.replyTo
       if (msg.replyTo?.content) {
         const rc = await _decryptReplyContent(
@@ -414,7 +425,13 @@ export const useChat = defineStore('chat', () => {
         )
         if (rc !== null) decryptedReplyTo = { ...msg.replyTo, content: rc }
       }
-      return { ...msg, content: cached, replyTo: decryptedReplyTo, decryptError: false }
+      return { ...msg, content: cachedPlaintext, replyTo: decryptedReplyTo, decryptError: false }
+    }
+
+    // Own message without cache (legacy / pre-cache message): cannot decrypt
+    // own ciphertext (Signal DM sessions are asymmetric).
+    if (msg.senderId === myId) {
+      return { ...msg, decryptError: true }
     }
 
     try {
@@ -430,6 +447,10 @@ export const useChat = defineStore('chat', () => {
       }
 
       if (plaintext === null) return { ...msg, decryptError: true }
+
+      // Persist for future reloads — ratchet has now consumed this ciphertext
+      // and won't decrypt it again. Best-effort: failures don't block render.
+      void cacheDmPlaintext(myId, msg.id, plaintext).catch(() => {})
 
       let decryptedReplyTo = msg.replyTo
       if (msg.replyTo?.content) {
@@ -458,23 +479,31 @@ export const useChat = defineStore('chat', () => {
     originalMessageId?: string,
   ): Promise<string | null> {
     if (!conv) return null
-    // Reply quotes own message — Signal DM is asymmetric, fall back to cache.
-    if (originalSenderId === myId && originalMessageId) {
-      return _ownPlaintexts.get(originalMessageId) ?? null
+    // Try the persistent cache first — covers own messages (always) and peer
+    // messages already decrypted once (ratchet has moved on, can't redo).
+    if (originalMessageId) {
+      const cached = await getDmPlaintext(myId, originalMessageId)
+      if (cached !== null) return cached
     }
+    // Own message with no cache: nothing else we can do (asymmetric session).
+    if (originalSenderId === myId) return null
     try {
+      let plaintext: string | null = null
       if (conv.type === 'dm') {
         const peer = conv.participants.find(p => p.userId !== myId)
         if (!peer) return null
-        return await chatCrypto.decryptDm(peer.userId, replyContent)
+        plaintext = await chatCrypto.decryptDm(peer.userId, replyContent)
       } else if (conv.type === 'group') {
         if (!originalSenderId) return null
-        return await chatCrypto.decryptGroup(originalSenderId, conv.id, replyContent)
+        plaintext = await chatCrypto.decryptGroup(originalSenderId, conv.id, replyContent)
       }
+      if (plaintext !== null && originalMessageId) {
+        void cacheDmPlaintext(myId, originalMessageId, plaintext).catch(() => {})
+      }
+      return plaintext
     } catch {
       return null
     }
-    return null
   }
 
   /**
@@ -584,6 +613,8 @@ export const useChat = defineStore('chat', () => {
         convId,
         list.filter((m) => m.id !== messageId),
       )
+      const myId = authStore.user?.id
+      if (myId) void deleteDmPlaintext(myId, messageId).catch(() => {})
     } catch (e: unknown) {
       error.value = e instanceof Error ? e.message : 'Erro ao excluir mensagem'
       throw e
@@ -712,6 +743,8 @@ export const useChat = defineStore('chat', () => {
       payload.conversationId,
       list.filter((m) => m.id !== payload.messageId),
     )
+    const myId = authStore.user?.id
+    if (myId) void deleteDmPlaintext(myId, payload.messageId).catch(() => {})
   }
 
   function handleTyping({ conversationId, userId, isTyping }: SocketTyping): void {

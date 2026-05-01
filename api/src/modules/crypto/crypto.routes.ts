@@ -5,92 +5,233 @@ import { authenticate } from '../../shared/middleware/authenticate.js'
 
 type CryptoRoutesOptions = { cryptoService: CryptoService }
 
+const fromB64 = (s: string): Uint8Array => Buffer.from(s, 'base64')
+const toB64 = (b: Uint8Array): string => Buffer.from(b).toString('base64')
+
 const userIdParam = z.object({ userId: z.string().uuid() })
 const conversationIdParam = z.object({ conversationId: z.string().uuid() })
-
-const upsertPublicKeyBody = z.object({
-  publicKey: z.string().min(1).max(2048),
+const skdmParams = z.object({
+  conversationId: z.string().uuid(),
+  senderUserId: z.string().uuid(),
 })
 
-const upsertBackupBody = z.object({
-  encryptedBackup: z.string().min(1),
-  backupSalt: z.string().min(1),
-  backupIv: z.string().min(1),
+const b64 = z.string().min(1).max(8192).regex(/^[A-Za-z0-9+/=]+$/, 'invalid base64')
+
+const putIdentityBody = z.object({
+  identityKey: b64,
+  registrationId: z.number().int().min(0).max(0x3fff),
 })
 
-const setGroupKeysBody = z.object({
-  keys: z.array(z.object({
-    userId: z.string().uuid(),
-    encryptedKey: z.string().min(1),
-    keyVersion: z.number().int().positive(),
+const putSignedPrekeyBody = z.object({
+  prekeyId: z.number().int().min(0).max(0xffffff),
+  publicKey: b64,
+  signature: b64,
+})
+
+const putKyberPrekeyBody = z.object({
+  prekeyId: z.number().int().min(0).max(0xffffff),
+  publicKey: b64,
+  signature: b64,
+})
+
+const putOneTimePrekeysBody = z.object({
+  prekeys: z.array(z.object({
+    prekeyId: z.number().int().min(0).max(0xffffff),
+    publicKey: b64,
+  })).min(1).max(200),
+})
+
+const putBackupBody = z.object({
+  encryptedBackup: b64,
+  backupSalt: b64,
+  backupIv: b64,
+})
+
+const putSenderKeyDistributionsBody = z.object({
+  distributions: z.array(z.object({
+    recipientUserId: z.string().uuid(),
+    ciphertext: b64,
   })).min(1).max(500),
-})
-
-const batchUserIdsQuery = z.object({
-  userIds: z.string().min(1),
 })
 
 export const cryptoRoutes: FastifyPluginAsyncZod<CryptoRoutesOptions> = async (app, opts) => {
   const svc = opts.cryptoService
 
-  app.put('/my-key', {
+  app.put('/identity', {
     schema: {
-      operationId: 'crypto_upsert_public_key',
+      operationId: 'crypto_put_identity',
       tags: ['Crypto'],
-      body: upsertPublicKeyBody,
-      response: { 200: z.object({ publicKey: z.string(), updatedAt: z.string() }) },
+      body: putIdentityBody,
+      response: { 204: z.void() },
     },
     preHandler: authenticate,
   }, async (req, reply) => {
     const { userId } = req.user as { userId: string }
-    const result = await svc.upsertPublicKey(userId, req.body.publicKey)
-    return reply.send({ publicKey: result.publicKey, updatedAt: result.updatedAt.toISOString() })
+    await svc.putIdentity(userId, {
+      identityKey: fromB64(req.body.identityKey),
+      registrationId: req.body.registrationId,
+    })
+    return reply.status(204).send()
   })
 
-  app.get('/public-key/:userId', {
+  app.get('/identity/:userId', {
     schema: {
-      operationId: 'crypto_get_public_key',
+      operationId: 'crypto_get_identity',
       tags: ['Crypto'],
       params: userIdParam,
       response: {
-        200: z.object({ userId: z.string(), publicKey: z.string() }),
+        200: z.object({
+          userId: z.string(),
+          identityKey: z.string(),
+          registrationId: z.number(),
+        }),
         404: z.object({ error: z.string() }),
       },
     },
     preHandler: authenticate,
   }, async (req, reply) => {
-    const result = await svc.getPublicKey(req.params.userId)
-    if (!result) return reply.status(404).send({ error: 'KEY_NOT_FOUND' })
-    return reply.send(result)
+    const row = await svc.getIdentity(req.params.userId)
+    if (!row) return reply.status(404).send({ error: 'IDENTITY_NOT_FOUND' })
+    return reply.send({
+      userId: row.userId,
+      identityKey: toB64(row.identityKey),
+      registrationId: row.registrationId,
+    })
   })
 
-  app.get('/public-keys', {
+  app.put('/signed-prekey', {
     schema: {
-      operationId: 'crypto_get_public_keys_batch',
+      operationId: 'crypto_put_signed_prekey',
       tags: ['Crypto'],
-      querystring: batchUserIdsQuery,
+      body: putSignedPrekeyBody,
+      response: { 204: z.void() },
+    },
+    preHandler: authenticate,
+  }, async (req, reply) => {
+    const { userId } = req.user as { userId: string }
+    await svc.putSignedPrekey(userId, {
+      prekeyId: req.body.prekeyId,
+      publicKey: fromB64(req.body.publicKey),
+      signature: fromB64(req.body.signature),
+    })
+    return reply.status(204).send()
+  })
+
+  app.put('/kyber-prekey', {
+    schema: {
+      operationId: 'crypto_put_kyber_prekey',
+      tags: ['Crypto'],
+      body: putKyberPrekeyBody,
+      response: { 204: z.void() },
+    },
+    preHandler: authenticate,
+  }, async (req, reply) => {
+    const { userId } = req.user as { userId: string }
+    await svc.putKyberPrekey(userId, {
+      prekeyId: req.body.prekeyId,
+      publicKey: fromB64(req.body.publicKey),
+      signature: fromB64(req.body.signature),
+    })
+    return reply.status(204).send()
+  })
+
+  app.post('/one-time-prekeys', {
+    schema: {
+      operationId: 'crypto_put_one_time_prekeys',
+      tags: ['Crypto'],
+      body: putOneTimePrekeysBody,
+      response: { 204: z.void() },
+    },
+    preHandler: authenticate,
+  }, async (req, reply) => {
+    const { userId } = req.user as { userId: string }
+    await svc.putOneTimePrekeys(userId, req.body.prekeys.map(p => ({
+      prekeyId: p.prekeyId,
+      publicKey: fromB64(p.publicKey),
+    })))
+    return reply.status(204).send()
+  })
+
+  app.get('/one-time-prekeys/count', {
+    schema: {
+      operationId: 'crypto_count_one_time_prekeys',
+      tags: ['Crypto'],
+      response: { 200: z.object({ count: z.number().int() }) },
+    },
+    preHandler: authenticate,
+  }, async (req, reply) => {
+    const { userId } = req.user as { userId: string }
+    const count = await svc.countOneTimePrekeys(userId)
+    return reply.send({ count })
+  })
+
+  app.get('/prekey-bundle/:userId', {
+    schema: {
+      operationId: 'crypto_fetch_prekey_bundle',
+      tags: ['Crypto'],
+      params: userIdParam,
       response: {
-        200: z.object({ keys: z.array(z.object({ userId: z.string(), publicKey: z.string() })) }),
+        200: z.object({
+          userId: z.string(),
+          registrationId: z.number(),
+          identityKey: z.string(),
+          signedPrekey: z.object({
+            prekeyId: z.number(),
+            publicKey: z.string(),
+            signature: z.string(),
+          }),
+          kyberPrekey: z.object({
+            prekeyId: z.number(),
+            publicKey: z.string(),
+            signature: z.string(),
+          }),
+          oneTimePrekey: z.object({
+            prekeyId: z.number(),
+            publicKey: z.string(),
+          }).nullable(),
+        }),
+        404: z.object({ error: z.string() }),
       },
     },
     preHandler: authenticate,
   }, async (req, reply) => {
-    const userIds = req.query.userIds.split(',').slice(0, 100).filter(id => id.length > 0)
-    const keys = await svc.getPublicKeysBatch(userIds)
-    return reply.send({ keys })
+    const bundle = await svc.fetchPrekeyBundle(req.params.userId)
+    if (!bundle) return reply.status(404).send({ error: 'BUNDLE_NOT_FOUND' })
+    return reply.send({
+      userId: bundle.userId,
+      registrationId: bundle.registrationId,
+      identityKey: toB64(bundle.identityKey),
+      signedPrekey: {
+        prekeyId: bundle.signedPrekey.prekeyId,
+        publicKey: toB64(bundle.signedPrekey.publicKey),
+        signature: toB64(bundle.signedPrekey.signature),
+      },
+      kyberPrekey: {
+        prekeyId: bundle.kyberPrekey.prekeyId,
+        publicKey: toB64(bundle.kyberPrekey.publicKey),
+        signature: toB64(bundle.kyberPrekey.signature),
+      },
+      oneTimePrekey: bundle.oneTimePrekey
+        ? { prekeyId: bundle.oneTimePrekey.prekeyId, publicKey: toB64(bundle.oneTimePrekey.publicKey) }
+        : null,
+    })
   })
 
   app.put('/backup', {
     schema: {
       operationId: 'crypto_upsert_backup',
       tags: ['Crypto'],
-      body: upsertBackupBody,
+      body: putBackupBody,
       response: { 204: z.void() },
     },
     preHandler: authenticate,
   }, async (req, reply) => {
     const { userId } = req.user as { userId: string }
-    await svc.upsertBackup(userId, req.body)
+    await svc.upsertBackup(userId, {
+      encryptedBackup: fromB64(req.body.encryptedBackup),
+      backupSalt: fromB64(req.body.backupSalt),
+      backupIv: fromB64(req.body.backupIv),
+    })
     return reply.status(204).send()
   })
 
@@ -99,7 +240,11 @@ export const cryptoRoutes: FastifyPluginAsyncZod<CryptoRoutesOptions> = async (a
       operationId: 'crypto_get_backup',
       tags: ['Crypto'],
       response: {
-        200: z.object({ encryptedBackup: z.string(), backupSalt: z.string(), backupIv: z.string() }),
+        200: z.object({
+          encryptedBackup: z.string(),
+          backupSalt: z.string(),
+          backupIv: z.string(),
+        }),
         404: z.object({ error: z.string() }),
       },
     },
@@ -108,15 +253,19 @@ export const cryptoRoutes: FastifyPluginAsyncZod<CryptoRoutesOptions> = async (a
     const { userId } = req.user as { userId: string }
     const backup = await svc.getBackup(userId)
     if (!backup) return reply.status(404).send({ error: 'NO_BACKUP' })
-    return reply.send(backup)
+    return reply.send({
+      encryptedBackup: toB64(backup.encryptedBackup),
+      backupSalt: toB64(backup.backupSalt),
+      backupIv: toB64(backup.backupIv),
+    })
   })
 
-  app.put('/group-key/:conversationId', {
+  app.put('/sender-key-distribution/:conversationId', {
     schema: {
-      operationId: 'crypto_set_group_keys',
+      operationId: 'crypto_put_sender_key_distributions',
       tags: ['Crypto'],
       params: conversationIdParam,
-      body: setGroupKeysBody,
+      body: putSenderKeyDistributionsBody,
       response: {
         204: z.void(),
         403: z.object({ error: z.string() }),
@@ -127,7 +276,14 @@ export const cryptoRoutes: FastifyPluginAsyncZod<CryptoRoutesOptions> = async (a
   }, async (req, reply) => {
     const { userId } = req.user as { userId: string }
     try {
-      await svc.setGroupKeys(userId, req.params.conversationId, req.body.keys)
+      await svc.putSenderKeyDistributions(
+        userId,
+        req.params.conversationId,
+        req.body.distributions.map(d => ({
+          recipientUserId: d.recipientUserId,
+          ciphertext: fromB64(d.ciphertext),
+        })),
+      )
       return reply.status(204).send()
     } catch (err) {
       const e = err as Error
@@ -137,13 +293,13 @@ export const cryptoRoutes: FastifyPluginAsyncZod<CryptoRoutesOptions> = async (a
     }
   })
 
-  app.get('/group-key/:conversationId', {
+  app.get('/sender-key-distribution/:conversationId/:senderUserId', {
     schema: {
-      operationId: 'crypto_get_group_key',
+      operationId: 'crypto_get_sender_key_distribution',
       tags: ['Crypto'],
-      params: conversationIdParam,
+      params: skdmParams,
       response: {
-        200: z.object({ encryptedKey: z.string(), keyVersion: z.number() }),
+        200: z.object({ ciphertext: z.string() }),
         403: z.object({ error: z.string() }),
         404: z.object({ error: z.string() }),
       },
@@ -152,9 +308,9 @@ export const cryptoRoutes: FastifyPluginAsyncZod<CryptoRoutesOptions> = async (a
   }, async (req, reply) => {
     const { userId } = req.user as { userId: string }
     try {
-      const key = await svc.getGroupKey(userId, req.params.conversationId)
-      if (!key) return reply.status(404).send({ error: 'KEY_NOT_FOUND' })
-      return reply.send({ encryptedKey: key.encryptedKey, keyVersion: key.keyVersion })
+      const skdm = await svc.getSenderKeyDistribution(userId, req.params.conversationId, req.params.senderUserId)
+      if (!skdm) return reply.status(404).send({ error: 'SKDM_NOT_FOUND' })
+      return reply.send({ ciphertext: toB64(skdm.ciphertext) })
     } catch (err) {
       const e = err as Error
       if (e.message === 'FORBIDDEN') return reply.status(403).send({ error: 'FORBIDDEN' })

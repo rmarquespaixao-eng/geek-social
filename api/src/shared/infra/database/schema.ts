@@ -2,8 +2,15 @@ import { sql } from 'drizzle-orm'
 import {
   pgTable, pgEnum, uuid, varchar, text,
   boolean, timestamp, date, integer, smallint, jsonb, uniqueIndex, index, numeric, primaryKey,
+  customType,
 } from 'drizzle-orm/pg-core'
 import { communityCategories } from '../../../modules/communities/categories.js'
+
+const bytea = customType<{ data: Uint8Array; default: false }>({
+  dataType() {
+    return 'bytea'
+  },
+})
 
 export const privacyEnum = pgEnum('privacy', ['public', 'friends_only', 'private'])
 export const collectionTypeEnum = pgEnum('collection_type', ['games', 'books', 'cardgames', 'boardgames', 'custom'])
@@ -714,4 +721,58 @@ export const communityBadgeGrants = pgTable('community_badge_grants', {
   grantedAt: timestamp('granted_at', { withTimezone: true }).defaultNow().notNull(),
 }, (table) => ({
   badgeUserUniq: uniqueIndex('community_badge_grants_badge_user_uniq').on(table.badgeId, table.userId),
+}))
+
+export const signalIdentityKeys = pgTable('signal_identity_keys', {
+  userId: uuid('user_id').primaryKey().references(() => users.id, { onDelete: 'cascade' }),
+  identityKey: bytea('identity_key').notNull(),
+  registrationId: integer('registration_id').notNull(),
+  encryptedBackup: bytea('encrypted_backup'),
+  backupSalt: bytea('backup_salt'),
+  backupIv: bytea('backup_iv'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+})
+
+export const signalSignedPrekeys = pgTable('signal_signed_prekeys', {
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  prekeyId: integer('prekey_id').notNull(),
+  publicKey: bytea('public_key').notNull(),
+  signature: bytea('signature').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.userId, table.prekeyId] }),
+  userCreatedIdx: index('signal_signed_prekeys_user_created_idx').on(table.userId, table.createdAt),
+}))
+
+export const signalKyberPrekeys = pgTable('signal_kyber_prekeys', {
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  prekeyId: integer('prekey_id').notNull(),
+  publicKey: bytea('public_key').notNull(),
+  signature: bytea('signature').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.userId, table.prekeyId] }),
+  userCreatedIdx: index('signal_kyber_prekeys_user_created_idx').on(table.userId, table.createdAt),
+}))
+
+export const signalOneTimePrekeys = pgTable('signal_one_time_prekeys', {
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  prekeyId: integer('prekey_id').notNull(),
+  publicKey: bytea('public_key').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.userId, table.prekeyId] }),
+  userIdx: index('signal_one_time_prekeys_user_idx').on(table.userId),
+}))
+
+export const signalSenderKeyDistributions = pgTable('signal_sender_key_distributions', {
+  conversationId: uuid('conversation_id').notNull().references(() => conversations.id, { onDelete: 'cascade' }),
+  senderUserId: uuid('sender_user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  recipientUserId: uuid('recipient_user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  ciphertext: bytea('ciphertext').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.conversationId, table.senderUserId, table.recipientUserId] }),
+  recipientIdx: index('signal_skdm_recipient_idx').on(table.recipientUserId, table.conversationId),
 }))

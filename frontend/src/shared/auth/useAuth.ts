@@ -11,7 +11,7 @@ import {
   initSignalClient,
   resetSignalSession,
 } from '@/shared/crypto/signal/SignalClient'
-import { initCrypto } from './cryptoBootstrap'
+import { initCrypto, clearCryptoSkipped } from './cryptoBootstrap'
 
 export function useAuth() {
   const store = useAuthStore()
@@ -40,6 +40,8 @@ export function useAuth() {
     try {
       await api.post('/auth/logout')
     } finally {
+      const myId = store.user?.id
+      if (myId) clearCryptoSkipped(myId)
       resetSignalSession()
       disconnectSocket()
       store.clearAuth()
@@ -56,6 +58,7 @@ export function useAuth() {
       // Old prekeys/sessions are gone after a restore — publish a fresh batch
       // so peers can keep starting new conversations with us.
       await restored.publishKeys()
+      clearCryptoSkipped(store.user.id)
       store.clearPendingCryptoRestore()
       return true
     } catch {
@@ -82,6 +85,7 @@ export function useAuth() {
 
     const enc = await session.exportEncryptedBackup(pin)
     await api.put('/crypto/backup', enc)
+    clearCryptoSkipped(userId)
     store.clearPendingCryptoRestore()
     store.setPendingPinSetup(false)
   }

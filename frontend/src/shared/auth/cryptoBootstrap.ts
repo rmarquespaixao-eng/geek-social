@@ -13,6 +13,20 @@ function is404(err: unknown): boolean {
   return (err as AxiosError | undefined)?.response?.status === 404
 }
 
+const SKIP_KEY_PREFIX = 'crypto_skip_restore:'
+
+export function markCryptoSkipped(userId: string): void {
+  try { localStorage.setItem(`${SKIP_KEY_PREFIX}${userId}`, '1') } catch { /* ignore quota/security errors */ }
+}
+
+export function isCryptoSkipped(userId: string): boolean {
+  try { return localStorage.getItem(`${SKIP_KEY_PREFIX}${userId}`) === '1' } catch { return false }
+}
+
+export function clearCryptoSkipped(userId: string): void {
+  try { localStorage.removeItem(`${SKIP_KEY_PREFIX}${userId}`) } catch { /* ignore */ }
+}
+
 async function fetchServerBackup(): Promise<EncryptedSignalBackup | null> {
   try {
     const { data } = await api.get<EncryptedSignalBackup>('/crypto/backup')
@@ -73,6 +87,7 @@ export async function initCrypto(userId: string, password?: string): Promise<voi
   }
 
   const backup = await fetchServerBackup()
+  const skipped = isCryptoSkipped(userId)
 
   if (backup) {
     if (password) {
@@ -80,6 +95,7 @@ export async function initCrypto(userId: string, password?: string): Promise<voi
         const restored = await SignalSession.loadFromBackup(userId, backup, password)
         await adoptRestoredSession(restored)
         await restored.publishKeys()
+        clearCryptoSkipped(userId)
         return
       } catch {
         // Login password ≠ backup password. Don't regenerate (would orphan
@@ -87,6 +103,7 @@ export async function initCrypto(userId: string, password?: string): Promise<voi
         // to the restore dialog so the user can enter the original PIN.
       }
     }
+    if (skipped) return
     store.setPendingCryptoRestore(backup)
     return
   }
@@ -95,6 +112,7 @@ export async function initCrypto(userId: string, password?: string): Promise<voi
     // Server has an identity but we have no local key and no backup.
     // Regenerating here would invalidate every session peers have with us;
     // surface the broken state via the PIN dialog instead.
+    if (skipped) return
     store.setPendingPinSetup(true)
     return
   }
@@ -105,7 +123,7 @@ export async function initCrypto(userId: string, password?: string): Promise<voi
   if (password) {
     const enc = await session.exportEncryptedBackup(password)
     await api.put('/crypto/backup', enc)
-  } else {
+  } else if (!skipped) {
     store.setPendingPinSetup(true)
   }
 }

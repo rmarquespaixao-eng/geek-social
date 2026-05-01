@@ -545,6 +545,7 @@ export const useChat = defineStore('chat', () => {
       senderId: message.senderId,
       senderName: message.senderName,
       content: message.content,
+      decryptError: message.decryptError,
     }
   }
 

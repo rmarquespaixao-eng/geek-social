@@ -5,6 +5,7 @@ import AppModal from '@/shared/ui/AppModal.vue'
 import AppButton from '@/shared/ui/AppButton.vue'
 import { useAuth } from '@/shared/auth/useAuth'
 import { useAuthStore } from '@/shared/auth/authStore'
+import { markCryptoSkipped } from '@/shared/auth/cryptoBootstrap'
 
 const authStore = useAuthStore()
 const auth = useAuth()
@@ -28,6 +29,8 @@ async function restore() {
 }
 
 function skip() {
+  const myId = authStore.user?.id
+  if (myId) markCryptoSkipped(myId)
   authStore.clearPendingCryptoRestore()
   authStore.setPendingPinSetup(false)
 }

@@ -337,7 +337,12 @@ function onDmRejected() {
         <p class="text-xs font-semibold text-(--color-accent-amber)">
           Respondendo {{ chat.replyingTo.senderName }}
         </p>
-        <p class="text-xs text-(--color-text-muted) truncate">{{ chat.replyingTo.content }}</p>
+        <p
+          :class="[
+            'text-xs truncate',
+            chat.replyingTo.decryptError ? 'italic text-(--color-text-muted)' : 'text-(--color-text-muted)',
+          ]"
+        >{{ chat.replyingTo.decryptError ? '[Mensagem criptografada]' : chat.replyingTo.content }}</p>
       </div>
       <button
         @click="chat.setReplyingTo(null)"

@@ -91,6 +91,7 @@ export interface MessageReply {
   senderName: string
   content: string
   type?: MessageType
+  decryptError?: boolean
 }
 
 export interface MessageReaction {

@@ -104,6 +104,8 @@ export interface Message {
   senderName: string
   senderAvatarUrl: string | null
   content: string
+  isEncrypted?: boolean
+  decryptError?: boolean
   type: MessageType
   attachments: MessageAttachment[]
   replyTo: MessageReply | null
@@ -149,6 +151,7 @@ export interface SendMessagePayload {
   replyToId?: string
   attachmentIds?: string[]
   callMetadata?: CallMetadata
+  isEncrypted?: boolean
 }
 
 export interface CreateGroupPayload {

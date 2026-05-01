@@ -66,6 +66,9 @@ import { PushRepository } from './modules/chat/push.repository.js'
 import { PushService } from './modules/chat/push.service.js'
 import { ChatGateway } from './modules/chat/chat.gateway.js'
 import { chatRoutes } from './modules/chat/chat.routes.js'
+import { CryptoRepository } from './modules/crypto/crypto.repository.js'
+import { CryptoService } from './modules/crypto/crypto.service.js'
+import { cryptoRoutes } from './modules/crypto/crypto.routes.js'
 import { NotificationsRepository } from './modules/notifications/notifications.repository.js'
 import { NotificationsService } from './modules/notifications/notifications.service.js'
 import { notificationsRoutes } from './modules/notifications/notifications.routes.js'
@@ -188,7 +191,14 @@ export async function buildApp() {
     credentials: true,
     methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   })
-  await app.register(fastifyJwt, { secret: env.JWT_SECRET })
+  // Algoritmo HS256 fixado explicitamente em sign + verify pra prevenir confusão
+  // de algoritmo (alg=none, ataques de cross-algorithm) caso a config evolua para
+  // chaves assimétricas no futuro. Auditoria #16.
+  await app.register(fastifyJwt, {
+    secret: env.JWT_SECRET,
+    sign: { algorithm: 'HS256' },
+    verify: { algorithms: ['HS256'] },
+  })
   await app.register(fastifyCookie)
   await app.register(fastifyMultipart, { limits: { fileSize: 5 * 1024 * 1024, files: 10 } })
 
@@ -202,6 +212,11 @@ export async function buildApp() {
 
   const userRepository = new UserRepository(db)
   const usersRepository = new UsersRepository(db)
+
+  // Decora o app com o repositório de usuários (auth) para que o middleware
+  // `authenticate` possa validar tokenVersion sem reescrever a assinatura
+  // de cada rota. Acessível via `request.server.userRepository`.
+  app.decorate('userRepository', userRepository)
   const storageService = new S3Adapter({
     bucketName: env.S3_BUCKET_NAME,
     region: env.AWS_REGION,
@@ -213,7 +228,7 @@ export async function buildApp() {
   const emailService = env.AWS_ACCESS_KEY_ID && !env.STORAGE_ENDPOINT
     ? new SESAdapter(env.SES_FROM_EMAIL, env.AWS_REGION, env.AWS_ACCESS_KEY_ID, env.AWS_SECRET_ACCESS_KEY)
     : new ConsoleEmailAdapter()
-  const authService = new AuthService(userRepository, emailService, {
+  const authService = new AuthService(db, userRepository, emailService, {
     appUrl: env.APP_URL,
     jwtSecret: env.JWT_SECRET,
     refreshTokenExpiresDays: env.REFRESH_TOKEN_EXPIRES_DAYS,
@@ -225,7 +240,7 @@ export async function buildApp() {
   const presenceRepository = new PresenceRepository(db)
   const presenceService = new PresenceService(presenceRepository)
 
-  const usersService = new UsersService(usersRepository, storageService, friendsRepository, presenceService)
+  const usersService = new UsersService(usersRepository, storageService, friendsRepository, presenceService, userRepository)
 
   const collectionsRepository = new CollectionsRepository(db)
   const collectionsService = new CollectionsService(
@@ -299,7 +314,7 @@ export async function buildApp() {
     pushService,
     friendsRepository,
     usersRepository,
-    (token: string) => app.jwt.verify(token) as { userId: string },
+    (token: string) => app.jwt.verify(token) as { userId: string; tokenVersion?: number },
   )
 
   await app.register(chatRoutes, {
@@ -313,21 +328,34 @@ export async function buildApp() {
     friendsService,
   })
 
+  const cryptoRepository = new CryptoRepository(db)
+  const cryptoService = new CryptoService(cryptoRepository, conversationsRepository)
+  await app.register(cryptoRoutes, { prefix: '/crypto', cryptoService })
+
   const reportsRepository = new ReportsRepository(db)
   const reportsService = new ReportsService(reportsRepository)
 
   const listingsRepository = new ListingsRepository(db)
-  const listingsService = new ListingsService(listingsRepository, itemsRepository, friendsRepository)
+  const listingsService = new ListingsService(db, listingsRepository, itemsRepository, friendsRepository, collectionsRepository)
 
   const offersRepository = new OffersRepository(db)
   const offerProposalsRepository = new OfferProposalsRepository(db)
-  const offersService = new OffersService(offersRepository, itemsRepository, collectionsRepository, friendsRepository, notificationsService, listingsService, offerProposalsRepository, collectionsService)
+  const offersService = new OffersService(db, offersRepository, itemsRepository, collectionsRepository, friendsRepository, notificationsService, listingsService, offerProposalsRepository, collectionsService)
   // Quebra a dependência circular: ListingsService precisa rejeitar ofertas pendentes ao encerrar/excluir
   listingsService.setOffersIntegration(offersRepository, notificationsService)
 
   const listingRatingsRepository = new ListingRatingsRepository(db)
   const listingRatingsService = new ListingRatingsService(listingRatingsRepository, offersRepository, notificationsService)
   notificationsService.setEmitter((userId, notification) => chatGateway.emitNotification(userId, notification))
+
+  // Auditoria #6: quando tokenVersion é incrementado (changePassword, setInitialPassword,
+  // logoutAllSessions), desconectar WebSockets ativos do usuário. Sem isso, conexões WS
+  // já abertas persistem mesmo com a sessão "revogada".
+  authService.afterSessionInvalidation = (userId) => {
+    chatGateway.disconnectUser(userId).catch((err) => {
+      app.log.warn({ err, userId }, 'failed to disconnect user sockets after session invalidation')
+    })
+  }
 
   // Events ("Rolê") — repos + services. Scheduler começa sem fila e recebe setQueue() depois.
   const eventsRepository = new EventsRepository(db)
@@ -471,6 +499,7 @@ export async function buildApp() {
     db,
     communitiesRepository,
     membersRepository,
+    joinRequestsRepository,
     auditLogRepository,
     storageService,
   )
@@ -480,12 +509,14 @@ export async function buildApp() {
     membersRepository,
     communitiesRepository,
     auditLogRepository,
+    notificationsService,
   )
   const membersService = new MembersService(
     db,
     membersRepository,
     communitiesRepository,
     joinRequestsService,
+    notificationsService,
   )
   const topicsService = new TopicsService(
     db,

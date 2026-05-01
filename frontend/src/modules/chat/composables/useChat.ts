@@ -2,6 +2,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import * as chatService from '../services/chatService'
+import * as cryptoSvc from '../services/cryptoService'
 import type {
   Conversation,
   Message,
@@ -183,14 +184,22 @@ export const useChat = defineStore('chat', () => {
         cursor ?? undefined,
       )
 
+      const conv = conversations.value.find(c => c.id === conversationId)
+      const settled = await Promise.allSettled(
+        result.messages.map(m => _decryptMessage(m, conv ?? undefined)),
+      )
+      const decryptedMsgs = settled.map((r, i) =>
+        r.status === 'fulfilled' ? r.value : result.messages[i],
+      )
+
       if (cursor) {
         const existing = messages.value.get(conversationId) ?? []
         messages.value = new Map(messages.value).set(conversationId, [
-          ...result.messages,
+          ...decryptedMsgs,
           ...existing,
         ])
       } else {
-        messages.value = new Map(messages.value).set(conversationId, result.messages)
+        messages.value = new Map(messages.value).set(conversationId, decryptedMsgs)
       }
 
       hasMore.value = new Map(hasMore.value).set(conversationId, result.hasMore)
@@ -220,18 +229,203 @@ export const useChat = defineStore('chat', () => {
   async function sendMessage(payload: SendMessagePayload): Promise<void> {
     if (!activeConversationId.value) return
     const convId = activeConversationId.value
+    const myId = authStore.user?.id
+    const conv = activeConversation.value
+
+    let finalContent = payload.content
+    let isEncrypted = false
+
+    if (payload.content && myId && conv && cryptoSvc.isReady(myId)) {
+      try {
+        if (conv.type === 'dm') {
+          const peer = conv.participants.find(p => p.userId !== myId)
+          if (peer) {
+            const peerPubKey = await cryptoSvc.getOrFetchPublicKey(peer.userId)
+            if (peerPubKey) {
+              finalContent = await cryptoSvc.encryptDm(myId, peerPubKey, payload.content)
+              isEncrypted = true
+            }
+          }
+        } else if (conv.type === 'group') {
+          const groupKey = await cryptoSvc.getOrLoadGroupKey(myId, convId)
+          if (groupKey) {
+            finalContent = await cryptoSvc.encryptGroup(groupKey, payload.content)
+            isEncrypted = true
+          }
+        }
+      } catch {
+        // fallback: send unencrypted
+      }
+    }
+
     const finalPayload: SendMessagePayload = {
       ...payload,
+      content: finalContent,
+      isEncrypted,
       replyToId: replyingTo.value?.id ?? payload.replyToId,
     }
     try {
       const message = await chatService.sendMessage(convId, finalPayload)
-      handleNewMessage({ conversationId: convId, message })
+      const decrypted = await _decryptMessage(message, conv ?? undefined)
+      handleNewMessage({ conversationId: convId, message: decrypted })
       replyingTo.value = null
     } catch (e: unknown) {
       error.value = e instanceof Error ? e.message : 'Erro ao enviar mensagem'
       throw e
     }
+  }
+
+  async function editMessage(conversationId: string, messageId: string, content: string): Promise<void> {
+    const myId = authStore.user?.id
+    const conv = conversations.value.find(c => c.id === conversationId)
+
+    let finalContent = content
+    if (myId && conv && cryptoSvc.isReady(myId)) {
+      try {
+        if (conv.type === 'dm') {
+          const peer = conv.participants.find(p => p.userId !== myId)
+          if (peer) {
+            const peerPubKey = await cryptoSvc.getOrFetchPublicKey(peer.userId)
+            if (peerPubKey) finalContent = await cryptoSvc.encryptDm(myId, peerPubKey, content)
+          }
+        } else if (conv.type === 'group') {
+          const groupKey = await cryptoSvc.getOrLoadGroupKey(myId, conversationId)
+          if (groupKey) finalContent = await cryptoSvc.encryptGroup(groupKey, content)
+        }
+      } catch {
+        // fallback: send plaintext
+      }
+    }
+
+    const updated = await chatService.editMessage(conversationId, messageId, finalContent)
+    const decrypted = await _decryptMessage(updated, conv ?? undefined)
+    const list = messages.value.get(conversationId)
+    if (list) {
+      const idx = list.findIndex(m => m.id === messageId)
+      if (idx !== -1) {
+        const next = [...list]
+        next[idx] = decrypted
+        messages.value = new Map(messages.value).set(conversationId, next)
+      }
+    }
+  }
+
+  async function forwardMessage(messageId: string, targetConversationIds: string[]): Promise<void> {
+    const myId = authStore.user?.id
+    let sourceMessage: Message | undefined
+    for (const list of messages.value.values()) {
+      const found = list.find(m => m.id === messageId)
+      if (found) { sourceMessage = found; break }
+    }
+
+    if (sourceMessage?.isEncrypted && myId && sourceMessage.content) {
+      // Client-side decrypt + re-send to each target (already decrypted in store)
+      for (const targetConvId of targetConversationIds) {
+        const targetConv = conversations.value.find(c => c.id === targetConvId)
+        if (!targetConv) continue
+        let encContent = sourceMessage.content
+        let isEncrypted = false
+        try {
+          if (cryptoSvc.isReady(myId)) {
+            if (targetConv.type === 'dm') {
+              const peer = targetConv.participants.find(p => p.userId !== myId)
+              if (peer) {
+                const peerPubKey = await cryptoSvc.getOrFetchPublicKey(peer.userId)
+                if (peerPubKey) { encContent = await cryptoSvc.encryptDm(myId, peerPubKey, sourceMessage.content); isEncrypted = true }
+              }
+            } else if (targetConv.type === 'group') {
+              const gKey = await cryptoSvc.getOrLoadGroupKey(myId, targetConvId)
+              if (gKey) { encContent = await cryptoSvc.encryptGroup(gKey, sourceMessage.content); isEncrypted = true }
+            }
+          }
+        } catch { /* fallback plain */ }
+        const sent = await chatService.sendMessage(targetConvId, {
+          content: encContent,
+          isEncrypted,
+        })
+        const decrypted = await _decryptMessage(sent, targetConv)
+        const existing = messages.value.get(targetConvId)
+        if (existing) {
+          messages.value = new Map(messages.value).set(targetConvId, [...existing, decrypted])
+        }
+      }
+    } else {
+      const result = await chatService.forwardMessage(messageId, targetConversationIds)
+      for (const msg of result.messages) {
+        const existing = messages.value.get(msg.conversationId)
+        if (existing) {
+          messages.value = new Map(messages.value).set(msg.conversationId, [...existing, msg])
+        }
+      }
+    }
+  }
+
+  // ── Crypto helpers ─────────────────────────────────────────────────────────
+
+  async function _decryptMessage(msg: Message, conv?: Conversation): Promise<Message> {
+    if (!msg.isEncrypted || !msg.content) return msg
+    const myId = authStore.user?.id
+    if (!myId) return { ...msg, decryptError: true }
+
+    const resolvedConv = conv ?? conversations.value.find(c => c.id === msg.conversationId)
+
+    try {
+      let plaintext: string | null = null
+
+      if (resolvedConv?.type === 'dm') {
+        const peer = resolvedConv.participants.find(p => p.userId !== myId)
+          ?? resolvedConv.participants.find(p => p.userId !== msg.senderId)
+        const peerUserId = peer?.userId ?? (msg.senderId !== myId ? msg.senderId : undefined)
+        if (peerUserId) {
+          const peerPubKey = await cryptoSvc.getOrFetchPublicKey(peerUserId)
+          if (peerPubKey) plaintext = await cryptoSvc.decryptDm(myId, peerPubKey, msg.content)
+        }
+      } else if (resolvedConv?.type === 'group') {
+        const groupKey = await cryptoSvc.getOrLoadGroupKey(myId, msg.conversationId)
+        if (groupKey) plaintext = await cryptoSvc.decryptGroup(groupKey, msg.content)
+      }
+
+      if (plaintext === null) return { ...msg, decryptError: true }
+
+      let decryptedReplyTo = msg.replyTo
+      if (msg.replyTo?.content) {
+        const rc = await _decryptReplyContent(msg.replyTo.content, myId, resolvedConv)
+        if (rc !== null) decryptedReplyTo = { ...msg.replyTo, content: rc }
+      }
+
+      return {
+        ...msg,
+        content: plaintext,
+        replyTo: decryptedReplyTo,
+        decryptError: false,
+      }
+    } catch {
+      return { ...msg, decryptError: true }
+    }
+  }
+
+  async function _decryptReplyContent(
+    replyContent: string,
+    myId: string,
+    conv: Conversation | undefined,
+  ): Promise<string | null> {
+    if (!conv) return null
+    try {
+      if (conv.type === 'dm') {
+        const peer = conv.participants.find(p => p.userId !== myId)
+        if (!peer) return null
+        const peerPubKey = await cryptoSvc.getOrFetchPublicKey(peer.userId)
+        if (!peerPubKey) return null
+        return await cryptoSvc.decryptDm(myId, peerPubKey, replyContent)
+      } else if (conv.type === 'group') {
+        const groupKey = await cryptoSvc.getOrLoadGroupKey(myId, conv.id)
+        if (!groupKey) return null
+        return await cryptoSvc.decryptGroup(groupKey, replyContent)
+      }
+    } catch {
+      return null
+    }
+    return null
   }
 
   function setReplyingTo(message: Message | null): void {
@@ -328,8 +522,15 @@ export const useChat = defineStore('chat', () => {
   }
 
   async function createGroup(payload: CreateGroupPayload): Promise<string> {
+    const myId = authStore.user?.id
     const conv = await chatService.createGroup(payload)
     conversations.value.unshift(conv)
+
+    if (myId && cryptoSvc.isReady(myId)) {
+      const memberIds = conv.participants.map(p => p.userId)
+      cryptoSvc.distributeGroupKeys(conv.id, memberIds).catch(() => {})
+    }
+
     await setActiveConversation(conv.id)
     return conv.id
   }
@@ -361,14 +562,8 @@ export const useChat = defineStore('chat', () => {
     const message = payload.message
     const convId = payload.conversationId ?? message.conversationId
     if (!convId) return
-    // Só adiciona ao cache se já fetchamos essa conversa antes;
-    // senão a mensagem vai vir no fetch inicial quando o usuário abrir a conversa
-    if (messages.value.has(convId)) {
-      const existing = messages.value.get(convId)!
-      if (!existing.find((m) => m.id === message.id)) {
-        messages.value = new Map(messages.value).set(convId, [...existing, message])
-      }
-    }
+
+    // Resolve conversation before decrypt (needed to determine DM peer or group key)
     let conv = conversations.value.find((c) => c.id === convId)
     if (!conv) {
       try {
@@ -378,9 +573,26 @@ export const useChat = defineStore('chat', () => {
         return
       }
     }
+
+    // Decrypt before inserting into the cache
+    const decrypted = await _decryptMessage(message, conv)
+
+    // Só adiciona ao cache se já fetchamos essa conversa antes;
+    // senão a mensagem vai vir no fetch inicial quando o usuário abrir a conversa
+    if (messages.value.has(convId)) {
+      const existing = messages.value.get(convId)!
+      if (!existing.find((m) => m.id === decrypted.id)) {
+        messages.value = new Map(messages.value).set(convId, [...existing, decrypted])
+      }
+    }
+
+    const lastContent = decrypted.decryptError
+      ? '[Mensagem criptografada]'
+      : (decrypted.content ?? message.content)
+
     conv.lastMessage = {
       id: message.id,
-      content: message.content,
+      content: lastContent,
       senderId: message.senderId,
       createdAt: message.createdAt,
       type: message.type,
@@ -506,6 +718,8 @@ export const useChat = defineStore('chat', () => {
     loadMessages,
     markRead,
     sendMessage,
+    editMessage,
+    forwardMessage,
     setReplyingTo,
     toggleReaction,
     deleteMessage,

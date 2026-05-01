@@ -9,7 +9,7 @@ import type { IFriendsRepository } from '../../shared/contracts/friends.reposito
 import type { UsersRepository } from '../users/users.repository.js'
 import { env } from '../../config/env.js'
 
-type JwtVerifyFn = (token: string) => { userId: string; [key: string]: unknown }
+type JwtVerifyFn = (token: string) => { userId: string; tokenVersion?: number; [key: string]: unknown }
 
 type CallSession = {
   callId: string
@@ -19,9 +19,13 @@ type CallSession = {
   startedAt: Date
 }
 
+const MSG_RATE_LIMIT = 30
+const MSG_RATE_WINDOW_MS = 60_000
+
 export class ChatGateway {
   private io: SocketIOServer
   private callSessions = new Map<string, CallSession>()
+  private messageBuckets = new Map<string, { count: number; resetAt: number }>()
   /**
    * Conjunto de DMs que cada usuário tem abertas no momento (qualquer aba).
    * Usado pelo cron de cleanup de chat temporário pra detectar "destinatário saiu".
@@ -45,13 +49,20 @@ export class ChatGateway {
   }
 
   private setup(): void {
-    // Middleware de autenticação JWT
+    // Middleware de autenticação JWT — também revalida tokenVersion contra o DB
+    // para invalidar sessões após deleteAccount/changePassword (G1-22).
     this.io.use(async (socket, next) => {
       const token = (socket.handshake.auth as Record<string, string>).token
-        ?? (socket.handshake.query as Record<string, string>).token
       if (!token) return next(new Error('UNAUTHORIZED'))
       try {
         const payload = this.jwtVerify(token as string)
+        if (typeof payload.userId !== 'string' || typeof payload.tokenVersion !== 'number') {
+          return next(new Error('UNAUTHORIZED'))
+        }
+        const user = await this.usersRepository.findById(payload.userId)
+        if (!user || user.tokenVersion !== payload.tokenVersion) {
+          return next(new Error('UNAUTHORIZED'))
+        }
         socket.data.userId = payload.userId
         next()
       } catch {
@@ -114,22 +125,30 @@ export class ChatGateway {
       })
 
       // message:send
-      socket.on('message:send', async (data: { conversationId: string; content?: string; attachmentIds?: string[] }) => {
+      socket.on('message:send', async (data: { conversationId: string; content?: string; attachmentIds?: string[]; isEncrypted?: boolean }) => {
+        if (!this.checkMessageRateLimit(userId)) {
+          socket.emit('error', { code: 'RATE_LIMIT_EXCEEDED' })
+          return
+        }
         try {
           const message = await this.messagesService.sendMessage(data.conversationId, userId, {
             content: data.content,
             attachmentIds: data.attachmentIds,
+            isEncrypted: data.isEncrypted,
           })
           const blocked = await this.messagesService.getBlockedRecipients(data.conversationId, userId)
           this.emitMessageNew(data.conversationId, message, blocked)
 
           // Push para membros offline (também não notifica bloqueadores)
           const members = await this.conversationsService.getConversationMembers(data.conversationId)
+          const conv = await this.conversationsService.getConversationType(data.conversationId)
+          const isTemporary = conv === 'dm' ? (await this.conversationsService.getConversation(data.conversationId, userId))?.isTemporary ?? false : false
           for (const member of members) {
             if (member.userId !== userId && !blocked.includes(member.userId) && !this.presenceService.isOnline(member.userId)) {
+              const pushBody = isTemporary || message.isEncrypted ? 'Nova mensagem' : (message.content ?? '📎 Anexo')
               await this.pushService.notify(member.userId, {
                 title: 'Nova mensagem',
-                body: message.content ?? '📎 Anexo',
+                body: pushBody,
                 conversationId: data.conversationId,
               }).catch(() => {})
             }
@@ -141,23 +160,49 @@ export class ChatGateway {
 
       // conversation:read
       socket.on('conversation:read', async (data: { conversationId: string }) => {
+        const member = await this.conversationsService.findMember(data.conversationId, userId)
+        if (!member) return
         await this.conversationsService.markAsRead(data.conversationId, userId).catch(() => {})
-        this.emitMessageRead(data.conversationId, userId, new Date())
+        const blocked = await this.messagesService.getBlockedRecipients(data.conversationId, userId)
+        const excludeRooms = blocked.map(uid => `user:${uid}`)
+        if (excludeRooms.length === 0) {
+          this.emitMessageRead(data.conversationId, userId, new Date())
+        } else {
+          this.io.to(`conv:${data.conversationId}`).except(excludeRooms).emit('message:read', {
+            conversationId: data.conversationId,
+            userId,
+            lastReadAt: new Date().toISOString(),
+          })
+        }
       })
 
       // typing
-      socket.on('typing:start', (data: { conversationId: string }) => {
-        socket.to(`conv:${data.conversationId}`).emit('typing', { conversationId: data.conversationId, userId, isTyping: true })
+      socket.on('typing:start', async (data: { conversationId: string }) => {
+        const member = await this.conversationsService.findMember(data.conversationId, userId)
+        if (!member) return
+        const blocked = await this.messagesService.getBlockedRecipients(data.conversationId, userId)
+        const excludeRooms = blocked.map(uid => `user:${uid}`)
+        socket.to(`conv:${data.conversationId}`).except(excludeRooms).emit('typing', {
+          conversationId: data.conversationId, userId, isTyping: true,
+        })
       })
 
-      socket.on('typing:stop', (data: { conversationId: string }) => {
-        socket.to(`conv:${data.conversationId}`).emit('typing', { conversationId: data.conversationId, userId, isTyping: false })
+      socket.on('typing:stop', async (data: { conversationId: string }) => {
+        const member = await this.conversationsService.findMember(data.conversationId, userId)
+        if (!member) return
+        const blocked = await this.messagesService.getBlockedRecipients(data.conversationId, userId)
+        const excludeRooms = blocked.map(uid => `user:${uid}`)
+        socket.to(`conv:${data.conversationId}`).except(excludeRooms).emit('typing', {
+          conversationId: data.conversationId, userId, isTyping: false,
+        })
       })
 
       // ──────── Chat temporário ────────
       // Frontend marca a DM ativa ao entrar
-      socket.on('chat:dm:enter', (data: { conversationId: string }) => {
+      socket.on('chat:dm:enter', async (data: { conversationId: string }) => {
         if (!data?.conversationId) return
+        const member = await this.conversationsService.findMember(data.conversationId, userId)
+        if (!member) return
         this.markDmActive(userId, data.conversationId)
         // Lembra no socket as DMs que ele abriu, para limpar no disconnect
         const opened: Set<string> = (socket.data.openedDms ??= new Set<string>())
@@ -167,6 +212,8 @@ export class ChatGateway {
       // Frontend sinaliza saída da DM → dispara cleanup imediato de mensagens lidas
       socket.on('chat:dm:leave', async (data: { conversationId: string }) => {
         if (!data?.conversationId) return
+        const member = await this.conversationsService.findMember(data.conversationId, userId)
+        if (!member) return
         const opened: Set<string> | undefined = socket.data.openedDms
         opened?.delete(data.conversationId)
         const stillActive = this.markDmInactive(userId, data.conversationId)
@@ -222,42 +269,52 @@ export class ChatGateway {
         }
       })
 
-      socket.on('call:accept', (data: { callId: string }) => {
+      socket.on('call:accept', async (data: { callId: string }) => {
         const session = this.callSessions.get(data?.callId)
         if (!session) return
         if (session.calleeId !== userId) return
+        const member = await this.conversationsService.findMember(session.conversationId, userId)
+        if (!member) return
         this.io.to(`user:${session.initiatorId}`).emit('call:accepted', { callId: session.callId })
       })
 
-      socket.on('call:reject', (data: { callId: string }) => {
+      socket.on('call:reject', async (data: { callId: string }) => {
         const session = this.callSessions.get(data?.callId)
         if (!session) return
         if (session.calleeId !== userId) return
+        const member = await this.conversationsService.findMember(session.conversationId, userId)
+        if (!member) return
         this.io.to(`user:${session.initiatorId}`).emit('call:rejected', { callId: session.callId })
         this.callSessions.delete(session.callId)
       })
 
-      socket.on('call:cancel', (data: { callId: string }) => {
+      socket.on('call:cancel', async (data: { callId: string }) => {
         const session = this.callSessions.get(data?.callId)
         if (!session) return
         if (session.initiatorId !== userId) return
+        const member = await this.conversationsService.findMember(session.conversationId, userId)
+        if (!member) return
         this.io.to(`user:${session.calleeId}`).emit('call:cancelled', { callId: session.callId })
         this.callSessions.delete(session.callId)
       })
 
-      socket.on('call:end', (data: { callId: string; durationSec?: number }) => {
+      socket.on('call:end', async (data: { callId: string; durationSec?: number }) => {
         const session = this.callSessions.get(data?.callId)
         if (!session) return
         if (session.initiatorId !== userId && session.calleeId !== userId) return
+        const member = await this.conversationsService.findMember(session.conversationId, userId)
+        if (!member) return
         const otherId = session.initiatorId === userId ? session.calleeId : session.initiatorId
         this.io.to(`user:${otherId}`).emit('call:ended', { callId: session.callId, durationSec: data.durationSec ?? 0 })
         this.callSessions.delete(session.callId)
       })
 
-      socket.on('call:signal', (data: { callId: string; type: 'offer' | 'answer' | 'ice'; payload: unknown }) => {
+      socket.on('call:signal', async (data: { callId: string; type: 'offer' | 'answer' | 'ice'; payload: unknown }) => {
         const session = this.callSessions.get(data?.callId)
         if (!session) return
         if (session.initiatorId !== userId && session.calleeId !== userId) return
+        const member = await this.conversationsService.findMember(session.conversationId, userId)
+        if (!member) return
         const otherId = session.initiatorId === userId ? session.calleeId : session.initiatorId
         this.io.to(`user:${otherId}`).emit('call:signal', {
           callId: session.callId,
@@ -408,6 +465,19 @@ export class ChatGateway {
     }
   }
 
+  // Desconecta todos os sockets de um usuário. Usado quando tokenVersion é incrementado
+  // (changePassword, setInitialPassword, deleteAccount, logout-all): bloqueia HTTP via
+  // middleware mas WS já abertos persistiriam até cair sozinhos. Auditoria #6.
+  async disconnectUser(userId: string, reason: string = 'TOKEN_VERSION_BUMPED'): Promise<void> {
+    const sockets = await this.io.fetchSockets()
+    for (const sock of sockets) {
+      if (sock.data.userId === userId) {
+        sock.emit('auth:revoked', { reason })
+        sock.disconnect(true)
+      }
+    }
+  }
+
   async joinUsersToConversation(conversationId: string, userIds: string[]): Promise<void> {
     const allSockets = await this.io.fetchSockets()
     for (const sock of allSockets) {
@@ -430,6 +500,20 @@ export class ChatGateway {
         }
       }
     }
+  }
+
+  // ────── Rate limiting de mensagens (per-user token bucket) ──────
+
+  private checkMessageRateLimit(userId: string): boolean {
+    const now = Date.now()
+    const bucket = this.messageBuckets.get(userId)
+    if (!bucket || bucket.resetAt <= now) {
+      this.messageBuckets.set(userId, { count: 1, resetAt: now + MSG_RATE_WINDOW_MS })
+      return true
+    }
+    if (bucket.count >= MSG_RATE_LIMIT) return false
+    bucket.count++
+    return true
   }
 
   // ────── Chat temporário: tracking de DM ativa por usuário ──────

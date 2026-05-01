@@ -16,6 +16,9 @@
     <CallScreen />
     <SteamImportBanner v-if="store.isAuthenticated" />
     <FloatingChatBar v-if="store.isAuthenticated" />
+
+    <!-- Restauração/configuração de chave E2E (OAuth users ou novo dispositivo) -->
+    <CryptoRestoreDialog v-if="store.isAuthenticated && (store.pendingCryptoRestore || store.pendingPinSetup)" />
   </div>
 </template>
 
@@ -29,6 +32,7 @@ import CallScreen from '@/modules/chat/components/CallScreen.vue'
 import FloatingChatBar from '@/modules/chat/components/FloatingChatBar.vue'
 import SteamImportBanner from '@/modules/integrations/steam/components/SteamImportBanner.vue'
 import { useFloatingChats } from '@/modules/chat/composables/useFloatingChats'
+import CryptoRestoreDialog from '@/modules/chat/components/CryptoRestoreDialog.vue'
 
 // Inicializa cedo para que o watcher em chat.activeConversationId capture
 // qualquer ativação de conversa desde o boot (incluindo /chat/:id direto).

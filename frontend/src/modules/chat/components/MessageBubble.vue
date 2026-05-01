@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, onMounted, onUnmounted } from 'vue'
-import { Trash2, Reply, MoreHorizontal, Download, SmilePlus, Check, CheckCheck, Play, Forward, Hourglass, Flag } from 'lucide-vue-next'
+import { Trash2, Reply, MoreHorizontal, Download, SmilePlus, Check, CheckCheck, Play, Forward, Hourglass, Flag, Lock } from 'lucide-vue-next'
 import ReportDialog from '@/modules/reports/components/ReportDialog.vue'
 import { useAuthStore } from '@/shared/auth/authStore'
 import { timeAgo } from '@/shared/utils/timeAgo'
@@ -136,9 +136,9 @@ async function confirmForward(conversationIds: string[]) {
   forwarding.value = true
   forwardError.value = null
   try {
-    const result = await chatService.forwardMessage(props.message.id, conversationIds)
+    await chat.forwardMessage(props.message.id, conversationIds)
     showForwardModal.value = false
-    forwardSuccess.value = `Encaminhada para ${result.forwardedCount} conversa${result.forwardedCount === 1 ? '' : 's'}.`
+    forwardSuccess.value = `Encaminhada para ${conversationIds.length} conversa${conversationIds.length === 1 ? '' : 's'}.`
     setTimeout(() => { forwardSuccess.value = null }, 2500)
   } catch (err: any) {
     forwardError.value = err?.response?.data?.error ?? 'Erro ao encaminhar mensagem.'
@@ -233,7 +233,13 @@ async function downloadAttachment(attachment: MessageAttachment) {
               : 'bg-(--color-bg-elevated) text-(--color-text-primary) rounded-bl-sm',
           ]"
         >
-          <p v-if="message.content" class="whitespace-pre-wrap break-words">{{ message.content }}</p>
+          <p
+            v-if="message.content"
+            :class="[
+              'whitespace-pre-wrap break-words',
+              message.decryptError && 'italic text-(--color-text-muted)',
+            ]"
+          >{{ message.decryptError ? '[Mensagem criptografada]' : message.content }}</p>
 
           <div v-if="message.attachments.length > 0" class="mt-2 space-y-2">
             <div v-for="attachment in message.attachments" :key="attachment.id">
@@ -349,12 +355,18 @@ async function downloadAttachment(attachment: MessageAttachment) {
           </button>
         </div>
 
-        <span class="text-[10px] text-(--color-text-muted) px-2 inline-flex items-center">
+        <span class="text-[10px] text-(--color-text-muted) px-2 inline-flex items-center gap-0.5">
           <Hourglass
             v-if="message.isTemporary"
             :size="10"
             class="mr-1 text-(--color-accent-amber)"
             :title="'Mensagem temporária'"
+          />
+          <Lock
+            v-if="message.isEncrypted"
+            :size="10"
+            :class="['mr-1', message.decryptError ? 'text-(--color-danger)' : 'text-(--color-text-muted)']"
+            :title="message.decryptError ? 'Não foi possível descriptografar' : 'Mensagem criptografada'"
           />
           {{ timeAgo(message.createdAt) }}
           <span v-if="message.editedAt"> · editado</span>

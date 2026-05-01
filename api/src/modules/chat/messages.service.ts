@@ -49,7 +49,7 @@ export class MessagesService {
   async sendMessage(
     conversationId: string,
     userId: string,
-    data: { content?: string; attachmentIds?: string[]; replyToId?: string; callMetadata?: CallMetadata },
+    data: { content?: string; attachmentIds?: string[]; replyToId?: string; callMetadata?: CallMetadata; isEncrypted?: boolean },
   ): Promise<MessageWithAttachments> {
     const member = await this.conversationsRepo.findMember(conversationId, userId)
     if (!member) throw new ChatError('NOT_FOUND')
@@ -63,6 +63,13 @@ export class MessagesService {
       if (other) {
         const blocked = await this.friendsRepo.isBlockedEitherDirection(userId, other.userId)
         if (blocked) throw new ChatError('BLOCKED')
+      }
+    }
+
+    if (data.replyToId) {
+      const replyTarget = await this.repo.findMessageById(data.replyToId)
+      if (!replyTarget || replyTarget.conversationId !== conversationId) {
+        throw new ChatError('INVALID_REPLY_TARGET')
       }
     }
 
@@ -85,6 +92,7 @@ export class MessagesService {
       replyToId: data.replyToId,
       callMetadata: data.callMetadata,
       isTemporary,
+      isEncrypted: data.isEncrypted ?? false,
     })
 
     if (hasAttachments) {
@@ -140,7 +148,7 @@ export class MessagesService {
 
     // Vídeo permite até 50MB (não é re-encodado); outros (imagem/áudio) ficam em 6MB.
     const MAX_BYTES = isVideo ? 50 * 1024 * 1024 : 6 * 1024 * 1024
-    if (sizeBytes > MAX_BYTES) throw new ChatError('ATTACHMENT_TOO_LARGE')
+    if (fileBuffer.length > MAX_BYTES) throw new ChatError('ATTACHMENT_TOO_LARGE')
 
     let uploadBuffer = fileBuffer
     let uploadMimeType = mimeType
@@ -354,8 +362,14 @@ export class MessagesService {
 
     let decodedCursor: MessageCursor | undefined
     if (cursor) {
-      const parsed = JSON.parse(Buffer.from(cursor, 'base64').toString('utf-8'))
-      decodedCursor = { createdAt: new Date(parsed.createdAt), id: parsed.id }
+      if (cursor.length > 512) throw new ChatError('INVALID_CURSOR')
+      try {
+        const parsed = JSON.parse(Buffer.from(cursor, 'base64').toString('utf-8'))
+        decodedCursor = { createdAt: new Date(parsed.createdAt), id: parsed.id }
+      } catch (err) {
+        console.error({ err }, 'chat: invalid cursor token')
+        throw new ChatError('INVALID_CURSOR')
+      }
     }
 
     return this.repo.findMessagesByConversation({

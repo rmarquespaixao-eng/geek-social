@@ -47,7 +47,6 @@ export const callMetadataSchema = z.object({
   durationSec: z.number().int().min(0),
   startedAt: z.string(),
   endedAt: z.string(),
-  initiatorId: z.string().uuid(),
 })
 
 export const sendMessageBodySchema = z.object({
@@ -55,6 +54,7 @@ export const sendMessageBodySchema = z.object({
   attachmentIds: z.array(z.string().uuid()).optional(),
   replyToId: z.string().uuid().optional(),
   callMetadata: callMetadataSchema.optional(),
+  isEncrypted: z.boolean().optional(),
 })
 
 export const forwardMessageSchema = z.object({

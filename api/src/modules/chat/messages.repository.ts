@@ -12,6 +12,7 @@ export class MessagesRepository implements IMessagesRepository {
   async createMessage(data: {
     conversationId: string; userId: string; content?: string; replyToId?: string
     callMetadata?: CallMetadata
+    isEncrypted?: boolean
     isTemporary?: boolean
     temporaryEvent?: TemporaryEvent
   }): Promise<Message> {
@@ -21,6 +22,7 @@ export class MessagesRepository implements IMessagesRepository {
       content: data.content ?? null,
       replyToId: data.replyToId ?? null,
       callMetadata: data.callMetadata ?? null,
+      isEncrypted: data.isEncrypted ?? false,
       isTemporary: data.isTemporary ?? false,
       temporaryEvent: data.temporaryEvent ?? null,
     }).returning()
@@ -279,6 +281,7 @@ export class MessagesRepository implements IMessagesRepository {
       content: row.content,
       replyToId: row.replyToId ?? null,
       callMetadata: (row.callMetadata as CallMetadata | null) ?? null,
+      isEncrypted: row.isEncrypted ?? false,
       isTemporary: row.isTemporary ?? false,
       temporaryEvent: (row.temporaryEvent as TemporaryEvent | null) ?? null,
       hiddenForUserIds: (row.hiddenForUserIds as string[] | null) ?? [],

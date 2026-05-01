@@ -8,6 +8,7 @@ import { useAuthStore } from '@/shared/auth/authStore'
 import { useFriends } from '@/modules/friends/composables/useFriends'
 import { useChat } from '../composables/useChat'
 import * as chatService from '../services/chatService'
+import * as cryptoSvc from '../services/cryptoService'
 import AppModal from '@/shared/ui/AppModal.vue'
 import AppConfirmDialog from '@/shared/ui/AppConfirmDialog.vue'
 import type { Conversation, ConversationMember, MemberRole } from '../types'
@@ -165,6 +166,7 @@ const friendsAvailableToAdd = computed(() => {
 async function addFriend(friendId: string) {
   try {
     await chatService.inviteMember(props.conversation.id, friendId)
+    cryptoSvc.distributeGroupKeyToMember(me.value, props.conversation.id, friendId).catch(() => {})
     await chat.fetchConversations()
   } catch (e: any) {
     error.value = e?.response?.data?.error ?? 'Erro ao adicionar amigo'

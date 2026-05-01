@@ -36,6 +36,8 @@ const CHAT_STATUS_BY_CODE: Record<string, number> = {
   INVALID_WAVEFORM: 400,
   NOT_DM: 422,
   SOURCE_TEMPORARY: 422,
+  CANNOT_REMOVE_OWNER: 422,
+  INVALID_REPLY_TARGET: 422,
 }
 
 function handleChatError(error: unknown, reply: FastifyReply) {
@@ -188,6 +190,7 @@ export class ChatController {
         senderAvatarUrl: senderAvatarHidden ? null : (sender?.avatarUrl ?? null),
         content: msg.content ?? '',
         type: deriveMessageType(msg),
+        isEncrypted: msg.isEncrypted,
         callMetadata: msg.callMetadata ?? null,
         isTemporary: msg.isTemporary,
         temporaryEvent: msg.temporaryEvent ?? null,
@@ -390,11 +393,13 @@ export class ChatController {
     const userId = (req.user as any).userId as string
     try {
       const body = sendMessageBodySchema.parse(req.body ?? {})
+      const callMetadata = body.callMetadata ? { ...body.callMetadata, initiatorId: userId } : undefined
       const raw = await this.messagesService.sendMessage(req.params.id, userId, {
         content: body.content,
         attachmentIds: body.attachmentIds,
         replyToId: body.replyToId,
-        callMetadata: body.callMetadata,
+        callMetadata,
+        isEncrypted: body.isEncrypted,
       })
       const enriched = await this.enrichMessage(raw)
       this.chatGateway.emitMessageNew(req.params.id, enriched)
@@ -566,7 +571,10 @@ export class ChatController {
   }
 
   async removePush(req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) {
-    await this.pushService.removeSubscription(req.params.id)
-    return reply.status(204).send()
+    const userId = (req.user as any).userId as string
+    try {
+      await this.pushService.removeSubscription(req.params.id, userId)
+      return reply.status(204).send()
+    } catch (e) { return handleChatError(e, reply) }
   }
 }

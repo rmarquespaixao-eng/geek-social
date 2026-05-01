@@ -33,7 +33,7 @@
     "@vitest/coverage-v8": "^2.0.0",
     "@vue/test-utils": "^2.4.0",
     "@vue/tsconfig": "^0.9.1",
-    "happy-dom": "^15.0.0",
+    "happy-dom": "^20.9.0",
     "msw": "^2.0.0",
     "tailwindcss": "^4.2.4",
     "typescript": "~6.0.2",
@@ -41,5 +41,8 @@
     "vite-plugin-pwa": "^1.2.0",
     "vitest": "^2.0.0",
     "vue-tsc": "^3.2.7"
+  },
+  "overrides": {
+    "serialize-javascript": "^7.0.5"
   }
 }

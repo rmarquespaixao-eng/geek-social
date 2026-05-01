@@ -2,6 +2,7 @@ import { z } from 'zod'
 import 'dotenv/config'
 
 const envSchema = z.object({
+  NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   DATABASE_URL: z.string().url(),
   JWT_SECRET: z.string().min(32),
   JWT_EXPIRES_IN: z.string().default('15m'),
@@ -29,6 +30,38 @@ const parsed = envSchema.safeParse(process.env)
 if (!parsed.success) {
   console.error('Variáveis de ambiente inválidas:', parsed.error.flatten().fieldErrors)
   process.exit(1)
+}
+
+const KNOWN_INSECURE_SECRETS: Array<{ envVar: keyof typeof parsed.data; values: string[] }> = [
+  {
+    envVar: 'JWT_SECRET',
+    values: [
+      'dev-only-secret-change-me-in-production-please-32',
+      'troque-por-um-secret-longo-e-aleatorio',
+    ],
+  },
+  {
+    envVar: 'VAPID_PRIVATE_KEY',
+    values: ['3NdUXAc798ZiD-j4CmcxvGew8oN6SGRELe94KixK7QU'],
+  },
+  {
+    envVar: 'VAPID_PUBLIC_KEY',
+    values: ['BEzO3HA6qWVExkbRErzPLMTZ2e3DOH1NZSZvNdUXl5pynzU2rb3u2hIeUS8YNCvchHMTZNFRgOlNunQm0BmELJg'],
+  },
+]
+
+if (parsed.data.NODE_ENV === 'production') {
+  const violations = KNOWN_INSECURE_SECRETS.filter(({ envVar, values }) =>
+    values.includes(parsed.data[envVar] as string),
+  )
+  if (violations.length > 0) {
+    console.error(
+      'Recusa de inicialização: secrets dev-only detectados em NODE_ENV=production:',
+      violations.map(v => v.envVar).join(', '),
+      '\nGere valores novos: JWT_SECRET via `openssl rand -hex 32`; VAPID via `npx web-push generate-vapid-keys`.',
+    )
+    process.exit(1)
+  }
 }
 
 export const env = parsed.data

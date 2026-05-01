@@ -116,6 +116,23 @@ export async function encryptDm(theirUserId: string, plaintext: string): Promise
   return `${messageType}.${bytesToB64(body)}`
 }
 
+// Throttle automatic session repair attempts so a corrupted session doesn't
+// trigger one prekey-bundle fetch per message rendered. 30s is enough for the
+// peer to publish fresh keys after a reset, short enough that the user doesn't
+// stare at "[Mensagem criptografada]" for long.
+const _lastRepairAt = new Map<string, number>()
+const REPAIR_THROTTLE_MS = 30_000
+
+/**
+ * Bypass the auto-repair throttle for `peerUserId` so the next decryptDm call
+ * can attempt repair again. Call this when the user explicitly clicks "retry"
+ * on a failed message — the throttle exists to avoid background spam, not to
+ * block intentional user action.
+ */
+export function clearRepairThrottle(peerUserId: string): void {
+  _lastRepairAt.delete(peerUserId)
+}
+
 export async function decryptDm(senderUserId: string, ciphertext: string): Promise<string | null> {
   const session = getActiveSignalSession()
   if (!session) return null
@@ -123,12 +140,27 @@ export async function decryptDm(senderUserId: string, ciphertext: string): Promi
   if (dotIdx === -1) return null
   const messageType = parseInt(ciphertext.slice(0, dotIdx), 10)
   if (!Number.isFinite(messageType)) return null
+  const body = b64ToBytes(ciphertext.slice(dotIdx + 1))
   try {
-    const body = b64ToBytes(ciphertext.slice(dotIdx + 1))
     const plaintext = await session.decryptMessage(senderUserId, body, messageType)
     return new TextDecoder().decode(plaintext)
   } catch {
-    return null
+    // Auto-repair only helps when the local session is stale but the peer still
+    // uses a compatible bundle. If the failure is because the ciphertext was
+    // encrypted under prekeys we no longer have (e.g. backup didn't include
+    // them), repair won't help — but it also won't make things worse.
+    const now = Date.now()
+    const lastRepair = _lastRepairAt.get(senderUserId) ?? 0
+    if (now - lastRepair < REPAIR_THROTTLE_MS) return null
+    _lastRepairAt.set(senderUserId, now)
+    const repaired = await repairDmSession(senderUserId)
+    if (!repaired) return null
+    try {
+      const plaintext = await session.decryptMessage(senderUserId, body, messageType)
+      return new TextDecoder().decode(plaintext)
+    } catch {
+      return null
+    }
   }
 }
 

@@ -477,6 +477,35 @@ export const useChat = defineStore('chat', () => {
     return null
   }
 
+  /**
+   * Re-attempt decryption of a single message previously marked decryptError.
+   * Bypasses the auto-repair throttle and updates the store in place. Useful
+   * when wired to a "tentar novamente" button on the failed bubble.
+   */
+  async function retryDecryptMessage(conversationId: string, messageId: string): Promise<void> {
+    const list = messages.value.get(conversationId)
+    if (!list) return
+    const idx = list.findIndex(m => m.id === messageId)
+    if (idx === -1) return
+    const msg = list[idx]
+    if (!msg.isEncrypted || !msg.decryptError) return
+
+    const conv = conversations.value.find(c => c.id === conversationId)
+    const myId = authStore.user?.id
+    if (conv?.type === 'dm' && myId) {
+      const peer = conv.participants.find(p => p.userId !== myId)
+      if (peer) chatCrypto.clearRepairThrottle(peer.userId)
+    } else if (conv?.type === 'group') {
+      chatCrypto.clearRepairThrottle(msg.senderId)
+    }
+
+    const decrypted = await _decryptMessage(msg, conv ?? undefined)
+    if (decrypted.decryptError) return
+    const next = [...list]
+    next[idx] = decrypted
+    messages.value = new Map(messages.value).set(conversationId, next)
+  }
+
   function setReplyingTo(message: Message | null): void {
     if (!message) {
       replyingTo.value = null
@@ -839,6 +868,7 @@ export const useChat = defineStore('chat', () => {
     editMessage,
     forwardMessage,
     setReplyingTo,
+    retryDecryptMessage,
     toggleReaction,
     deleteMessage,
     openDm,

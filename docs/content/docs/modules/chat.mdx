@@ -11,6 +11,7 @@ O módulo **Chat** é o mais extenso do sistema (32 endpoints REST + ~15 eventos
 - **Grupos** — N membros com roles (owner/admin/member) + permissions granulares
 - **DM Requests** — pedido inicial entre não-amigos antes de virar conversa real
 - **Mensagens** — texto, attachments (audio/video/imagem/arquivo), reply, calls, reactions livres
+- **End-to-end encryption (E2EE)** — Signal Protocol em DMs e grupos; backend só vê ciphertext. Detalhes em [Criptografia E2EE](/docs/concepts/criptografia-e2ee).
 - **Modo Snapchat per-user** — mensagens efêmeras em conversas marcadas como temporary
 - **Forward / share** — replicar mensagens em N conversas
 - **Read receipts + typing** — eventos de socket ephemeral
@@ -220,6 +221,7 @@ Catálogo completo em [Eventos de socket](/docs/reference/eventos-socket). Os pr
 - **`is_temporary` é per-conversation** + `hidden_at` per-user combinam pra modo "Snapchat só pra mim"
 - **Group permissions** restringem can_send_messages e can_send_files separadamente
 - **DM request rejected é final** — sender não pode reenviar (unique constraint)
+- **Mensagens E2E são opacas pro backend** — `messages.is_encrypted=true` + `content` carrega ciphertext (`"messageType.base64body"` em DM; `base64body` em grupo). Decifração só no cliente; push notifications são metadata-only
 
 ## Dependências entre módulos
 
@@ -228,3 +230,4 @@ Catálogo completo em [Eventos de socket](/docs/reference/eventos-socket). Os pr
 - **Users** — `show_presence` e `show_read_receipts` afetam o que é emitido
 - **Storage (S3)** — uploads de attachments + thumbnails
 - **Reports** — message/conversation podem ser target de reports
+- **Crypto** — `signal_*` tabelas + endpoints `/crypto/*` provêm o keying material consumido pelas DMs e grupos. Ver [Criptografia E2EE](/docs/concepts/criptografia-e2ee).

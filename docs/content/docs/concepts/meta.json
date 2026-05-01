@@ -8,6 +8,7 @@
     "notificacoes",
     "testing",
     "observability",
-    "security"
+    "security",
+    "criptografia-e2ee"
   ]
 }

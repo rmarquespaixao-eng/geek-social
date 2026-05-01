@@ -100,7 +100,8 @@ export async function repairDmSession(peerUserId: string): Promise<boolean> {
 export async function encryptDm(theirUserId: string, plaintext: string): Promise<string> {
   const session = getActiveSignalSession()
   if (!session) throw new CryptoNotReadyError()
-  if (!(await session.hasSession(theirUserId))) {
+  const had = await session.hasSession(theirUserId)
+  if (!had) {
     try {
       await session.processPrekeyBundleForRecipient(theirUserId)
     } catch (err) {
@@ -157,25 +158,33 @@ export async function decryptGroup(
   ciphertext: string,
 ): Promise<string | null> {
   const session = getActiveSignalSession()
-  if (!session) return null
+  if (!session) {
+    console.warn('[decryptGroup] no active Signal session', { senderUserId, conversationId })
+    return null
+  }
   let body: Uint8Array
   try {
     body = b64ToBytes(ciphertext)
-  } catch {
+  } catch (err) {
+    console.error('[decryptGroup] b64 decode failed', err)
     return null
   }
 
   try {
     const plaintext = await session.decryptGroupMessage(senderUserId, body)
     return new TextDecoder().decode(plaintext)
-  } catch {
-    // No SenderKey for this sender yet — fetch and process the stored SKDM, then retry once.
+  } catch (err1) {
+    console.warn('[decryptGroup] first decrypt failed, will fetch SKDM', { senderUserId, err: err1 })
     const fetched = await fetchAndProcessSenderKey(conversationId, senderUserId)
-    if (!fetched) return null
+    if (!fetched) {
+      console.error('[decryptGroup] could not fetch/process SKDM', { senderUserId, conversationId })
+      return null
+    }
     try {
       const plaintext = await session.decryptGroupMessage(senderUserId, body)
       return new TextDecoder().decode(plaintext)
-    } catch {
+    } catch (err2) {
+      console.error('[decryptGroup] retry after SKDM still failed', { senderUserId, err: err2 })
       return null
     }
   }

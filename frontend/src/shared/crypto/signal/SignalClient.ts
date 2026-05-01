@@ -205,11 +205,24 @@ export interface EncryptedSignalBackup {
   backupIv: string
 }
 
+interface BackupPrekeyRecord {
+  id: number
+  record: string
+}
+
 interface BackupPlaintext {
   identityPublicKey: string
   identityPrivateKey: string
   registrationId: number
   deviceId: number
+  // v2 fields — optional for backward compat with v1 backups (without these,
+  // restore falls back to id=0 which causes ID collisions on re-publish and
+  // permanent loss of inbound messages encrypted under the old SPK/Kyber).
+  nextPrekeyId?: number
+  nextSignedPrekeyId?: number
+  nextKyberPrekeyId?: number
+  signedPrekeys?: BackupPrekeyRecord[]
+  kyberPrekeys?: BackupPrekeyRecord[]
 }
 
 const PBKDF2_ITERATIONS = 600_000
@@ -368,15 +381,23 @@ export class SignalSession {
     const identityPublicKey = b64ToBytes(plaintext.identityPublicKey)
     const identityPrivateKey = b64ToBytes(plaintext.identityPrivateKey)
 
+    const signedPrekeys = plaintext.signedPrekeys ?? []
+    const kyberPrekeys = plaintext.kyberPrekeys ?? []
+    const nextPrekeyId = plaintext.nextPrekeyId ?? 0
+    const nextSignedPrekeyId = plaintext.nextSignedPrekeyId
+      ?? (signedPrekeys.length ? Math.max(...signedPrekeys.map(p => p.id)) + 1 : 0)
+    const nextKyberPrekeyId = plaintext.nextKyberPrekeyId
+      ?? (kyberPrekeys.length ? Math.max(...kyberPrekeys.map(p => p.id)) + 1 : 0)
+
     const inner = WasmSignalClient.restore(
       identityPublicKey,
       identityPrivateKey,
       plaintext.registrationId,
       userId,
       plaintext.deviceId,
-      0,
-      0,
-      0,
+      nextPrekeyId,
+      nextSignedPrekeyId,
+      nextKyberPrekeyId,
     )
 
     // Wipe any prior local state for this user before persisting the restored identity.
@@ -387,15 +408,41 @@ export class SignalSession {
       txDeleteByUserId(STORE_SESSIONS, userId),
       txDeleteByUserId(STORE_SENDER_KEYS, userId),
     ])
+
+    // Re-import SPK + Kyber records from the backup so messages encrypted under
+    // these keys (before the backup was taken) remain decryptable. OTPs are
+    // intentionally omitted from the backup (one-time, easily refilled) — the
+    // first PreKeyMessage that referenced a now-missing OTP will fail to decrypt.
+    for (const spk of signedPrekeys) {
+      const record = b64ToBytes(spk.record)
+      await inner.import_signed_pre_key(spk.id, record)
+      await txPut(STORE_SIGNED_PREKEYS, {
+        key: `${userId}:${spk.id}`,
+        userId,
+        id: spk.id,
+        record,
+      } satisfies PrekeyRow)
+    }
+    for (const kpk of kyberPrekeys) {
+      const record = b64ToBytes(kpk.record)
+      await inner.import_kyber_pre_key(kpk.id, record)
+      await txPut(STORE_KYBER_PREKEYS, {
+        key: `${userId}:${kpk.id}`,
+        userId,
+        id: kpk.id,
+        record,
+      } satisfies PrekeyRow)
+    }
+
     await txPut(STORE_META, {
       userId,
       identityPublicKey,
       identityPrivateKey,
       registrationId: plaintext.registrationId,
       deviceId: plaintext.deviceId,
-      nextPrekeyId: 0,
-      nextSignedPrekeyId: 0,
-      nextKyberPrekeyId: 0,
+      nextPrekeyId,
+      nextSignedPrekeyId,
+      nextKyberPrekeyId,
       bootstrappedAt: Date.now(),
     } satisfies MetaRecord)
 
@@ -586,11 +633,20 @@ export class SignalSession {
 
   async exportEncryptedBackup(password: string): Promise<EncryptedSignalBackup> {
     const idKp = this.inner.get_identity_key_pair()
+    const [signedPrekeys, kyberPrekeys] = await Promise.all([
+      txListByUserId<PrekeyRow>(STORE_SIGNED_PREKEYS, this.userId),
+      txListByUserId<PrekeyRow>(STORE_KYBER_PREKEYS, this.userId),
+    ])
     const plaintext: BackupPlaintext = {
       identityPublicKey: bytesToB64(idKp.public_key),
       identityPrivateKey: bytesToB64(idKp.private_key),
       registrationId: this.inner.get_registration_id(),
       deviceId: this.inner.get_local_device_id(),
+      nextPrekeyId: this.inner.get_next_pre_key_id(),
+      nextSignedPrekeyId: this.inner.get_next_signed_pre_key_id(),
+      nextKyberPrekeyId: this.inner.get_next_kyber_pre_key_id(),
+      signedPrekeys: signedPrekeys.map(p => ({ id: p.id, record: bytesToB64(p.record) })),
+      kyberPrekeys: kyberPrekeys.map(p => ({ id: p.id, record: bytesToB64(p.record) })),
     }
 
     const salt = crypto.getRandomValues(new Uint8Array(16))

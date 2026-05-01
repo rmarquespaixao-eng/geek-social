@@ -93,6 +93,7 @@ const lastMessagePreview = computed(() => {
   if (msg.type === 'image') return '📷 Imagem'
   if (msg.type === 'video') return '🎬 Vídeo'
   if (msg.type === 'file') return '📎 Arquivo'
+  if (msg.isEncrypted) return '🔒 Mensagem criptografada'
   const content = msg.content ?? ''
   return content.length > 50 ? content.slice(0, 50) + '…' : content
 })

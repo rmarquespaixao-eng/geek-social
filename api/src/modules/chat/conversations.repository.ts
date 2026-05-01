@@ -175,7 +175,7 @@ export class ConversationsRepository implements IConversationsRepository {
         })
 
       const [lastMsg] = await this.db.select({
-        id: messages.id, content: messages.content, userId: messages.userId, createdAt: messages.createdAt,
+        id: messages.id, content: messages.content, userId: messages.userId, createdAt: messages.createdAt, isEncrypted: messages.isEncrypted,
       }).from(messages)
         .where(and(eq(messages.conversationId, conv.id), sql`${messages.deletedAt} IS NULL`))
         .orderBy(sql`${messages.createdAt} DESC`)
@@ -208,7 +208,7 @@ export class ConversationsRepository implements IConversationsRepository {
       results.push({
         ...this.mapConv(conv),
         participants,
-        lastMessage: lastMsg ? { id: lastMsg.id, content: lastMsg.content, senderId: lastMsg.userId, createdAt: lastMsg.createdAt, type: lastMsgType } : null,
+        lastMessage: lastMsg ? { id: lastMsg.id, content: lastMsg.content, senderId: lastMsg.userId, createdAt: lastMsg.createdAt, type: lastMsgType, isEncrypted: lastMsg.isEncrypted ?? false } : null,
         unreadCount: Number(unreadCount),
         dmRequest: dmReq ? { id: dmReq.id, senderId: dmReq.senderId, receiverId: dmReq.receiverId, status: dmReq.status } : null,
         isBlockedByMe: false,
@@ -248,7 +248,7 @@ export class ConversationsRepository implements IConversationsRepository {
     })
 
     const [lastMsg] = await this.db.select({
-      id: messages.id, content: messages.content, userId: messages.userId, createdAt: messages.createdAt,
+      id: messages.id, content: messages.content, userId: messages.userId, createdAt: messages.createdAt, isEncrypted: messages.isEncrypted,
     }).from(messages)
       .where(and(eq(messages.conversationId, conv.id), sql`${messages.deletedAt} IS NULL`))
       .orderBy(sql`${messages.createdAt} DESC`)
@@ -275,7 +275,7 @@ export class ConversationsRepository implements IConversationsRepository {
     return {
       ...this.mapConv(conv),
       participants,
-      lastMessage: lastMsg ? { id: lastMsg.id, content: lastMsg.content, senderId: lastMsg.userId, createdAt: lastMsg.createdAt, type: lastMsgType } : null,
+      lastMessage: lastMsg ? { id: lastMsg.id, content: lastMsg.content, senderId: lastMsg.userId, createdAt: lastMsg.createdAt, type: lastMsgType, isEncrypted: lastMsg.isEncrypted ?? false } : null,
       unreadCount: Number(unreadCount),
       dmRequest: dmReq ? { id: dmReq.id, senderId: dmReq.senderId, receiverId: dmReq.receiverId, status: dmReq.status } : null,
       isBlockedByMe: false,

@@ -46,6 +46,7 @@ export type LastMessageInfo = {
   senderId: string
   createdAt: Date
   type: 'text' | 'image' | 'audio' | 'video' | 'file' | 'call'
+  isEncrypted: boolean
 }
 
 export type ConversationWithMeta = Conversation & {

@@ -40,6 +40,13 @@ export const useChat = defineStore('chat', () => {
   const messagesLoading = ref(false)
   const error = ref<string | null>(null)
 
+  // Plaintexts of outgoing encrypted messages, keyed by message id.
+  // Why: Signal DM sessions are asymmetric — the sender cannot decrypt the
+  // wire ciphertext of their own outgoing message (the receiving chain belongs
+  // to the peer). Cached at send time so the local UI (immediate echo, socket
+  // round-trip, replies that quote it) renders the plaintext. Lost on reload.
+  const _ownPlaintexts = new Map<string, string>()
+
   // ── Computed ────────────────────────────────────────────────────────────────
   const activeConversation = computed(() =>
     conversations.value.find((c) => c.id === activeConversationId.value) ?? null,
@@ -275,6 +282,7 @@ export const useChat = defineStore('chat', () => {
     }
     try {
       const message = await chatService.sendMessage(convId, finalPayload)
+      if (isEncrypted && payload.content) _ownPlaintexts.set(message.id, payload.content)
       const decrypted = await _decryptMessage(message, conv ?? undefined)
       handleNewMessage({ conversationId: convId, message: decrypted })
       replyingTo.value = null
@@ -306,6 +314,7 @@ export const useChat = defineStore('chat', () => {
     }
 
     const updated = await chatService.editMessage(conversationId, messageId, finalContent)
+    if (finalContent !== content) _ownPlaintexts.set(updated.id, content)
     const decrypted = await _decryptMessage(updated, conv ?? undefined)
     const list = messages.value.get(conversationId)
     if (list) {
@@ -355,6 +364,7 @@ export const useChat = defineStore('chat', () => {
           content: encContent,
           isEncrypted,
         })
+        if (isEncrypted && sourceMessage.content) _ownPlaintexts.set(sent.id, sourceMessage.content)
         const decrypted = await _decryptMessage(sent, targetConv)
         const existing = messages.value.get(targetConvId)
         if (existing) {
@@ -391,6 +401,22 @@ export const useChat = defineStore('chat', () => {
 
     const resolvedConv = conv ?? conversations.value.find(c => c.id === msg.conversationId)
 
+    // Own message: Signal DM sessions are asymmetric (sender can't decrypt own
+    // ciphertext). Use the plaintext cached at send time. Historical own
+    // messages from previous sessions miss the cache and stay encrypted.
+    if (msg.senderId === myId) {
+      const cached = _ownPlaintexts.get(msg.id)
+      if (cached === undefined) return { ...msg, decryptError: true }
+      let decryptedReplyTo = msg.replyTo
+      if (msg.replyTo?.content) {
+        const rc = await _decryptReplyContent(
+          msg.replyTo.content, myId, resolvedConv, msg.replyTo.senderId, msg.replyTo.id,
+        )
+        if (rc !== null) decryptedReplyTo = { ...msg.replyTo, content: rc }
+      }
+      return { ...msg, content: cached, replyTo: decryptedReplyTo, decryptError: false }
+    }
+
     try {
       let plaintext: string | null = null
 
@@ -407,7 +433,9 @@ export const useChat = defineStore('chat', () => {
 
       let decryptedReplyTo = msg.replyTo
       if (msg.replyTo?.content) {
-        const rc = await _decryptReplyContent(msg.replyTo.content, myId, resolvedConv, msg.replyTo.senderId)
+        const rc = await _decryptReplyContent(
+          msg.replyTo.content, myId, resolvedConv, msg.replyTo.senderId, msg.replyTo.id,
+        )
         if (rc !== null) decryptedReplyTo = { ...msg.replyTo, content: rc }
       }
 
@@ -427,8 +455,13 @@ export const useChat = defineStore('chat', () => {
     myId: string,
     conv: Conversation | undefined,
     originalSenderId?: string,
+    originalMessageId?: string,
   ): Promise<string | null> {
     if (!conv) return null
+    // Reply quotes own message — Signal DM is asymmetric, fall back to cache.
+    if (originalSenderId === myId && originalMessageId) {
+      return _ownPlaintexts.get(originalMessageId) ?? null
+    }
     try {
       if (conv.type === 'dm') {
         const peer = conv.participants.find(p => p.userId !== myId)
@@ -598,14 +631,26 @@ export const useChat = defineStore('chat', () => {
     const decrypted = await _decryptMessage(message, conv)
 
     // Só adiciona ao cache se já fetchamos essa conversa antes;
-    // senão a mensagem vai vir no fetch inicial quando o usuário abrir a conversa
+    // senão a mensagem vai vir no fetch inicial quando o usuário abrir a conversa.
+    // Replace-by-id: o socket pode chegar antes do REST de sendMessage retornar
+    // (race), inserindo a versão sem plaintext-cached; quando o REST chega depois,
+    // queremos sobrescrever a entrada para acoplar o plaintext descriptografado.
     if (messages.value.has(convId)) {
       const existing = messages.value.get(convId)!
-      if (!existing.find((m) => m.id === decrypted.id)) {
-        messages.value = new Map(messages.value).set(convId, [...existing, decrypted])
+      const idx = existing.findIndex((m) => m.id === decrypted.id)
+      let next: Message[]
+      if (idx === -1) {
+        next = [...existing, decrypted]
+      } else {
+        next = [...existing]
+        next[idx] = decrypted
       }
+      messages.value = new Map(messages.value).set(convId, next)
     }
 
+    // Já descriptografamos para o preview — marcamos isEncrypted=false
+    // pra que o componente exiba o conteúdo (ou o placeholder literal)
+    // sem voltar a aplicar o ícone de cadeado.
     const lastContent = decrypted.decryptError
       ? '[Mensagem criptografada]'
       : (decrypted.content ?? message.content)
@@ -616,6 +661,7 @@ export const useChat = defineStore('chat', () => {
       senderId: message.senderId,
       createdAt: message.createdAt,
       type: message.type,
+      isEncrypted: false,
     }
     const isMine = message.senderId === authStore.user?.id
     if (!isMine && convId !== activeConversationId.value) {

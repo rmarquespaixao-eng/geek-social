@@ -43,6 +43,7 @@ export interface LastMessage {
   senderId: string
   createdAt: string
   type: MessageType
+  isEncrypted?: boolean
 }
 
 export interface Conversation {

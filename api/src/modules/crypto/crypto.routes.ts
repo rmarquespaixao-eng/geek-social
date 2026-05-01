@@ -16,6 +16,9 @@ const skdmParams = z.object({
 })
 
 const b64 = z.string().min(1).max(8192).regex(/^[A-Za-z0-9+/=]+$/, 'invalid base64')
+// Encrypted Signal backup carries identity + all SPK + Kyber records; the blob
+// scales with #prekeys retained, so it cannot share the small-key cap.
+const b64Large = z.string().min(1).max(262_144).regex(/^[A-Za-z0-9+/=]+$/, 'invalid base64')
 
 const putIdentityBody = z.object({
   identityKey: b64,
@@ -42,7 +45,7 @@ const putOneTimePrekeysBody = z.object({
 })
 
 const putBackupBody = z.object({
-  encryptedBackup: b64,
+  encryptedBackup: b64Large,
   backupSalt: b64,
   backupIv: b64,
 })

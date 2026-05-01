@@ -224,6 +224,120 @@ server stores: { encryptedBackup: ciphertext, backupSalt: salt, backupIv: iv }
 - **Inclui `nextPrekeyId/nextSignedPrekeyId/nextKyberPrekeyId`:** sem isso, o cliente restaurado começaria do ID 0 e colidiria com IDs já no servidor (bug histórico — ver "Bugs e lições" abaixo)
 - **Tamanho:** schema Zod aceita até **256 KB** (`d33590c` aumentou de 8 KB → 256 KB pra acomodar SPK+Kyber records)
 
+## O que **não** vai pro backup: histórico de mensagens
+
+O backup PIN-encrypted preserva a **identidade criptográfica** do user (= "quem ele é" pros peers + capacidade de receber mensagens novas), mas **não** preserva o **histórico de mensagens**.
+
+Por que essa separação existe:
+
+| O que | Onde vive | Sobrevive a troca de dispositivo? |
+|---|---|---|
+| Chave de identidade + SPK/Kyber records | Backup PIN no server (cifrado) | ✅ Sim, com PIN |
+| Sessões Signal (Double Ratchet state) | IDB local (`sessions` store) | ❌ Não — sessão é específica do device |
+| Sender keys de grupo | IDB local (`senderKeys` store) | ❌ Não |
+| Plaintexts decifrados | IDB local (`dmPlaintexts` store) | ❌ Não |
+| Ciphertexts | DB do server (`messages.content`) | ⚠️ Sim, mas ilegíveis no novo device |
+
+**O paradoxo do ciphertext do server:** a tabela `messages` guarda todos os ciphertexts indefinidamente. Por que então não dá pra decifrar num device novo?
+
+- Cada mensagem foi cifrada pra um *message key* específico, derivado de uma posição precisa do Double Ratchet do device antigo.
+- Quando o device antigo decifrou aquela mensagem, **ele apagou a message key** (forward secrecy).
+- O device novo, mesmo com a identidade restaurada, não consegue rederivar essa message key — o ratchet começa do zero numa sessão nova.
+- Resultado: o ciphertext continua no server, mas é tão indecifrável quanto random bytes.
+
+**Isso é uma propriedade desejada**, não um bug. Forward secrecy garante que comprometer um device hoje não vaza histórico — o preço é que trocar de device honestamente também não recupera histórico.
+
+### Cenários práticos pro user
+
+| Cenário | O que sobrevive |
+|---|---|
+| **Reinstala o app no mesmo device** (browser cache limpo) | Restaura identidade via PIN; mensagens novas funcionam imediatamente. **Histórico antigo perdido**. |
+| **Migra pra um device novo** (PIN em mãos) | Idem — identidade restaurada, mas histórico fica no device antigo. |
+| **Esquece o PIN** | Identidade perdida; precisa recriar (peers vão ver `IdentityChangedError` e devem confirmar safety number na próxima conversa). Histórico em qualquer device antigo continua acessível enquanto IDB existir. |
+| **Perde o device** | Mensagens novas não chegam até restaurar identidade; histórico evaporou. |
+| **Quer backup do histórico** | Não há suporte — feature não existe ainda. |
+
+### Por que isso é igual ao Signal/WhatsApp
+
+A mesma arquitetura é usada por Signal e WhatsApp por design: backup de mensagens E2E é uma feature **opcional** e tecnicamente complicada — exige cifrar o histórico fora da sessão (com chave derivada de PIN ou armazenada em iCloud/Google Drive cifrada), o que adiciona uma terceira camada de criptografia + UX de gerenciar ainda outro segredo.
+
+### Roadmap (não implementado)
+
+Se um dia quisermos adicionar backup de histórico, opções viáveis:
+
+1. **Backup encriptado server-side** — cliente exporta plaintexts decifrados, cifra com chave derivada do PIN (ou chave de backup separada), upload pro server. Custo: outro segredo pra user gerenciar; tamanho do backup explode rápido.
+2. **Sync entre devices via "linked devices"** — protocolo Signal multi-device (Sesame). Cada device tem registrationId distinto; mensagem é cifrada N vezes (uma por device do destinatário). Não recupera histórico antigo, mas devices futuros recebem em paralelo.
+3. **Export/import manual** — comando "exportar conversas" que gera um arquivo `.tar.gpg` cifrado com password do user.
+
+Nada disso está no roadmap atual.
+
+## Persistência local: IDB **não é** cifrado at-rest
+
+Esta é uma limitação importante e explícita: o IndexedDB `geek-signal-v1` armazena material sensível **em texto plano** at-rest:
+
+- `meta.identityPrivateKey` — chave privada de identidade do user
+- `sessions[*].record` — estado da sessão Double Ratchet (contém chaves derivadas)
+- `senderKeys[*].record` — sender keys de grupos
+- `dmPlaintexts[*].plaintext` — mensagens decifradas em texto plano
+
+Tudo isso pode ser lido por:
+
+| Vetor | Possibilidade |
+|---|---|
+| **XSS no domínio do app** | Sim, se um payload XSS conseguir burlar o CSP do Pacote B (`connect-src 'self'` força exfil pra mesma origem, o que aumenta a barreira mas não elimina) |
+| **Outras origens cross-site** | Não — IndexedDB é same-origin policy |
+| **Outra aba do mesmo origin** | Sim — qualquer JS rodando em geek-social.app pode ler |
+| **Service worker malicioso** | Só se conseguir registrar no domínio (precisa de JS na origem) |
+| **Forense de disco com dump físico** | Sim — IDB do Chrome vive em `~/.config/google-chrome/Default/IndexedDB/...` em LevelDB sem criptografia (a menos que o OS faça disk encryption full-disk) |
+| **Malware com privilégios do user no device** | Sim — leitura direta dos arquivos LevelDB |
+| **Extensão de browser maliciosa** com permissão de acesso ao site | Sim |
+
+### Comparação com Signal/WhatsApp mobile
+
+| Plataforma | Proteção at-rest do IDB/SQLite |
+|---|---|
+| Signal Android | SQLCipher cifrado com chave do Android Keystore (lockada à tela de bloqueio do OS) |
+| Signal iOS | iOS Data Protection (AES com chave derivada do PIN do device) |
+| WhatsApp mobile | idem ao Signal — file encryption do OS |
+| **Signal Desktop / WhatsApp Web** | **Igual ao geek-social hoje:** sem criptografia at-rest do storage local |
+| **geek-social (browser)** | Sem criptografia at-rest |
+
+Geek-social não é nem melhor nem pior que Signal Desktop / WhatsApp Web nesse aspecto — é a baseline de qualquer app E2EE rodando em browser.
+
+### O que isso implica pro threat model
+
+- **Adversário com acesso ao device desbloqueado** (alguém usando o computador, malware com privilégios do user, dump do disco sem disk encryption do OS): vê tudo. Mitigar via:
+  - Disk encryption do OS (FileVault/BitLocker/LUKS)
+  - Logout/clear do app antes de deixar device exposto
+  - Não usar o app em devices compartilhados sem perfil próprio
+
+- **Adversário sem acesso ao device** (só ao tráfego de rede ou ao DB do server): **não vê plaintexts** — esse adversário continua bloqueado pelo Signal Protocol. O E2EE faz o trabalho dele aqui.
+
+### Mitigações no roadmap
+
+Pacote D da auditoria interna prevê **IDB encryption** — pretende cifrar os stores sensíveis com uma chave derivada do PIN (mesmo PIN do backup), forçando destravamento no boot do app. Implementação esperada:
+
+```ts
+// pseudo: derivar masterKey no login a partir do PIN
+const masterKey = await PBKDF2(pin, deviceSalt, 600_000)
+
+// envelope cada record antes de gravar:
+const encrypted = await AES_GCM_encrypt(masterKey, iv, JSON.stringify(plaintextRecord))
+idb.put({ key, ciphertext: encrypted, iv })
+
+// na leitura:
+const decrypted = await AES_GCM_decrypt(masterKey, iv, ciphertext)
+```
+
+Trade-offs:
+- ✅ Adversário com dump do disco precisa do PIN
+- ✅ XSS precisa esperar destravamento no boot pra ler dados
+- ❌ User precisa digitar PIN a cada login (UX friction)
+- ❌ Não protege contra XSS *após* destravamento (chave fica em memória do tab)
+- ❌ Não protege contra malware com hooks no browser
+
+Status: **não implementado**. Por enquanto, a recomendação é confiar no disk encryption do OS + boas práticas de não compartilhar device.
+
 ## Mensagens 1-1 (DM) — X3DH/PQXDH + Double Ratchet
 
 ### Iniciar sessão
@@ -395,6 +509,8 @@ Esses fixes formam a base operacional — qualquer reescrita futura precisa pres
 
 ## Limitações conhecidas
 
+- **Sem backup de histórico de mensagens** — só backup de identidade. Trocar device = perder histórico. Ver seção "O que **não** vai pro backup" acima.
+- **IDB sem criptografia at-rest** — material sensível (identity privada, sessões, plaintexts) fica em LevelDB plain. Mitigação parcial vem do disk encryption do OS. Pacote D do roadmap pretende cifrar com chave derivada do PIN. Ver seção "Persistência local" acima.
 - **Single-device** por user (`deviceId=1`). Multi-device exigiria sincronização de sessões via cabo seguro entre devices do mesmo user (cada um teria registrationId distinto).
 - **Sem rekey periódico do backup** — se o user trocar PIN, precisa explicitamente regerar.
 - **Sem deniability/forward secrecy assimétrica** além do que o Signal entrega — se a chave de identidade for comprometida, futuras sessões iniciadas com aquele identity-key são suscetíveis a MITM até o user perceber via safety number.
@@ -403,16 +519,21 @@ Esses fixes formam a base operacional — qualquer reescrita futura precisa pres
 
 ## Threat model
 
-| Adversário | Capacidade | Mitigação |
-|---|---|---|
-| Operador com acesso ao DB | Lê todas as tabelas | Mensagens são ciphertext; identity privada só com PIN encriptado (PBKDF2 600k) |
-| Atacante MITM no transporte | Vê tráfego TLS terminado | Mesmo se quebrar TLS, ainda é só ciphertext; identity TOFU pega troca de chave |
-| Adversário com computador quântico (futuro) | Quebra Curve25519 | Kyber1024 no PQXDH preserva o segredo |
-| Atacante rouba JWT vazado | Pode falar pelo user no chat | Mas **não** lê histórico — não tem chave privada do IDB do dispositivo legítimo |
-| Roubo do dispositivo desbloqueado | Acesso total ao IDB | Fora de escopo (mesmo problema do Signal/WhatsApp); roadmap: lock screen no app |
-| Roubo do dispositivo bloqueado | OS bloqueia acesso ao IDB | OK |
-| Compromise do servidor de push | Sabe o `messageId` | Não decifra: payload é metadata-only |
-| User esquece PIN | Backup inacessível | Restore impossível — perde histórico desse dispositivo, mas não as mensagens em outros peers; precisa recriar identity (peers vão precisar verificar nova safety number) |
+| Adversário | Capacidade | Mitigação atual | Status |
+|---|---|---|---|
+| Operador com acesso ao DB | Lê todas as tabelas | Mensagens são ciphertext; identity privada só com PIN encriptado (PBKDF2 600k) | ✅ Coberto |
+| Atacante MITM no transporte (TLS terminado) | Vê tráfego TLS | Mesmo se quebrar TLS, vê só ciphertext; TOFU pega troca de identity | ✅ Coberto |
+| Adversário com computador quântico (futuro) | Quebra Curve25519 | Kyber1024 no PQXDH preserva o segredo das sessões | ✅ Coberto (harvest-now-decrypt-later resistente) |
+| Atacante rouba JWT vazado | Pode enviar mensagens fingindo ser o user | **Não** lê histórico — não tem chave privada do IDB do dispositivo legítimo. Peers vão ver mudança de identity (TOFU) na próxima sessão nova. | ✅ Coberto |
+| Compromise do servidor de push (FCM/APNS) | Sabe `messageId` e momento | Não decifra: payload é metadata-only | ✅ Coberto |
+| XSS no domínio do app burlando CSP | Lê IDB, exfil identity + plaintexts | CSP `connect-src 'self'` força exfil pra mesma origem (eleva barreira); IDB **não cifrado at-rest** | ⚠️ Parcial — depende do CSP segurar |
+| Malware com privilégios do user no device | Lê arquivos LevelDB do browser | **Nada hoje** — disk encryption do OS é a única barreira | ❌ Não coberto |
+| Forense de disco (device sem disk encryption do OS) | Dump de `~/.config/.../IndexedDB/` | **Nada hoje** | ❌ Não coberto |
+| Roubo do dispositivo desbloqueado | Acesso ao IDB inteiro | **Nada hoje** — mesmo problema do Signal Desktop / WhatsApp Web | ❌ Não coberto (Pacote D planejado) |
+| Roubo do dispositivo bloqueado | OS bloqueia acesso ao disco | OK desde que disk encryption do OS esteja ligado | ✅ Coberto pela camada do OS |
+| Extensão de browser maliciosa com permissão no site | Lê IDB via API de extensão | **Nada hoje** | ❌ Não coberto |
+| User esquece PIN | Backup inacessível | Restore impossível — perde acesso a recuperação. Histórico em devices ativos continua íntegro. Peers verão mudança de identity na próxima conversa. | ⚠️ Recuperação parcial |
+| Servidor age maliciosamente (entrega prekey bundle adulterado) | Tenta MITM cifrando pra chave do atacante | TOFU detecta troca de identity-key na primeira mensagem; safety number permite verificação out-of-band | ✅ Coberto se user verificar safety number |
 
 ## Onde ler mais
 

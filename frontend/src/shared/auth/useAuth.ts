@@ -43,7 +43,10 @@ export function useAuth() {
 
   async function initCrypto(userId: string, password?: string): Promise<void> {
     const existingKey = await cryptoService.loadPrivateKey(userId)
-    if (existingKey) return
+    if (existingKey) {
+      await cryptoService.initKeyPair(userId)
+      return
+    }
 
     // Try to restore from server backup first
     let backup: cryptoService.EncryptedBackup | null = null
@@ -54,22 +57,23 @@ export function useAuth() {
       // 404 = no backup yet
     }
 
-    if (backup && password) {
-      try {
-        await cryptoService.importFromBackup(userId, backup, password)
-        return
-      } catch {
-        // Wrong password or corrupted — fall through to generate new
+    if (backup) {
+      if (password) {
+        try {
+          await cryptoService.importFromBackup(userId, backup, password)
+          return
+        } catch {
+          // Login password ≠ backup password (typo or password rotated). Never
+          // regenerate here — that would overwrite the server pubkey and make
+          // every prior encrypted message permanently undecipherable. Prompt
+          // the user for the original PIN via the restore dialog instead.
+        }
       }
-    }
-
-    if (backup && !password) {
-      // OAuth user: signal the UI to ask for the backup PIN
       store.setPendingCryptoRestore(backup)
       return
     }
 
-    // No backup: generate fresh keypair and upload
+    // No backup on server: safe to generate a fresh keypair and upload.
     const publicKey = await cryptoService.initKeyPair(userId)
     await api.put('/crypto/my-key', { publicKey }).catch(() => {})
 

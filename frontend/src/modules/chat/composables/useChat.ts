@@ -528,7 +528,7 @@ export const useChat = defineStore('chat', () => {
 
     if (myId && cryptoSvc.isReady(myId)) {
       const memberIds = conv.participants.map(p => p.userId)
-      cryptoSvc.distributeGroupKeys(conv.id, memberIds).catch(() => {})
+      await cryptoSvc.distributeGroupKeys(conv.id, memberIds).catch(() => {})
     }
 
     await setActiveConversation(conv.id)

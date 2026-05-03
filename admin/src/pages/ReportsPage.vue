@@ -241,29 +241,8 @@ onMounted(load)
                             {{ r.targetType === 'community_comment' ? 'Deletar comentário' : 'Deletar post' }}
                           </Button>
 
-                          <!-- Suspend/ban for user target -->
-                          <template v-if="r.targetType === 'user'">
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              class="border-amber-400 text-amber-700 hover:bg-amber-50"
-                              :disabled="actionLoading[`usr-${r.id}-suspended`]"
-                              @click="setUserStatus(r, r.targetId, 'suspended')"
-                            >
-                              Suspender usuário
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="destructive"
-                              :disabled="actionLoading[`usr-${r.id}-banned`]"
-                              @click="setUserStatus(r, r.targetId, 'banned')"
-                            >
-                              Banir usuário
-                            </Button>
-                          </template>
-
-                          <!-- Suspend/ban author for post/topic/comment -->
-                          <template v-if="['post', 'community_topic', 'community_comment'].includes(r.targetType) && r.reportedUserId">
+                          <!-- Suspend/ban: available for any targetType when reportedUserId is known -->
+                          <template v-if="r.reportedUserId">
                             <Button
                               size="sm"
                               variant="outline"
@@ -271,7 +250,7 @@ onMounted(load)
                               :disabled="actionLoading[`usr-${r.id}-suspended`]"
                               @click="setUserStatus(r, r.reportedUserId!, 'suspended')"
                             >
-                              Suspender autor
+                              {{ r.targetType === 'user' ? 'Suspender usuário' : 'Suspender autor' }}
                             </Button>
                             <Button
                               size="sm"
@@ -279,7 +258,7 @@ onMounted(load)
                               :disabled="actionLoading[`usr-${r.id}-banned`]"
                               @click="setUserStatus(r, r.reportedUserId!, 'banned')"
                             >
-                              Banir autor
+                              {{ r.targetType === 'user' ? 'Banir usuário' : 'Banir autor' }}
                             </Button>
                           </template>
 

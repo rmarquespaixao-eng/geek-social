@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { Users, Activity, Flag, Globe, TrendingUp } from 'lucide-vue-next'
 import StatCard from '@/components/admin/StatCard.vue'
 import Card from '@/components/ui/Card.vue'
@@ -10,14 +10,39 @@ import Badge from '@/components/ui/Badge.vue'
 import { api } from '@/lib/api'
 import { formatDate } from '@/lib/utils'
 
-const stats = ref({ totalUsers: 0, onlineNow: 0, reportsPending: 0, totalCommunities: 0 })
+interface Stats {
+  totalUsers: number
+  onlineNow: number
+  reportsPending: number
+  totalCommunities: number
+  reportsByReason: Record<string, number>
+}
+
+const stats = ref<Stats>({ totalUsers: 0, onlineNow: 0, reportsPending: 0, totalCommunities: 0, reportsByReason: {} })
 const recentLogs = ref<any[]>([])
 const loading = ref(true)
+
+// reason → {label, variant, severity order}
+const reasonSeverity = [
+  { reason: 'hate',       label: 'Crítica',  variant: 'destructive' as const },
+  { reason: 'harassment', label: 'Alta',     variant: 'warning'     as const },
+  { reason: 'nsfw',       label: 'Média',    variant: 'default'     as const },
+  { reason: 'spam',       label: 'Baixa',    variant: 'secondary'   as const },
+  { reason: 'other',      label: 'Outros',   variant: 'secondary'   as const },
+]
+
+const severityItems = computed(() => {
+  const byReason = stats.value.reportsByReason
+  const total = Object.values(byReason).reduce((s, n) => s + n, 0)
+  return reasonSeverity
+    .map(s => ({ ...s, count: byReason[s.reason] ?? 0, pct: total > 0 ? Math.round(((byReason[s.reason] ?? 0) / total) * 100) : 0 }))
+    .filter(s => s.count > 0)
+})
 
 onMounted(async () => {
   try {
     const [statsRes, logsRes] = await Promise.all([
-      api.get('/admin/stats').catch(() => ({ data: { totalUsers: 1247, onlineNow: 83, reportsPending: 12, totalCommunities: 34 } })),
+      api.get('/admin/stats').catch(() => ({ data: { totalUsers: 0, onlineNow: 0, reportsPending: 0, totalCommunities: 0, reportsByReason: {} } })),
       api.get('/admin/logs?limit=8').catch(() => ({ data: { items: [] } })),
     ])
     stats.value = statsRes.data
@@ -65,18 +90,17 @@ onMounted(async () => {
           <CardTitle>Denúncias por Severidade</CardTitle>
         </CardHeader>
         <CardContent>
-          <div class="space-y-3">
-            <div v-for="item in [
-              { label: 'Crítica', count: 2, variant: 'destructive' as const, pct: 16 },
-              { label: 'Alta', count: 4, variant: 'warning' as const, pct: 33 },
-              { label: 'Média', count: 4, variant: 'default' as const, pct: 33 },
-              { label: 'Baixa', count: 2, variant: 'secondary' as const, pct: 16 },
-            ]" :key="item.label" class="flex items-center gap-3">
-              <Badge :variant="item.variant" class="w-16 justify-center">{{ item.label }}</Badge>
+          <div v-if="loading" class="text-sm text-slate-400">Carregando...</div>
+          <div v-else-if="severityItems.length === 0" class="text-sm text-slate-400 italic">
+            Nenhuma denúncia pendente.
+          </div>
+          <div v-else class="space-y-3">
+            <div v-for="item in severityItems" :key="item.reason" class="flex items-center gap-3">
+              <Badge :variant="item.variant" class="w-16 justify-center shrink-0">{{ item.label }}</Badge>
               <div class="flex-1 rounded-full bg-slate-100 h-2">
                 <div class="h-2 rounded-full bg-indigo-500 transition-all" :style="{ width: item.pct + '%' }" />
               </div>
-              <span class="w-4 text-right text-sm font-medium text-slate-700">{{ item.count }}</span>
+              <span class="w-6 text-right text-sm font-medium text-slate-700">{{ item.count }}</span>
             </div>
           </div>
         </CardContent>

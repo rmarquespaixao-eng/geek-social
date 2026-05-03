@@ -1,6 +1,6 @@
 import { eq, and, count, desc, sql, or } from 'drizzle-orm'
 import type { DatabaseClient } from '../../../shared/infra/database/postgres.client.js'
-import { reports, posts, postComments } from '../../../shared/infra/database/schema.js'
+import { reports, posts, postComments, messages } from '../../../shared/infra/database/schema.js'
 import type { ListReportsQuery } from './admin-reports.schema.js'
 
 export type AdminReportRow = typeof reports.$inferSelect & { reportedUserId: string | null }
@@ -23,13 +23,13 @@ export class AdminReportsRepository {
 
     const where = conditions.length > 0 ? and(...conditions) : undefined
 
-    // reportedUserId: for user targets it IS targetId; for post/community_topic it's the post author;
-    // for community_comment it's the comment author
+    // reportedUserId: resolves the author of the reported content across all target types
     const reportedUserIdExpr = sql<string | null>`
       CASE
         WHEN ${reports.targetType} = 'user' THEN ${reports.targetId}
         WHEN ${reports.targetType} IN ('post', 'community_topic') THEN ${posts.userId}
         WHEN ${reports.targetType} = 'community_comment' THEN ${postComments.userId}
+        WHEN ${reports.targetType} = 'message' THEN ${messages.userId}
         ELSE NULL
       END
     `.as('reported_user_id')
@@ -57,6 +57,10 @@ export class AdminReportsRepository {
         .leftJoin(postComments, and(
           eq(reports.targetType, 'community_comment'),
           eq(postComments.id, reports.targetId),
+        ))
+        .leftJoin(messages, and(
+          eq(reports.targetType, 'message'),
+          eq(messages.id, reports.targetId),
         ))
         .where(where)
         .orderBy(desc(reports.createdAt))

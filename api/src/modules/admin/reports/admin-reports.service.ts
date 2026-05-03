@@ -31,6 +31,7 @@ export class AdminReportsService {
       description: r.description,
       status: r.status,
       createdAt: r.createdAt,
+      reportedUserId: r.reportedUserId ?? null,
     }))
     return { items, total, page: filters.page, pageSize: filters.pageSize }
   }

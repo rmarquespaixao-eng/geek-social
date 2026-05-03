@@ -454,7 +454,6 @@ export const reports = pgTable('reports', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 }, (table) => ({
-  reporterTargetUnique: uniqueIndex('reports_reporter_target_unique').on(table.reporterId, table.targetType, table.targetId),
   statusCreatedAtIdx: index('reports_status_created_at_idx').on(table.status, table.createdAt),
 }))
 
@@ -827,6 +826,8 @@ export const adminActionEnum = pgEnum('admin_action', [
   'collection_type_update',
   'collection_type_toggle',
   'collection_type_delete',
+  'content_post_delete',
+  'content_comment_delete',
 ])
 
 export const adminAuditLog = pgTable('admin_audit_log', {

@@ -29,6 +29,9 @@ import { moderationRoutes } from './moderation/moderation.routes.js'
 import { CollectionTypesRepository } from './collection-types/collection-types.repository.js'
 import { CollectionTypesService } from './collection-types/collection-types.service.js'
 import { collectionTypesRoutes } from './collection-types/collection-types.routes.js'
+import { AdminContentRepository } from './content/admin-content.repository.js'
+import { AdminContentService } from './content/admin-content.service.js'
+import { adminContentRoutes } from './content/admin-content.routes.js'
 
 export async function adminRoutes(app: FastifyInstance, opts: {
   db: DatabaseClient
@@ -91,4 +94,9 @@ export async function adminRoutes(app: FastifyInstance, opts: {
   const collectionTypesRepo = new CollectionTypesRepository(db)
   const collectionTypesService = new CollectionTypesService(collectionTypesRepo, auditLogService)
   await app.register(collectionTypesRoutes, { prefix: '/collection-types', collectionTypesService })
+
+  // Content moderation (delete posts/comments)
+  const adminContentRepo = new AdminContentRepository(db)
+  const adminContentService = new AdminContentService(adminContentRepo, auditLogService)
+  await app.register(adminContentRoutes, { prefix: '/content', adminContentService })
 }

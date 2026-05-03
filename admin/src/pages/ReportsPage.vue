@@ -12,12 +12,13 @@ import CardContent from '@/components/ui/CardContent.vue'
 interface Report {
   id: string
   reporterId: string
-  targetType: 'post' | 'comment' | 'user' | 'community'
+  targetType: 'post' | 'community_topic' | 'community_comment' | 'user' | 'message' | 'collection' | 'conversation'
   targetId: string
   reason: string
   description: string | null
-  status: 'pending' | 'reviewing' | 'resolved' | 'dismissed'
+  status: 'pending' | 'reviewing' | 'resolved' | 'dismissed' | 'reviewed'
   createdAt: string
+  reportedUserId: string | null
 }
 
 const reports = ref<Report[]>([])
@@ -26,6 +27,7 @@ const page = ref(1)
 const statusFilter = ref('')
 const loading = ref(false)
 const expandedId = ref<string | null>(null)
+const actionLoading = ref<Record<string, boolean>>({})
 
 const statusOptions = [
   { value: '', label: 'Todos os status' },
@@ -53,9 +55,12 @@ const statusLabel: Record<string, string> = {
 
 const targetTypeLabel: Record<string, string> = {
   post: 'Post',
-  comment: 'Comentário',
+  community_topic: 'Tópico',
+  community_comment: 'Comentário',
   user: 'Usuário',
-  community: 'Comunidade',
+  message: 'Mensagem',
+  collection: 'Coleção',
+  conversation: 'Conversa',
 }
 
 const reasonLabel: Record<string, string> = {
@@ -94,6 +99,36 @@ async function updateStatus(id: string, status: string) {
   } catch {
     toast.error('Erro ao atualizar')
   }
+}
+
+async function doAction(key: string, fn: () => Promise<void>) {
+  actionLoading.value[key] = true
+  try {
+    await fn()
+  } finally {
+    actionLoading.value[key] = false
+  }
+}
+
+async function deleteContent(report: Report) {
+  const isComment = report.targetType === 'community_comment'
+  const endpoint = isComment
+    ? `/admin/content/comments/${report.targetId}`
+    : `/admin/content/posts/${report.targetId}`
+  await doAction(`del-${report.id}`, async () => {
+    await api.delete(endpoint)
+    toast.success('Conteúdo removido')
+    await updateStatus(report.id, 'resolved')
+  })
+}
+
+async function setUserStatus(report: Report, userId: string, status: 'suspended' | 'banned') {
+  await doAction(`usr-${report.id}-${status}`, async () => {
+    await api.patch(`/admin/users/${userId}/status`, { status })
+    const label = status === 'suspended' ? 'Usuário suspenso' : 'Usuário banido'
+    toast.success(label)
+    await updateStatus(report.id, 'resolved')
+  })
 }
 
 onMounted(load)
@@ -164,7 +199,8 @@ onMounted(load)
                 <!-- Detail / action panel -->
                 <tr v-if="expandedId === r.id" class="border-b border-slate-200 bg-slate-50">
                   <td colspan="5" class="px-4 py-4">
-                    <div class="space-y-3">
+                    <div class="space-y-4">
+                      <!-- Report metadata -->
                       <div class="grid grid-cols-2 gap-4 text-sm sm:grid-cols-4">
                         <div>
                           <p class="font-medium text-slate-500 text-xs uppercase tracking-wide">Tipo de alvo</p>
@@ -189,13 +225,77 @@ onMounted(load)
                         <p class="mt-0.5 text-sm text-slate-700 whitespace-pre-wrap">{{ r.description }}</p>
                       </div>
 
-                      <div class="flex gap-2 pt-1">
-                        <Button size="sm" @click="updateStatus(r.id, 'resolved')">
-                          Resolver
-                        </Button>
-                        <Button size="sm" variant="ghost" class="text-red-600 hover:text-red-700" @click="updateStatus(r.id, 'dismissed')">
-                          Descartar
-                        </Button>
+                      <!-- Actions -->
+                      <div class="border-t border-slate-200 pt-3">
+                        <p class="mb-2 text-xs font-medium uppercase tracking-wide text-slate-500">Ações de moderação</p>
+                        <div class="flex flex-wrap gap-2">
+
+                          <!-- Delete content (post / topic / comment) -->
+                          <Button
+                            v-if="['post', 'community_topic', 'community_comment'].includes(r.targetType)"
+                            size="sm"
+                            variant="destructive"
+                            :disabled="actionLoading[`del-${r.id}`]"
+                            @click="deleteContent(r)"
+                          >
+                            {{ r.targetType === 'community_comment' ? 'Deletar comentário' : 'Deletar post' }}
+                          </Button>
+
+                          <!-- Suspend/ban for user target -->
+                          <template v-if="r.targetType === 'user'">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              class="border-amber-400 text-amber-700 hover:bg-amber-50"
+                              :disabled="actionLoading[`usr-${r.id}-suspended`]"
+                              @click="setUserStatus(r, r.targetId, 'suspended')"
+                            >
+                              Suspender usuário
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="destructive"
+                              :disabled="actionLoading[`usr-${r.id}-banned`]"
+                              @click="setUserStatus(r, r.targetId, 'banned')"
+                            >
+                              Banir usuário
+                            </Button>
+                          </template>
+
+                          <!-- Suspend/ban author for post/topic/comment -->
+                          <template v-if="['post', 'community_topic', 'community_comment'].includes(r.targetType) && r.reportedUserId">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              class="border-amber-400 text-amber-700 hover:bg-amber-50"
+                              :disabled="actionLoading[`usr-${r.id}-suspended`]"
+                              @click="setUserStatus(r, r.reportedUserId!, 'suspended')"
+                            >
+                              Suspender autor
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="destructive"
+                              :disabled="actionLoading[`usr-${r.id}-banned`]"
+                              @click="setUserStatus(r, r.reportedUserId!, 'banned')"
+                            >
+                              Banir autor
+                            </Button>
+                          </template>
+
+                          <!-- Always: resolve / dismiss -->
+                          <Button size="sm" @click="updateStatus(r.id, 'resolved')">
+                            Resolver
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            class="text-red-600 hover:text-red-700"
+                            @click="updateStatus(r.id, 'dismissed')"
+                          >
+                            Descartar
+                          </Button>
+                        </div>
                       </div>
                     </div>
                   </td>

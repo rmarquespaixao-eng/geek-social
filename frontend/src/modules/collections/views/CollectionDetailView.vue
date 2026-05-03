@@ -467,7 +467,7 @@ function onListingSaved() {
         <!-- Loading items -->
         <div
           v-if="itemsStore.loading && itemsStore.items.length === 0"
-          :class="viewMode === 'grid' ? 'grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3' : 'space-y-2'"
+          :class="viewMode === 'grid' ? 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3' : 'space-y-2'"
         >
           <div
             v-for="n in 8"
@@ -517,7 +517,7 @@ function onListingSaved() {
         <!-- Grid view -->
         <div
           v-else-if="viewMode === 'grid'"
-          class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3"
+          class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3"
         >
           <ItemCard
             v-for="item in itemsStore.items"

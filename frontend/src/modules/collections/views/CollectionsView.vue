@@ -54,9 +54,15 @@ onMounted(() => {
 
 async function switchToItems() {
   activeView.value = 'items'
+  router.replace({ query: { tab: 'items' } })
   if (!allItems.initialized) {
     await allItems.fetchPage({ sort: listSort.value })
   }
+}
+
+function switchToCollections() {
+  activeView.value = 'collections'
+  router.replace({ query: {} })
 }
 
 function goToItem(collectionId: string, itemId: string) {
@@ -174,7 +180,7 @@ const isEmpty = computed(() => !store.loading && store.collections.length === 0)
           :class="activeView === 'collections'
             ? 'bg-[#f59e0b] text-[#0f0f1a]'
             : 'text-[#94a3b8] hover:text-[#e2e8f0]'"
-          @click="activeView = 'collections'"
+          @click="switchToCollections"
         >
           <LayoutGrid :size="14" />
           Coleções

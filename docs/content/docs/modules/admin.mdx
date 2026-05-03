@@ -1,0 +1,102 @@
+---
+title: Admin
+description: Painel administrativo do Geek Social — moderação, usuários, comunidades, coleções, feature flags, LGPD e logs.
+---
+
+## Visão geral
+
+O painel admin é uma SPA separada (porta **8090**) construída em Vue 3. Autentica com o mesmo JWT da plataforma, mas exige `platformRole = admin` em todas as rotas protegidas.
+
+```
+http://localhost:8090   # dev local
+```
+
+Todo acesso ao painel requer login com uma conta de role `admin`. Em dev, a conta padrão é `admin@geeksocial.local`.
+
+## Seções
+
+### Dashboard
+
+Cards de métricas globais (usuários, posts, coleções, denúncias) e gráficos:
+
+- Usuários registrados por dia (últimos 30 dias)
+- Posts por dia
+- Distribuição de severidade das denúncias
+
+### Usuários
+
+Lista paginada de todos os usuários com busca por nome/e-mail e filtro por role e status. Exibe: avatar, display name, e-mail, role, status de verificação de e-mail e data de criação.
+
+> **UX gap**: clicar em uma linha não abre detalhe de usuário — não há rota `/users/:id` no admin.
+
+### Comunidades
+
+Lista de comunidades com slug, contagem de membros e tópicos, status (`Ativa` / `Suspensa`) e data de criação. Botão **Suspender / Reativar** chama `PATCH /admin/communities/:id/status`.
+
+### Coleções
+
+Tipos de coleção disponíveis na plataforma (Board Games, Livros, Card Games, Personalizado, Games…). Toggle de ativo/inativo por tipo. Tipos marcados como `isSystem` não podem ser desativados — a API retorna 422 `SYSTEM_LOCKED`.
+
+### Denúncias
+
+Fila de revisão agrupada por `targetType` (user, post, message, collection, conversation). Para cada denúncia:
+
+| Ação | Efeito |
+|---|---|
+| Dispensar | Status → `dismissed` |
+| Marcar revisado | Status → `reviewed` |
+| Ações por tipo | Silenciar usuário, remover post, encerrar conversa, etc. |
+
+### Feature Flags
+
+CRUD completo de flags globais e overrides por usuário. Veja [Feature Flags](/docs/concepts/feature-flags).
+
+### LGPD
+
+Fila de solicitações de portabilidade e exclusão de dados. Prazo legal: 15 dias corridos.
+
+- Filtro por status (pendente, em andamento, concluído)
+- Exportações geradas automaticamente; exclusões requerem confirmação manual
+
+Veja [LGPD](/docs/concepts/lgpd).
+
+### Logs de Atividade
+
+Duas abas:
+
+| Aba | O quê |
+|---|---|
+| Ações administrativas | Toda mutação feita por admins (community_unsuspend, report_review, feature_flag_toggle, etc.) com ator, alvo, IP e timestamp |
+| Acessos de usuários | page_view por página, com IP |
+
+Filtrável por UUID do ator.
+
+### Moderação
+
+Configurações de moderação automática via IA e verificação de idade:
+
+- **Moderação via IA** — provedor (OpenAI, Anthropic, Gemini, endpoint custom), threshold de texto/imagem, ações automáticas (remover, sinalizar para revisão, notificar moderadores)
+- **Verificação de idade** — plataforma 16+, método (autodeclaração, cartão de crédito, documento, consentimento dos pais)
+
+## Autenticação e autorização
+
+```
+PATCH /admin/*   →  authenticate → requireRole('admin')
+```
+
+A middleware `requireRole` verifica `request.user.platformRole === 'admin'`. Qualquer usuário comum que tente acessar endpoints `/admin/*` recebe **403**.
+
+## Endpoints admin
+
+Prefixo `/admin`:
+
+| Recurso | Endpoints |
+|---|---|
+| Usuários | `GET /admin/users`, `PATCH /admin/users/:id/role`, `PATCH /admin/users/:id/status` |
+| Comunidades | `GET /admin/communities`, `PATCH /admin/communities/:id/status` |
+| Coleções | `GET /admin/collection-types`, `POST`, `PATCH /:id`, `PUT /:id`, `DELETE /:id` |
+| Denúncias | `GET /admin/reports`, `PATCH /admin/reports/:id/review` |
+| Flags | `GET /admin/feature-flags`, `POST`, `PATCH /:id`, `DELETE /:id`, overrides por usuário |
+| LGPD | `GET /admin/lgpd/requests`, `PATCH /admin/lgpd/requests/:id` |
+| Logs | `GET /admin/audit-logs`, `GET /admin/access-logs` |
+| Dashboard | `GET /admin/stats` |

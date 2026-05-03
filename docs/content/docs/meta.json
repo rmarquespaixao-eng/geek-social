@@ -3,23 +3,14 @@
   "pages": [
     "index",
     "roadmap",
-    "---Introdução---",
     "intro",
-    "---Conceitos---",
     "concepts",
-    "---Tutoriais---",
     "tutoriais",
-    "---API Reference---",
     "api",
-    "---Banco de dados---",
     "data-model",
-    "---Módulos---",
     "modules",
-    "---Frontend---",
     "frontend",
-    "---Operations---",
     "operations",
-    "---Referência---",
     "reference"
   ]
 }

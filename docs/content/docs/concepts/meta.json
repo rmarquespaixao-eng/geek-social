@@ -9,6 +9,8 @@
     "testing",
     "observability",
     "security",
-    "criptografia-e2ee"
+    "criptografia-e2ee",
+    "feature-flags",
+    "lgpd"
   ]
 }

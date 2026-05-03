@@ -1,0 +1,73 @@
+---
+title: Feature Flags
+description: Sistema de feature flags com cache em memória, overrides por usuário e painel admin.
+---
+
+## Visão geral
+
+O Geek Social tem um sistema de feature flags que permite ligar/desligar módulos inteiros em runtime, sem redeploy. Cada flag pode ser habilitada globalmente ou sobrescrita por usuário específico.
+
+## Como funciona
+
+```
+request → requireFlag(flagKey) → cache hit? → 200 OK
+                                ↓ miss
+                            DB: feature_flags + user_feature_flags
+                                ↓
+                            resolve(userEnabled ?? globalEnabled)
+                                ↓
+                            preencher cache (TTL 30s)
+                                ↓
+                            disabled? → 403
+```
+
+**TTL do cache**: 30 segundos em memória (por processo). Mudanças feitas no admin levam até 30s para propagar.
+
+**Prioridade**: override por usuário (`user_feature_flags.enabled`) tem precedência sobre o valor global (`feature_flags.enabled`).
+
+## Flags de módulo
+
+As seguintes flags protegem módulos inteiros da API:
+
+| Flag key | Módulo protegido | Porta de entrada |
+|---|---|---|
+| `module_collections` | `/collections`, `/items` | `app.ts:355` |
+| `module_friends` | `/friends` | `app.ts:362` |
+| `module_feed` | `/feed`, `/posts` | `app.ts:370` |
+| `module_chat` | `/chat` | `app.ts:416` |
+| `module_notifications` | `/notifications` | `app.ts:578` |
+
+Quando uma flag de módulo está desabilitada, todos os endpoints do módulo retornam **403** — inclusive para admins.
+
+## Tabelas
+
+| Tabela | Papel |
+|---|---|
+| `feature_flags` | Flags globais — key, enabled, descrição |
+| `user_feature_flags` | Override por usuário — sobrescreve o valor global |
+
+## API
+
+```
+GET  /feature-flags/me         # flags ativas do usuário autenticado
+GET  /admin/feature-flags      # listagem completa (admin)
+POST /admin/feature-flags      # criar flag (admin)
+PATCH /admin/feature-flags/:id # atualizar flag (admin)
+DELETE /admin/feature-flags/:id
+GET  /admin/feature-flags/:id/overrides        # overrides por usuário
+POST /admin/feature-flags/:id/overrides        # criar override
+PATCH /admin/feature-flags/:id/overrides/:uid  # atualizar override
+DELETE /admin/feature-flags/:id/overrides/:uid # remover override
+```
+
+## Painel admin
+
+No painel admin (`/feature-flags`):
+
+- Toggle global de cada flag
+- Expandir flag para ver e gerenciar overrides por usuário
+- Buscar usuário pelo UUID para adicionar override
+
+## Behavior importante
+
+A middleware `requireFlag` roda no hook `preHandler` — **antes** de `authenticate`. Isso significa que se o `userId` não estiver disponível ainda (request não autenticado), a flag é avaliada apenas pelo valor global. Flags de módulo nunca bloqueiam rotas públicas que não exigem autenticação.

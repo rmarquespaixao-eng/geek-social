@@ -1,0 +1,63 @@
+---
+title: LGPD
+description: Conformidade com a Lei Geral de Proteção de Dados — portabilidade, exclusão e requisitos do painel admin.
+---
+
+## Visão geral
+
+O Geek Social implementa os direitos do titular previstos na LGPD (Lei 13.709/2018):
+
+| Direito | Implementação |
+|---|---|
+| **Portabilidade** | Exportação de todos os dados do usuário em JSON |
+| **Exclusão** | Solicitação de deleção de conta e dados |
+| **Acesso** | Endpoint `GET /users/me` retorna dados do perfil autenticado |
+
+## Fluxo de solicitação
+
+1. **Usuário** acessa Configurações → LGPD e abre uma solicitação de portabilidade ou exclusão
+2. Solicitação é registrada na tabela `lgpd_requests` com status `pending`
+3. **Admin** vê a solicitação no painel (`/lgpd`) com prazo calculado automaticamente
+4. Para **exportação**: arquivo JSON gerado automaticamente e disponibilizado para download
+5. Para **exclusão**: requer confirmação manual do admin no painel; deleção é irreversível
+
+**Prazo legal**: 15 dias corridos a partir da solicitação.
+
+## Dados exportados
+
+A exportação de portabilidade inclui:
+
+- Dados do perfil (nome, e-mail, bio, localização, pronomes)
+- Coleções e itens
+- Posts e comentários
+- Histórico de amizades
+- Configurações de privacidade
+
+Mensagens de chat **E2EE** não são incluídas na exportação — as chaves de descriptografia ficam apenas no dispositivo do usuário.
+
+## API
+
+```
+POST /users/lgpd/request          # abrir solicitação (autenticado)
+GET  /admin/lgpd/requests         # listar solicitações (admin)
+PATCH /admin/lgpd/requests/:id    # atualizar status (admin)
+```
+
+## Configurações de privacidade
+
+Além das solicitações LGPD, o usuário controla via Configurações:
+
+| Configuração | Efeito |
+|---|---|
+| `feedVisible` | Oculta feed de atividades do perfil público |
+| `collectionsVisible` | Oculta coleções do perfil público |
+| `friendsVisible` | Oculta lista de amigos do perfil público |
+| `allowDmFromNonFriends` | Controla quem pode iniciar DM |
+
+Essas preferências são armazenadas em `users.privacySettings` (JSONB).
+
+## Considerações de retenção
+
+- Tokens de refresh expiram em 7 dias e são removidos automaticamente
+- Logs de acesso são retidos para fins de segurança (LGPD art. 7º, inc. II — legítimo interesse)
+- Dados de denúncias são retidos mesmo após exclusão de conta (obrigação legal)

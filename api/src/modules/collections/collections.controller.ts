@@ -115,6 +115,12 @@ export class CollectionsController {
     } catch (error) { return this.handleError(error, reply) }
   }
 
+  async getStats(request: FastifyRequest, reply: FastifyReply) {
+    const { userId } = request.user as AccessTokenClaims
+    const stats = await this.service.getStats(userId)
+    return reply.send(stats)
+  }
+
   async listPublic(request: FastifyRequest<{ Params: { userId: string } }>, reply: FastifyReply) {
     const user = request.user as AccessTokenClaims | undefined
     const viewerId = user?.userId ?? null

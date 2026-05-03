@@ -219,6 +219,10 @@ export class CollectionsService {
     return this.collectionsRepo.updateSchemaEntry(entryId, data)
   }
 
+  async getStats(userId: string) {
+    return (this.collectionsRepo as import('./collections.repository.js').CollectionsRepository).getStats(userId)
+  }
+
   async getPublicCollections(ownerId: string, viewerId: string | null): Promise<Collection[]> {
     const isOwner = viewerId === ownerId
 

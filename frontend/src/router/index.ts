@@ -81,6 +81,12 @@ const router = createRouter({
       meta: { requiresAuth: true },
     },
     {
+      path: '/collections/dashboard',
+      name: 'CollectionsDashboard',
+      component: () => import('@/modules/collections/views/CollectionsDashboardView.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
       path: '/collections/:id',
       name: 'CollectionDetail',
       component: () => import('@/modules/collections/views/CollectionDetailView.vue'),

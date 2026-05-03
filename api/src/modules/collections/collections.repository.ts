@@ -1,4 +1,4 @@
-import { eq, and, ilike, asc, inArray, count } from 'drizzle-orm'
+import { eq, and, ilike, asc, inArray, count, sql } from 'drizzle-orm'
 import type { DatabaseClient } from '../../shared/infra/database/postgres.client.js'
 import { collections, collectionFieldSchema, collectionTypes, fieldDefinitions, items } from '../../shared/infra/database/schema.js'
 import type {
@@ -11,6 +11,13 @@ import type {
   SchemaEntryData,
   CollectionVisibility,
 } from '../../shared/contracts/collection.repository.contract.js'
+
+export type CollectionStats = {
+  totalCollections: number
+  itemsByType: { typeKey: string; typeName: string; typeIcon: string; count: number }[]
+  gamesByStatus: { status: string | null; count: number }[]
+  itemsByRating: { rating: number | null; count: number }[]
+}
 
 export class CollectionsRepository implements ICollectionRepository {
   constructor(private readonly db: DatabaseClient) {}
@@ -208,6 +215,50 @@ export class CollectionsRepository implements ICollectionRepository {
       .where(eq(collectionFieldSchema.collectionId, collectionId))
       .orderBy(asc(collectionFieldSchema.displayOrder))
     return rows as unknown as CollectionSchemaEntry[]
+  }
+
+  async getStats(userId: string): Promise<CollectionStats> {
+    const [totalResult, itemsByTypeRows, gamesByStatusRows, itemsByRatingRows] = await Promise.all([
+
+      this.db.select({ total: count() })
+        .from(collections)
+        .where(eq(collections.userId, userId)),
+
+      this.db.select({
+          typeKey: collectionTypes.key,
+          typeName: collectionTypes.name,
+          typeIcon: collectionTypes.icon,
+          count: count(items.id),
+        })
+        .from(collections)
+        .innerJoin(collectionTypes, eq(collections.collectionTypeId, collectionTypes.id))
+        .innerJoin(items, eq(items.collectionId, collections.id))
+        .where(eq(collections.userId, userId))
+        .groupBy(collectionTypes.id, collectionTypes.key, collectionTypes.name, collectionTypes.icon),
+
+      this.db.select({
+          status: sql<string | null>`${items.fields}->>'status'`,
+          count: count(),
+        })
+        .from(items)
+        .innerJoin(collections, eq(items.collectionId, collections.id))
+        .innerJoin(collectionTypes, eq(collections.collectionTypeId, collectionTypes.id))
+        .where(and(eq(collections.userId, userId), eq(collectionTypes.key, 'games')))
+        .groupBy(sql`${items.fields}->>'status'`),
+
+      this.db.select({ rating: items.rating, count: count() })
+        .from(items)
+        .innerJoin(collections, eq(items.collectionId, collections.id))
+        .where(eq(collections.userId, userId))
+        .groupBy(items.rating),
+    ])
+
+    return {
+      totalCollections: Number(totalResult[0]?.total ?? 0),
+      itemsByType: itemsByTypeRows.map(r => ({ typeKey: r.typeKey, typeName: r.typeName ?? r.typeKey, typeIcon: r.typeIcon ?? '', count: Number(r.count) })),
+      gamesByStatus: gamesByStatusRows.map(r => ({ status: r.status ?? null, count: Number(r.count) })),
+      itemsByRating: itemsByRatingRows.map(r => ({ rating: r.rating ?? null, count: Number(r.count) })),
+    }
   }
 
   async getFieldSchemasForCollections(collectionIds: string[]): Promise<Record<string, CollectionSchemaEntry[]>> {

@@ -121,3 +121,10 @@ export interface ItemsPage {
   items: Item[]
   nextCursor: string | null
 }
+
+export interface CollectionStats {
+  totalCollections: number
+  itemsByType: { typeKey: string; typeName: string; typeIcon: string; count: number }[]
+  gamesByStatus: { status: string | null; count: number }[]
+  itemsByRating: { rating: number | null; count: number }[]
+}

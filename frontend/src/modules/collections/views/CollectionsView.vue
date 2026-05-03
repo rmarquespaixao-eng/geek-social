@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { Library, Plus, Package } from 'lucide-vue-next'
+import { Library, Plus, Package, BarChart2 } from 'lucide-vue-next'
 import { useCollectionsStore } from '../composables/useCollections'
 import CollectionCard from '../components/CollectionCard.vue'
 import CollectionForm from '../components/CollectionForm.vue'
@@ -74,14 +74,23 @@ const isEmpty = computed(() => !store.loading && store.collections.length === 0)
         <span>{{ totalItems === 1 ? 'item' : 'itens' }}</span>
       </template>
       <template #action>
-        <button
-          class="flex items-center gap-1.5 bg-[#f59e0b] hover:bg-[#d97706] active:scale-95 text-black text-[13px] font-semibold px-3.5 md:px-4 py-2 rounded-lg transition-all shadow-md shadow-[#f59e0b]/20"
-          @click="openCreateModal"
-        >
-          <Plus :size="16" :stroke-width="2.5" />
-          <span class="hidden sm:inline">Nova coleção</span>
-          <span class="sm:hidden">Nova</span>
-        </button>
+        <div class="flex items-center gap-2">
+          <button
+            class="flex items-center gap-1.5 bg-[#1e2038] hover:bg-[#252640] border border-[#2e3050] text-[#94a3b8] hover:text-[#e2e8f0] text-[13px] font-semibold px-3.5 py-2 rounded-lg transition-all"
+            @click="router.push('/collections/dashboard')"
+          >
+            <BarChart2 :size="15" />
+            <span class="hidden sm:inline">Dashboard</span>
+          </button>
+          <button
+            class="flex items-center gap-1.5 bg-[#f59e0b] hover:bg-[#d97706] active:scale-95 text-black text-[13px] font-semibold px-3.5 md:px-4 py-2 rounded-lg transition-all shadow-md shadow-[#f59e0b]/20"
+            @click="openCreateModal"
+          >
+            <Plus :size="16" :stroke-width="2.5" />
+            <span class="hidden sm:inline">Nova coleção</span>
+            <span class="sm:hidden">Nova</span>
+          </button>
+        </div>
       </template>
     </AppPageHeader>
 

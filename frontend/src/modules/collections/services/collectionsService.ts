@@ -3,6 +3,7 @@ import type {
   Collection,
   CollectionType,
   CollectionSchemaEntry,
+  CollectionStats,
   CreateCollectionPayload,
   UpdateCollectionPayload,
   FieldDefinition,
@@ -68,6 +69,11 @@ export async function uploadCollectionCover(id: string, file: File): Promise<Col
 export async function listPublicCollections(userId: string): Promise<Collection[]> {
   const { data } = await api.get<Record<string, unknown>[]>(`/users/${userId}/collections`)
   return normalizeList(data)
+}
+
+export async function getCollectionStats(): Promise<CollectionStats> {
+  const { data } = await api.get<CollectionStats>('/collections/stats')
+  return data
 }
 
 // Field Definitions (biblioteca do usuário)

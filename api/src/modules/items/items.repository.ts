@@ -1,6 +1,6 @@
 import { eq, and, or, ilike, sql, type SQL } from 'drizzle-orm'
 import type { DatabaseClient } from '../../shared/infra/database/postgres.client.js'
-import { items, collections } from '../../shared/infra/database/schema.js'
+import { items, collections, collectionTypes } from '../../shared/infra/database/schema.js'
 import type {
   IItemRepository, Item, CreateItemData, UpdateItemData, ExistingSteamItem,
   SearchItemsParams, ItemsPage, FieldFilter,
@@ -182,9 +182,10 @@ export class ItemsRepository implements IItemRepository {
       })
       .from(items)
       .innerJoin(collections, eq(items.collectionId, collections.id))
+      .innerJoin(collectionTypes, eq(collectionTypes.id, collections.collectionTypeId))
       .where(and(
         eq(collections.userId, userId),
-        eq(collections.type, 'games'),
+        eq(collectionTypes.key, 'games'),
         sql`${items.fields} ? 'steam_appid'`,
       ))
     return rows.map(r => ({ appId: Number(r.appId), collectionId: r.collectionId }))

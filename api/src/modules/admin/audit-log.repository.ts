@@ -1,4 +1,4 @@
-import { eq, and, gte, lte, desc } from 'drizzle-orm'
+import { eq, and, gte, lte, desc, count } from 'drizzle-orm'
 import type { DatabaseClient } from '../../shared/infra/database/postgres.client.js'
 import { adminAuditLog } from '../../shared/infra/database/schema.js'
 import type { PlatformRole } from '../../shared/middleware/require-role.js'
@@ -31,8 +31,10 @@ export class AdminAuditLogRepository {
     actorId: string | null,
     roleAtTime: PlatformRole,
     opts: RecordOptions = {},
+    tx?: DatabaseClient,
   ): Promise<void> {
-    await this.db.insert(adminAuditLog).values({
+    const exec = tx ?? this.db
+    await exec.insert(adminAuditLog).values({
       actorId: actorId ?? null,
       actorRoleAtTime: roleAtTime,
       action,
@@ -43,7 +45,7 @@ export class AdminAuditLogRepository {
     })
   }
 
-  async list(filters: ListLogsFilters = {}): Promise<typeof adminAuditLog.$inferSelect[]> {
+  async list(filters: ListLogsFilters = {}): Promise<{ rows: typeof adminAuditLog.$inferSelect[]; total: number }> {
     const { page = 1, pageSize = 50 } = filters
     const conditions = []
 
@@ -54,16 +56,19 @@ export class AdminAuditLogRepository {
     if (filters.from) conditions.push(gte(adminAuditLog.createdAt, filters.from))
     if (filters.to) conditions.push(lte(adminAuditLog.createdAt, filters.to))
 
-    const query = this.db
-      .select()
-      .from(adminAuditLog)
-      .orderBy(desc(adminAuditLog.createdAt))
-      .limit(pageSize)
-      .offset((page - 1) * pageSize)
+    const where = conditions.length > 0 ? and(...conditions) : undefined
 
-    if (conditions.length > 0) {
-      return query.where(and(...conditions))
-    }
-    return query
+    const [totalRes, rows] = await Promise.all([
+      this.db.select({ count: count() }).from(adminAuditLog).where(where),
+      this.db
+        .select()
+        .from(adminAuditLog)
+        .where(where)
+        .orderBy(desc(adminAuditLog.createdAt))
+        .limit(pageSize)
+        .offset((page - 1) * pageSize),
+    ])
+
+    return { rows, total: Number(totalRes[0]?.count ?? 0) }
   }
 }

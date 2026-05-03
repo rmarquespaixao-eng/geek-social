@@ -34,6 +34,10 @@ export async function adminRoutes(app: FastifyInstance, opts: { db: DatabaseClie
   // Shared audit log
   const auditLogRepo = new AdminAuditLogRepository(db)
   const auditLogService = new AdminAuditLogService(auditLogRepo)
+  // Expor para reuso por outros módulos via app.adminAuditLogService
+  if (!app.hasDecorator('adminAuditLogService')) {
+    app.decorate('adminAuditLogService', auditLogService)
+  }
 
   // Stats
   const statsRepo = new StatsRepository(db)
@@ -66,7 +70,7 @@ export async function adminRoutes(app: FastifyInstance, opts: { db: DatabaseClie
   // LGPD
   const lgpdRepo = new LgpdRepository(db)
   const lgpdService = new LgpdService(lgpdRepo, auditLogService)
-  await app.register(lgpdRoutes, { prefix: '/lgpd', lgpdService })
+  await app.register(lgpdRoutes, { prefix: '/lgpd-requests', lgpdService })
 
   // Moderation
   const moderationRepo = new ModerationRepository(db)

@@ -1,6 +1,5 @@
 import type { AxiosError } from 'axios'
 import { api } from '@/shared/http/api'
-import { useAuthStore } from './authStore'
 import {
   SignalSession,
   adoptRestoredSession,
@@ -11,20 +10,6 @@ import {
 
 function is404(err: unknown): boolean {
   return (err as AxiosError | undefined)?.response?.status === 404
-}
-
-const SKIP_KEY_PREFIX = 'crypto_skip_restore:'
-
-export function markCryptoSkipped(userId: string): void {
-  try { localStorage.setItem(`${SKIP_KEY_PREFIX}${userId}`, '1') } catch { /* ignore quota/security errors */ }
-}
-
-export function isCryptoSkipped(userId: string): boolean {
-  try { return localStorage.getItem(`${SKIP_KEY_PREFIX}${userId}`) === '1' } catch { return false }
-}
-
-export function clearCryptoSkipped(userId: string): void {
-  try { localStorage.removeItem(`${SKIP_KEY_PREFIX}${userId}`) } catch { /* ignore */ }
 }
 
 async function fetchServerBackup(): Promise<EncryptedSignalBackup | null> {
@@ -51,34 +36,24 @@ async function serverHasIdentity(userId: string): Promise<boolean> {
  * Bootstraps the Signal client for the logged-in user.
  *
  * Flow:
- * 1. Local IndexedDB has identity → restore client; if server is missing identity,
- *    re-publish ours (recovers users whose original publish failed).
- * 2. No local identity, server has backup → if password works, restore + publish
- *    fresh prekeys; otherwise stash backup for the PIN restore dialog.
- * 3. No local identity, no backup, server has identity → orphaned: cannot
- *    regenerate without invalidating peers' sessions, so prompt PIN setup so the
- *    user sees the broken state instead of silently overwriting.
- * 4. Fresh user (nothing anywhere) → generate locally, publish, and either back
- *    up under the login password or prompt a PIN to set one.
+ * 1. IDB has keys → load silently, no user input needed.
+ * 2. IDB empty + login password → try auto-restore from server backup (transparent).
+ *    On success, republish prekeys. On failure (wrong password), fall through.
+ * 3. No restorable backup → generate fresh identity and publish.
+ *    Backup saved with login password so a future same-password login auto-recovers.
  *
- * All network errors propagate to the caller — the previous .catch(() => {})
- * variant masked silent publish failures and was the root cause of users with
- * 0 keys on the server.
+ * No PIN dialogs. If IDB is cleared without a restorable backup, a fresh identity
+ * is generated automatically — old ciphertexts become unreadable (same trade-off
+ * as WhatsApp Web on browser data clear).
  */
 export async function initCrypto(userId: string, password?: string): Promise<void> {
-  const store = useAuthStore()
-
   const localMeta = await peekLocalSignalMeta(userId)
 
   if (localMeta) {
     const session = await initSignalClient(userId)
     if (!(await serverHasIdentity(userId))) {
-      // Server lost our identity — republish refreshes every key so we don't
-      // also need a separate maintenance pass.
       await session.publishKeys()
     } else {
-      // Fire-and-forget: rotate stale SPK/Kyber and refill OTPs in the
-      // background so login latency isn't tied to the maintenance round-trips.
       void session.runKeyMaintenance().catch((err: unknown) => {
         console.warn('[crypto] key maintenance failed', err)
       })
@@ -86,44 +61,32 @@ export async function initCrypto(userId: string, password?: string): Promise<voi
     return
   }
 
-  const backup = await fetchServerBackup()
-  const skipped = isCryptoSkipped(userId)
-
-  if (backup) {
-    if (password) {
+  // IDB empty — try transparent restore from server backup using login password
+  if (password) {
+    const backup = await fetchServerBackup()
+    if (backup) {
       try {
         const restored = await SignalSession.loadFromBackup(userId, backup, password)
         await adoptRestoredSession(restored)
         await restored.publishKeys()
-        clearCryptoSkipped(userId)
         return
       } catch {
-        // Login password ≠ backup password. Don't regenerate (would orphan
-        // every prior ciphertext addressed to the old identity); fall through
-        // to the restore dialog so the user can enter the original PIN.
+        // Backup was encrypted with a different password — fall through to fresh identity
       }
     }
-    if (skipped) return
-    store.setPendingCryptoRestore(backup)
-    return
   }
 
-  if (await serverHasIdentity(userId)) {
-    // Server has an identity but we have no local key and no backup.
-    // Regenerating here would invalidate every session peers have with us;
-    // surface the broken state via the PIN dialog instead.
-    if (skipped) return
-    store.setPendingPinSetup(true)
-    return
-  }
-
+  // Generate fresh identity
   const session = await initSignalClient(userId)
   await session.publishKeys()
 
+  // Best-effort backup with login password for transparent auto-restore on next device
   if (password) {
-    const enc = await session.exportEncryptedBackup(password)
-    await api.put('/crypto/backup', enc)
-  } else if (!skipped) {
-    store.setPendingPinSetup(true)
+    try {
+      const enc = await session.exportEncryptedBackup(password)
+      await api.put('/crypto/backup', enc)
+    } catch {
+      // Non-critical
+    }
   }
 }

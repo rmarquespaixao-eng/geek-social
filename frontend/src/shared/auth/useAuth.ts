@@ -5,13 +5,8 @@ import type { LoginPayload, RegisterPayload, AuthResponse, User } from '@/shared
 import { useRouter } from 'vue-router'
 import { connectSocket, disconnectSocket } from '@/shared/socket/socket'
 import { requestPushPermission } from '@/shared/pwa/usePush'
-import {
-  SignalSession,
-  adoptRestoredSession,
-  initSignalClient,
-  resetSignalSession,
-} from '@/shared/crypto/signal/SignalClient'
-import { initCrypto, clearCryptoSkipped } from './cryptoBootstrap'
+import { resetSignalSession } from '@/shared/crypto/signal/SignalClient'
+import { initCrypto } from './cryptoBootstrap'
 
 export function useAuth() {
   const store = useAuthStore()
@@ -21,7 +16,6 @@ export function useAuth() {
   async function login(payload: LoginPayload): Promise<void> {
     const { data } = await api.post<AuthResponse>('/auth/login', payload)
     store.setAuth(data.accessToken, { avatarUrl: null, ...data.user })
-    // Carrega perfil completo (avatar, cover, bio, steamId, etc) — login só retorna o mínimo.
     await loadUser()
     connectSocket(data.accessToken)
     requestPushPermission().catch(() => {})
@@ -40,54 +34,11 @@ export function useAuth() {
     try {
       await api.post('/auth/logout')
     } finally {
-      const myId = store.user?.id
-      if (myId) clearCryptoSkipped(myId)
       resetSignalSession()
       disconnectSocket()
       store.clearAuth()
       router.push('/login')
     }
-  }
-
-  async function restoreKeyFromBackup(password: string): Promise<boolean> {
-    const backup = store.pendingCryptoRestore
-    if (!backup || !store.user) return false
-    try {
-      const restored = await SignalSession.loadFromBackup(store.user.id, backup, password)
-      await adoptRestoredSession(restored)
-      // Old prekeys/sessions are gone after a restore — publish a fresh batch
-      // so peers can keep starting new conversations with us.
-      await restored.publishKeys()
-      clearCryptoSkipped(store.user.id)
-      store.clearPendingCryptoRestore()
-      return true
-    } catch {
-      return false
-    }
-  }
-
-  async function setupCryptoWithPin(userId: string, pin: string): Promise<void> {
-    const session = await initSignalClient(userId)
-
-    // If we never managed to publish during initCrypto (offline, transient 5xx),
-    // the local identity exists but the server doesn't know about it. Catch up now.
-    let needsPublish = false
-    try {
-      await api.get(`/crypto/identity/${userId}`)
-    } catch (err) {
-      if ((err as { response?: { status?: number } }).response?.status === 404) {
-        needsPublish = true
-      } else {
-        throw err
-      }
-    }
-    if (needsPublish) await session.publishKeys()
-
-    const enc = await session.exportEncryptedBackup(pin)
-    await api.put('/crypto/backup', enc)
-    clearCryptoSkipped(userId)
-    store.clearPendingCryptoRestore()
-    store.setPendingPinSetup(false)
   }
 
   async function loadUser(): Promise<void> {
@@ -112,7 +63,5 @@ export function useAuth() {
     logout,
     loadUser,
     initCrypto,
-    restoreKeyFromBackup,
-    setupCryptoWithPin,
   }
 }

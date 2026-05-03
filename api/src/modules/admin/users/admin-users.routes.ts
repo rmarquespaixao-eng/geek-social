@@ -11,6 +11,21 @@ const mutationRateLimiter = createUserRateLimiter(20, 60 * 1000)
 const noContent = z.void()
 const idParam = z.object({ id: z.string().uuid() })
 
+const listUsersResponseSchema = z.object({
+  items: z.array(z.object({
+    id: z.string().uuid(),
+    displayName: z.string(),
+    email: z.string(),
+    avatarUrl: z.string().nullable(),
+    platformRole: z.enum(['user', 'moderator', 'admin']),
+    emailVerified: z.boolean(),
+    createdAt: z.date(),
+  })),
+  total: z.number(),
+  page: z.number(),
+  pageSize: z.number(),
+})
+
 export const adminUsersRoutes: FastifyPluginAsyncZod<{ adminUsersService: AdminUsersService }> = async (app, opts) => {
   const ctrl = new AdminUsersController(opts.adminUsersService)
 
@@ -22,6 +37,7 @@ export const adminUsersRoutes: FastifyPluginAsyncZod<{ adminUsersService: AdminU
       summary: 'Listar usuários',
       security: [{ accessToken: [] }],
       querystring: listUsersQuerySchema,
+      response: { 200: listUsersResponseSchema },
     },
     handler: ctrl.list.bind(ctrl),
   })

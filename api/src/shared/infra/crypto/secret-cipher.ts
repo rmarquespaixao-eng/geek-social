@@ -12,7 +12,14 @@ export type CiphertextBundle = {
 }
 
 function getMasterKey(): Buffer {
-  return Buffer.from(env.ADMIN_SECRETS_ENC_KEY, 'hex')
+  const key = Buffer.from(env.ADMIN_SECRETS_ENC_KEY, 'hex')
+  if (key.byteLength !== 32) {
+    throw new Error(
+      `ADMIN_SECRETS_ENC_KEY deve ter 32 bytes (256 bits) codificados em hex (64 caracteres hex). ` +
+      `Recebido: ${key.byteLength} bytes.`,
+    )
+  }
+  return key
 }
 
 export function encryptSecret(plaintext: string): CiphertextBundle {

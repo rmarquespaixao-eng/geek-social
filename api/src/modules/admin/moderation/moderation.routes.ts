@@ -2,10 +2,12 @@ import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod'
 import { z } from 'zod'
 import { authenticate } from '../../../shared/middleware/authenticate.js'
 import { requireRole } from '../../../shared/middleware/require-role.js'
+import { createUserRateLimiter } from '../../../shared/middleware/rate-limit.js'
 import { ModerationController } from './moderation.controller.js'
 import { aiConfigInputSchema, aiConfigResponseSchema, ageConfigInputSchema, ageConfigResponseSchema } from './moderation.schema.js'
 import type { ModerationService } from './moderation.service.js'
 
+const mutationRateLimiter = createUserRateLimiter(20, 60 * 1000)
 const noContent = z.void()
 
 export const moderationRoutes: FastifyPluginAsyncZod<{ moderationService: ModerationService }> = async (app, opts) => {
@@ -25,7 +27,7 @@ export const moderationRoutes: FastifyPluginAsyncZod<{ moderationService: Modera
   })
 
   app.patch('/ai', {
-    preHandler: [authenticate, requireRole('admin')],
+    preHandler: [authenticate, requireRole('admin'), mutationRateLimiter],
     schema: {
       operationId: 'admin_moderation_ai_update',
       tags: ['Admin'],
@@ -38,7 +40,7 @@ export const moderationRoutes: FastifyPluginAsyncZod<{ moderationService: Modera
   })
 
   app.delete('/ai/api-key', {
-    preHandler: [authenticate, requireRole('admin')],
+    preHandler: [authenticate, requireRole('admin'), mutationRateLimiter],
     schema: {
       operationId: 'admin_moderation_ai_apikey_clear',
       tags: ['Admin'],
@@ -63,7 +65,7 @@ export const moderationRoutes: FastifyPluginAsyncZod<{ moderationService: Modera
   })
 
   app.patch('/age', {
-    preHandler: [authenticate, requireRole('admin')],
+    preHandler: [authenticate, requireRole('admin'), mutationRateLimiter],
     schema: {
       operationId: 'admin_moderation_age_update',
       tags: ['Admin'],

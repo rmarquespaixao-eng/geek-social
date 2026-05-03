@@ -23,8 +23,7 @@ export class ModerationService {
   ) {}
 
   async getAiConfig() {
-    const row = await this.repo.getAi()
-    if (!row) return null
+    const row = await this.repo.getOrSeedAi()
     return this.toAiResponse(row)
   }
 
@@ -55,8 +54,12 @@ export class ModerationService {
         update.apiKeyCiphertext = bundle.ciphertext
         update.apiKeyIv = bundle.iv
         update.apiKeyTag = bundle.tag
-      } catch {
-        throw new ModerationError('MASTER_KEY_MISSING', 'Chave mestra de criptografia não configurada', 500)
+      } catch (err) {
+        // Propagar erros não relacionados à chave mestra (ex: DB, rede)
+        if (err instanceof Error && err.message.includes('ADMIN_SECRETS_ENC_KEY')) {
+          throw new ModerationError('MASTER_KEY_MISSING', 'Chave mestra de criptografia não configurada ou inválida', 500)
+        }
+        throw err
       }
     }
 
@@ -78,7 +81,7 @@ export class ModerationService {
   }
 
   async getAgeConfig() {
-    return this.repo.getAge()
+    return this.repo.getOrSeedAge()
   }
 
   async updateAgeConfig(request: FastifyRequest, input: AgeConfigInput) {

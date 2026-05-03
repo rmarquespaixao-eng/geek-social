@@ -19,7 +19,13 @@ export function requireRole(allowed: PlatformRole | PlatformRole[]) {
 
   return async function requireRoleHandler(request: FastifyRequest, reply: FastifyReply): Promise<void> {
     const claims = request.user as (AccessTokenClaims & { platformRole?: PlatformRole }) | undefined
-    const role: PlatformRole = claims?.platformRole ?? 'user'
+
+    if (!claims) {
+      reply.status(401).send({ error: 'Não autenticado' })
+      return
+    }
+
+    const role: PlatformRole = claims.platformRole ?? 'user'
 
     if (!allowedRoles.includes(role)) {
       reply.status(403).send({ error: 'Acesso negado' })

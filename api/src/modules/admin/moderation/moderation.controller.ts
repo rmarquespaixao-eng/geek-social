@@ -15,7 +15,6 @@ export class ModerationController {
 
   async getAiConfig(_request: FastifyRequest, reply: FastifyReply) {
     const result = await this.service.getAiConfig()
-    if (!result) return reply.status(404).send({ error: 'NOT_FOUND', message: 'Configuração de IA não encontrada' })
     return reply.send(result)
   }
 
@@ -35,7 +34,6 @@ export class ModerationController {
 
   async getAgeConfig(_request: FastifyRequest, reply: FastifyReply) {
     const result = await this.service.getAgeConfig()
-    if (!result) return reply.status(404).send({ error: 'NOT_FOUND', message: 'Configuração de verificação de idade não encontrada' })
     return reply.send(result)
   }
 

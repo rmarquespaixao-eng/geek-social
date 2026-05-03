@@ -49,7 +49,7 @@ export class FeatureFlagsService {
     const updated = await this.repo.update(id, body, claims.userId)
 
     const wasToggled = body.enabled !== undefined && body.enabled !== existing.enabled
-    await this.auditLog.recordFromRequest(request, wasToggled ? 'feature_flag_toggle' : 'feature_flag_toggle', {
+    await this.auditLog.recordFromRequest(request, wasToggled ? 'feature_flag_toggle' : 'feature_flag_update', {
       targetType: 'feature_flag',
       targetId: id,
       metadata: { key: existing.key, enabled: body.enabled ?? existing.enabled },

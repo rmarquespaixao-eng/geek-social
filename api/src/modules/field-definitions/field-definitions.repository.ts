@@ -1,11 +1,10 @@
-import { eq, and, count, isNotNull } from 'drizzle-orm'
+import { eq, and, count } from 'drizzle-orm'
 import type { DatabaseClient } from '../../shared/infra/database/postgres.client.js'
 import { fieldDefinitions, collectionFieldSchema } from '../../shared/infra/database/schema.js'
 import type {
   IFieldDefinitionRepository,
   FieldDefinition,
   CreateFieldDefinitionData,
-  CollectionType,
 } from '../../shared/contracts/field-definition.repository.contract.js'
 
 export class FieldDefinitionRepository implements IFieldDefinitionRepository {
@@ -33,14 +32,6 @@ export class FieldDefinitionRepository implements IFieldDefinitionRepository {
       .where(eq(fieldDefinitions.userId, userId)) as Promise<FieldDefinition[]>
   }
 
-  async findSystemByCollectionType(type: CollectionType): Promise<FieldDefinition[]> {
-    return this.db.select().from(fieldDefinitions)
-      .where(and(
-        eq(fieldDefinitions.isSystem, true),
-        eq(fieldDefinitions.collectionType, type),
-      )) as Promise<FieldDefinition[]>
-  }
-
   async findSystemByCollectionTypeId(collectionTypeId: string): Promise<FieldDefinition[]> {
     return this.db.select().from(fieldDefinitions)
       .where(and(
@@ -66,15 +57,12 @@ export class FieldDefinitionRepository implements IFieldDefinitionRepository {
   }
 
   async upsertSystem(data: Omit<FieldDefinition, 'id' | 'createdAt' | 'isHidden'> & { isHidden?: boolean }): Promise<void> {
-    // Busca por collectionTypeId (pós-migração) ou por collectionType (pré-migração)
     const conditions = [
       eq(fieldDefinitions.isSystem, true),
       eq(fieldDefinitions.fieldKey, data.fieldKey),
     ]
     if (data.collectionTypeId) {
       conditions.push(eq(fieldDefinitions.collectionTypeId, data.collectionTypeId))
-    } else if (data.collectionType) {
-      conditions.push(eq(fieldDefinitions.collectionType, data.collectionType))
     }
 
     const existing = await this.db.select({ id: fieldDefinitions.id })
@@ -83,7 +71,6 @@ export class FieldDefinitionRepository implements IFieldDefinitionRepository {
       .limit(1)
 
     if (existing.length > 0) {
-      // Atualiza nome/tipo/opções/hidden caso tenham mudado no seed
       await this.db.update(fieldDefinitions)
         .set({
           name: data.name,
@@ -100,7 +87,6 @@ export class FieldDefinitionRepository implements IFieldDefinitionRepository {
       name: data.name,
       fieldKey: data.fieldKey,
       fieldType: data.fieldType,
-      collectionType: data.collectionType ?? null,
       collectionTypeId: data.collectionTypeId ?? null,
       selectOptions: data.selectOptions ?? null,
       isSystem: true,

@@ -3,7 +3,7 @@ import { z } from 'zod'
 export const aiConfigInputSchema = z.object({
   provider: z.string().max(40).optional(),
   model: z.string().max(80).optional(),
-  endpoint: z.string().url().max(500).optional().or(z.literal('').transform(() => undefined)),
+  endpoint: z.union([z.string().url().max(500), z.literal('').transform(() => undefined as undefined)]).optional(),
   enabled: z.boolean().optional(),
   moderateText: z.boolean().optional(),
   moderateImages: z.boolean().optional(),

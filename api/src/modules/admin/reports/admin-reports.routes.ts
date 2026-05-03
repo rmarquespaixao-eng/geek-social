@@ -2,10 +2,12 @@ import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod'
 import { z } from 'zod'
 import { authenticate } from '../../../shared/middleware/authenticate.js'
 import { requireRole } from '../../../shared/middleware/require-role.js'
+import { createUserRateLimiter } from '../../../shared/middleware/rate-limit.js'
 import { AdminReportsController } from './admin-reports.controller.js'
 import { listReportsQuerySchema, updateReportStatusBodySchema } from './admin-reports.schema.js'
 import type { AdminReportsService } from './admin-reports.service.js'
 
+const mutationRateLimiter = createUserRateLimiter(20, 60 * 1000)
 const noContent = z.void()
 const idParam = z.object({ id: z.string().uuid() })
 
@@ -25,7 +27,7 @@ export const adminReportsRoutes: FastifyPluginAsyncZod<{ adminReportsService: Ad
   })
 
   app.patch('/:id/status', {
-    preHandler: [authenticate, requireRole(['admin', 'moderator'])],
+    preHandler: [authenticate, requireRole(['admin', 'moderator']), mutationRateLimiter],
     schema: {
       operationId: 'admin_reports_update_status',
       tags: ['Admin'],

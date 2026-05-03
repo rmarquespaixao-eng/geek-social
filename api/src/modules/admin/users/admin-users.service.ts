@@ -69,10 +69,12 @@ export class AdminUsersService {
         metadata: { reason: body.reason ?? null },
       })
     } else if (body.status === 'active') {
-      await this.auditLog.recordFromRequest(request, 'user_unban', {
-        targetType: 'user',
-        targetId,
-      })
+      // F-28: unban/reactivate não tem suporte completo enquanto não houver coluna status dedicada no DB.
+      throw new AdminUsersError(
+        'STATUS_NOT_SUPPORTED',
+        'Gerenciamento de status "active" depende de implementação futura (coluna status no DB). Use suspensão/ban por tokenVersion.',
+        400,
+      )
     } else if (body.status === 'suspended') {
       await this.repo.bumpTokenVersion(targetId)
       await this.auditLog.recordFromRequest(request, 'user_suspend', {
@@ -86,18 +88,24 @@ export class AdminUsersService {
   async setRole(request: FastifyRequest, targetId: string, body: SetUserRoleBody): Promise<void> {
     const claims = request.user as (AccessTokenClaims & { platformRole?: PlatformRole }) | undefined
     const actorRole = claims?.platformRole ?? 'user'
+    const actorId = claims?.userId ?? ''
 
     if (actorRole !== 'admin') {
       throw new AdminUsersError('FORBIDDEN', 'Apenas administradores podem alterar papel de usuário', 403)
     }
 
+    // F-24: Bloquear auto-alteração de papel
+    if (actorId === targetId) {
+      throw new AdminUsersError('SELF_ROLE_CHANGE', 'Não é possível alterar o próprio papel', 422)
+    }
+
     const target = await this.repo.findById(targetId)
     if (!target) throw new AdminUsersError('NOT_FOUND', 'Usuário não encontrado', 404)
 
-    // Proteção: não pode rebaixar o último admin
+    // Proteção: não pode rebaixar o último admin (com FOR UPDATE para evitar race condition)
     if (target.platformRole === 'admin' && body.role !== 'admin') {
-      const adminCount = await this.repo.countAdmins()
-      if (adminCount <= 1) {
+      const isLast = await this.repo.isLastAdmin(targetId)
+      if (isLast) {
         throw new AdminUsersError('LAST_ADMIN', 'Não é possível rebaixar o último administrador da plataforma', 422)
       }
       // Role-down invalida sessões imediatamente

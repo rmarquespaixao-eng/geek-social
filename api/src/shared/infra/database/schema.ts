@@ -13,10 +13,6 @@ const bytea = customType<{ data: Uint8Array; default: false }>({
 })
 
 export const privacyEnum = pgEnum('privacy', ['public', 'friends_only', 'private'])
-// collectionTypeEnum mantido temporariamente para não quebrar código existente durante migração.
-// Após migration 0052 e atualização de todos os módulos que referenciam este enum,
-// esta linha será removida.
-export const collectionTypeEnum = pgEnum('collection_type', ['games', 'books', 'cardgames', 'boardgames', 'custom'])
 // platformRoleEnum declarado antes da tabela users (usada como default nela)
 export const platformRoleEnum = pgEnum('platform_role', ['user', 'moderator', 'admin'])
 export const collectionVisibilityEnum = pgEnum('collection_visibility', ['public', 'private', 'friends_only'])
@@ -94,8 +90,6 @@ export const fieldDefinitions = pgTable('field_definitions', {
   name: varchar('name', { length: 100 }).notNull(),
   fieldKey: varchar('field_key', { length: 50 }).notNull(),
   fieldType: fieldTypeEnum('field_type').notNull(),
-  // Substituído por collectionTypeId (FK) após migration 0052; mantido temporariamente para compatibilidade com código existente
-  collectionType: collectionTypeEnum('collection_type'),
   collectionTypeId: uuid('collection_type_id'),
   selectOptions: jsonb('select_options').$type<string[]>(),
   isSystem: boolean('is_system').default(false).notNull(),
@@ -110,8 +104,6 @@ export const collections = pgTable('collections', {
   description: text('description'),
   iconUrl: varchar('icon_url'),
   coverUrl: varchar('cover_url'),
-  // Substituído por collectionTypeId (FK) após migration 0052; mantido temporariamente para compatibilidade
-  type: collectionTypeEnum('type'),
   collectionTypeId: uuid('collection_type_id'),
   visibility: collectionVisibilityEnum('visibility').default('public').notNull(),
   autoShareToFeed: boolean('auto_share_to_feed').default(false).notNull(),
@@ -818,6 +810,7 @@ export const adminActionEnum = pgEnum('admin_action', [
   'community_unsuspend',
   'feature_flag_create',
   'feature_flag_toggle',
+  'feature_flag_update',
   'feature_flag_delete',
   'ai_config_update',
   'ai_apikey_set',
@@ -882,6 +875,7 @@ export const lgpdRequests = pgTable('lgpd_requests', {
 // ── Admin: configurações de moderação automatizada ─────────────────
 export const aiModerationConfig = pgTable('ai_moderation_config', {
   id: uuid('id').defaultRandom().primaryKey(),
+  singleton: boolean('singleton').notNull().default(true),
   provider: varchar('provider', { length: 40 }),
   model: varchar('model', { length: 80 }),
   endpoint: varchar('endpoint', { length: 500 }),
@@ -899,17 +893,22 @@ export const aiModerationConfig = pgTable('ai_moderation_config', {
   apiKeyTag: bytea('api_key_tag'),
   updatedBy: uuid('updated_by').references(() => users.id, { onDelete: 'set null' }),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
-})
+}, (table) => ({
+  singletonUniq: uniqueIndex('ai_moderation_config_singleton_uniq').on(table.singleton),
+}))
 
 export const ageModerationConfig = pgTable('age_moderation_config', {
   id: uuid('id').defaultRandom().primaryKey(),
+  singleton: boolean('singleton').notNull().default(true),
   enabled: boolean('enabled').notNull().default(false),
   minimumAge: smallint('minimum_age').notNull().default(13),
   method: varchar('method', { length: 40 }).notNull().default('declaration'),
   requireVerification: boolean('require_verification').notNull().default(false),
   updatedBy: uuid('updated_by').references(() => users.id, { onDelete: 'set null' }),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
-})
+}, (table) => ({
+  singletonUniq: uniqueIndex('age_moderation_config_singleton_uniq').on(table.singleton),
+}))
 
 // ── Tipos de coleção (migrado de pgEnum para tabela) ───────────────
 export const collectionTypes = pgTable('collection_types', {

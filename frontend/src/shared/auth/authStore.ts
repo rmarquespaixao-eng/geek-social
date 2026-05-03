@@ -1,13 +1,10 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { User } from '@/shared/types/auth.types'
-import type { EncryptedSignalBackup } from '@/shared/crypto/signal/SignalClient'
 
 export const useAuthStore = defineStore('auth', () => {
   const user = ref<User | null>(null)
   const token = ref<string | null>(null)
-  const pendingCryptoRestore = ref<EncryptedSignalBackup | null>(null)
-  const pendingPinSetup = ref(false)
 
   const isAuthenticated = computed(() => !!user.value)
 
@@ -27,25 +24,10 @@ export const useAuthStore = defineStore('auth', () => {
   function clearAuth() {
     token.value = null
     user.value = null
-    pendingCryptoRestore.value = null
-    pendingPinSetup.value = false
-  }
-
-  function setPendingCryptoRestore(backup: EncryptedSignalBackup) {
-    pendingCryptoRestore.value = backup
-  }
-
-  function clearPendingCryptoRestore() {
-    pendingCryptoRestore.value = null
-  }
-
-  function setPendingPinSetup(v: boolean) {
-    pendingPinSetup.value = v
   }
 
   return {
-    user, token, isAuthenticated, pendingCryptoRestore, pendingPinSetup,
+    user, token, isAuthenticated,
     setAuth, setToken, setUser, clearAuth,
-    setPendingCryptoRestore, clearPendingCryptoRestore, setPendingPinSetup,
   }
 })

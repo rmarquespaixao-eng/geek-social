@@ -64,6 +64,12 @@ export class CollectionTypesService {
     const existing = await this.repo.findById(id)
     if (!existing) throw new CollectionTypeError('NOT_FOUND', 'Tipo de coleção não encontrado', 404)
 
+    if (existing.isSystem) {
+      if (input.active === false) {
+        throw new CollectionTypeError('SYSTEM_LOCKED', 'Tipos de coleção do sistema não podem ser desativados', 422)
+      }
+    }
+
     const row = await this.repo.update(id, {
       name: input.name,
       description: input.description,
@@ -82,6 +88,10 @@ export class CollectionTypesService {
   async delete(request: FastifyRequest, id: string) {
     const existing = await this.repo.findById(id)
     if (!existing) throw new CollectionTypeError('NOT_FOUND', 'Tipo de coleção não encontrado', 404)
+
+    if (existing.isSystem) {
+      throw new CollectionTypeError('SYSTEM_LOCKED', 'Tipos de coleção do sistema não podem ser removidos', 422)
+    }
 
     const deleted = await this.repo.delete(id)
     if (!deleted) throw new CollectionTypeError('DELETE_FAILED', 'Falha ao remover tipo de coleção', 500)

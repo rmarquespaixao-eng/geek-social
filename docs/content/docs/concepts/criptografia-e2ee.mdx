@@ -1,6 +1,6 @@
 ---
 title: Criptografia E2EE
-description: Arquitetura completa do end-to-end encryption do chat — Signal Protocol (X3DH/PQXDH + Double Ratchet + Sender Keys) via libsignal-wasm, com backup PIN, rotação de chaves e TOFU.
+description: Arquitetura completa do end-to-end encryption do chat — Signal Protocol (X3DH/PQXDH + Double Ratchet + Sender Keys) via libsignal-wasm, backup transparente por senha de login, rotação de chaves e TOFU.
 ---
 
 O chat do Geek Social é **end-to-end encrypted**: o servidor armazena apenas ciphertext + material público de chave; nenhuma instância do backend (incluindo operadores com acesso ao DB) consegue ler conteúdo de mensagens. A implementação atual é o **Signal Protocol** completo via [libsignal-wasm](https://github.com/getmaapp/signal-wasm) (Rust compilado pra WebAssembly), substituindo o esquema legado ECDH P-256 + AES-GCM estático.
@@ -58,7 +58,7 @@ A migração `0045_signal_protocol.sql` dropa o schema legado (`user_crypto_keys
 | **Curva** | Curve25519 |
 | **Tamanho** | 32 bytes pública / 32 bytes privada |
 | **Geração** | Cliente, no primeiro login |
-| **Onde mora** | Pública: `signal_identity_keys.identity_key` (server) + IDB cliente. Privada: **somente** IDB cliente, ou backup PIN-encrypted no server |
+| **Onde mora** | Pública: `signal_identity_keys.identity_key` (server) + IDB cliente. Privada: **somente** IDB cliente; backup best-effort cifrado com senha de login no server |
 | **Uso** | Assina SPK e Kyber prekeys; identidade de longo prazo pra TOFU/safety numbers |
 
 `registration_id` é um inteiro 14-bit gerado junto e cumpre o papel do device-id no Signal — atualmente **um device por user** (`deviceId=1` hardcoded), com espaço pra multi-device futuro.
@@ -180,30 +180,25 @@ Pontos críticos:
   A3 --> Done([Pronto])
   A4 --> Done
 
-  A -- Não --> B{Server tem backup?}
-  B -- Sim --> B1{Tem PIN salvo na sessão?}
-  B1 -- Sim --> B2[loadFromBackup<br/>PBKDF2 + AES-GCM]
+  A -- Não --> B{Tem senha de login<br/>+ backup no server?}
+  B -- Sim --> B2[loadFromBackup automático<br/>PBKDF2 + AES-GCM<br/>sem interação do usuário]
   B2 -- ok --> B3[publishKeys novos OTPs]
   B3 --> Done
-  B2 -- fail --> B4[Stash backup,<br/>abrir diálogo PIN]
-  B4 --> Done
-  B1 -- Não --> B4
+  B2 -- fail --> C
 
-  B -- Não --> C{Server tem identidade<br/>mas sem backup?}
-  C -- Sim --> C1[Estado órfão:<br/>abrir diálogo<br/>de configurar PIN]
-  C1 --> Done
-  C -- Não --> D[Fresh user:<br/>gera tudo, publica,<br/>oferece configurar PIN]
-  D --> Done
+  B -- Não --> C[Gera identidade nova,<br/>publica, salva backup<br/>best-effort com senha do login]
+  C --> Done
 `} />
 
-Os quatro estados resolvem todos os cenários reais:
+Os três estados cobrem todos os cenários reais sem interação do usuário:
 
-1. **Login normal:** identidade já no IDB, server alinhado → roda manutenção (rotação semanal + refill).
-2. **Restore via backup:** novo dispositivo, user lembra do PIN → backup descriptografado, identity + SPK/Kyber records reimportados, OTPs novas geradas.
-3. **Backup com PIN errado:** stash do backup pra retry, diálogo de PIN abre.
-4. **Estado órfão:** server tem identity mas IDB vazio e nenhum backup → diálogo "configure um PIN" obrigatório (não regenerar silenciosamente, senão peers perderiam o trust).
+1. **Login normal:** identidade já no IDB, server alinhado → roda manutenção silenciosa (rotação semanal + refill).
+2. **Restore transparente:** IDB vazio mas server tem backup + usuário logou com senha → backup descriptografado automaticamente, identity + SPK/Kyber records reimportados, OTPs novas geradas. Sem PIN, sem diálogo.
+3. **Identidade nova:** IDB vazio + nenhum backup restaurável (OAuth, senha diferente, dados limpos) → nova identidade gerada silenciosamente, backup salvo com senha atual (best-effort). Histórico anterior torna-se inacessível (trade-off explícito do modelo).
 
-## Backup PIN-encrypted
+## Backup transparente (sem PIN)
+
+O backup usa o mesmo esquema criptográfico (PBKDF2 + AES-GCM), mas a chave é derivada automaticamente da **senha de login** do usuário — sem diálogo separado:
 
 ```
 plaintext = JSON.stringify({
@@ -213,16 +208,20 @@ plaintext = JSON.stringify({
   kyberPrekeys:  [{ id, record(b64) }, ...]
 })
 
-key = PBKDF2-SHA256(PIN, salt[16B], 600_000 iterations) → 256-bit
+key = PBKDF2-SHA256(loginPassword, salt[16B], 600_000 iterations) → 256-bit
 ciphertext = AES-256-GCM(key, iv[12B], plaintext)
 
 server stores: { encryptedBackup: ciphertext, backupSalt: salt, backupIv: iv }
 ```
 
-- **Iterações 600k:** torna brute-force de PIN inviável mesmo com GPU — adversário com dump do DB ainda precisa quebrar PBKDF2 + AES-GCM
-- **Sem OTPs no backup:** descartadas pra reduzir tamanho; o restore gera OTPs novas
-- **Inclui `nextPrekeyId/nextSignedPrekeyId/nextKyberPrekeyId`:** sem isso, o cliente restaurado começaria do ID 0 e colidiria com IDs já no servidor (bug histórico — ver "Bugs e lições" abaixo)
-- **Tamanho:** schema Zod aceita até **256 KB** (`d33590c` aumentou de 8 KB → 256 KB pra acomodar SPK+Kyber records)
+- **Chave = senha do login:** restore automático em novo dispositivo com mesma senha, sem pedir PIN extra
+- **OAuth / sem senha:** sem backup — identidade nova gerada se IDB for limpo
+- **Iterações 600k:** brute-force inviável mesmo com GPU
+- **Sem OTPs no backup:** o restore gera OTPs novas
+- **Inclui `nextPrekeyId/nextSignedPrekeyId/nextKyberPrekeyId`:** evita colisão de IDs ao restaurar (bug histórico — ver "Bugs e lições")
+- **Tamanho:** schema Zod aceita até **256 KB**
+
+**Modelo de segurança:** o servidor tem o backup cifrado com a mesma chave que deriva da senha do login. Um atacante que obtiver o hash da senha E o backup pode tentar brute-force — mitigado pelo PBKDF2 600k. Mesmo cenário de apps como Bitwarden que cifram com a senha mestra. Para usuários com senhas fracas, o risco é real; recomenda-se senha forte ou OAuth.
 
 ## O que **não** vai pro backup: histórico de mensagens
 
@@ -251,9 +250,9 @@ Por que essa separação existe:
 
 | Cenário | O que sobrevive |
 |---|---|
-| **Reinstala o app no mesmo device** (browser cache limpo) | Restaura identidade via PIN; mensagens novas funcionam imediatamente. **Histórico antigo perdido**. |
-| **Migra pra um device novo** (PIN em mãos) | Idem — identidade restaurada, mas histórico fica no device antigo. |
-| **Esquece o PIN** | Identidade perdida; precisa recriar (peers vão ver `IdentityChangedError` e devem confirmar safety number na próxima conversa). Histórico em qualquer device antigo continua acessível enquanto IDB existir. |
+| **Reinstala o app no mesmo device** (browser cache limpo) | Se usou senha no login: restaura identidade automaticamente; mensagens novas funcionam imediatamente. **Histórico antigo perdido**. |
+| **Migra pra um device novo** (mesma senha) | Idem — identidade restaurada transparente, histórico fica no device antigo. |
+| **Troca de senha** | Backup antigo cifrado com senha anterior — próximo login gera nova identidade (peers veem `IdentityChangedError`). |
 | **Perde o device** | Mensagens novas não chegam até restaurar identidade; histórico evaporou. |
 | **Quer backup do histórico** | Não há suporte — feature não existe ainda. |
 
@@ -315,11 +314,11 @@ Geek-social não é nem melhor nem pior que Signal Desktop / WhatsApp Web nesse 
 
 ### Mitigações no roadmap
 
-Pacote D da auditoria interna prevê **IDB encryption** — pretende cifrar os stores sensíveis com uma chave derivada do PIN (mesmo PIN do backup), forçando destravamento no boot do app. Implementação esperada:
+Pacote D da auditoria interna prevê **IDB encryption** — cifrar os stores sensíveis com uma chave derivada da senha de login (já disponível em memória no boot), forçando que o IDB só seja legível com a senha do usuário. Implementação esperada:
 
 ```ts
-// pseudo: derivar masterKey no login a partir do PIN
-const masterKey = await PBKDF2(pin, deviceSalt, 600_000)
+// pseudo: derivar masterKey da senha de login na autenticação
+const masterKey = await PBKDF2(loginPassword, deviceSalt, 600_000)
 
 // envelope cada record antes de gravar:
 const encrypted = await AES_GCM_encrypt(masterKey, iv, JSON.stringify(plaintextRecord))
@@ -330,11 +329,12 @@ const decrypted = await AES_GCM_decrypt(masterKey, iv, ciphertext)
 ```
 
 Trade-offs:
-- ✅ Adversário com dump do disco precisa do PIN
-- ✅ XSS precisa esperar destravamento no boot pra ler dados
-- ❌ User precisa digitar PIN a cada login (UX friction)
-- ❌ Não protege contra XSS *após* destravamento (chave fica em memória do tab)
+- ✅ Adversário com dump do disco precisa da senha de login
+- ✅ XSS precisa esperar boot autenticado pra ler dados
+- ✅ Sem UX friction — usa a senha já digitada no login, não pede PIN extra
+- ❌ Não protege contra XSS *após* autenticação (chave fica em memória do tab)
 - ❌ Não protege contra malware com hooks no browser
+- ❌ OAuth users sem senha: IDB não pode ser cifrado (sem segredo disponível)
 
 Status: **não implementado**. Por enquanto, a recomendação é confiar no disk encryption do OS + boas práticas de não compartilhar device.
 
@@ -512,7 +512,7 @@ Esses fixes formam a base operacional — qualquer reescrita futura precisa pres
 - **Sem backup de histórico de mensagens** — só backup de identidade. Trocar device = perder histórico. Ver seção "O que **não** vai pro backup" acima.
 - **IDB sem criptografia at-rest** — material sensível (identity privada, sessões, plaintexts) fica em LevelDB plain. Mitigação parcial vem do disk encryption do OS. Pacote D do roadmap pretende cifrar com chave derivada do PIN. Ver seção "Persistência local" acima.
 - **Single-device** por user (`deviceId=1`). Multi-device exigiria sincronização de sessões via cabo seguro entre devices do mesmo user (cada um teria registrationId distinto).
-- **Sem rekey periódico do backup** — se o user trocar PIN, precisa explicitamente regerar.
+- **Sem rekey ao trocar senha** — se o user trocar a senha de login, o backup antigo fica cifrado com a senha anterior. Próximo login com IDB limpo gera nova identidade (reset de sessão percebido pelos peers via TOFU).
 - **Sem deniability/forward secrecy assimétrica** além do que o Signal entrega — se a chave de identidade for comprometida, futuras sessões iniciadas com aquele identity-key são suscetíveis a MITM até o user perceber via safety number.
 - **Mensagens antigas pré-rotação de grupo** continuam decifráveis pelo ex-membro se ele ainda tiver o IDB local — não há *remote wipe*.
 - **Steam api key** continua at-rest sem criptografia (pendência separada — não faz parte do E2EE do chat).
@@ -521,7 +521,7 @@ Esses fixes formam a base operacional — qualquer reescrita futura precisa pres
 
 | Adversário | Capacidade | Mitigação atual | Status |
 |---|---|---|---|
-| Operador com acesso ao DB | Lê todas as tabelas | Mensagens são ciphertext; identity privada só com PIN encriptado (PBKDF2 600k) | ✅ Coberto |
+| Operador com acesso ao DB | Lê todas as tabelas | Mensagens são ciphertext; identity privada cifrada com PBKDF2 600k (chave = senha de login) | ✅ Coberto |
 | Atacante MITM no transporte (TLS terminado) | Vê tráfego TLS | Mesmo se quebrar TLS, vê só ciphertext; TOFU pega troca de identity | ✅ Coberto |
 | Adversário com computador quântico (futuro) | Quebra Curve25519 | Kyber1024 no PQXDH preserva o segredo das sessões | ✅ Coberto (harvest-now-decrypt-later resistente) |
 | Atacante rouba JWT vazado | Pode enviar mensagens fingindo ser o user | **Não** lê histórico — não tem chave privada do IDB do dispositivo legítimo. Peers vão ver mudança de identity (TOFU) na próxima sessão nova. | ✅ Coberto |
@@ -532,7 +532,7 @@ Esses fixes formam a base operacional — qualquer reescrita futura precisa pres
 | Roubo do dispositivo desbloqueado | Acesso ao IDB inteiro | **Nada hoje** — mesmo problema do Signal Desktop / WhatsApp Web | ❌ Não coberto (Pacote D planejado) |
 | Roubo do dispositivo bloqueado | OS bloqueia acesso ao disco | OK desde que disk encryption do OS esteja ligado | ✅ Coberto pela camada do OS |
 | Extensão de browser maliciosa com permissão no site | Lê IDB via API de extensão | **Nada hoje** | ❌ Não coberto |
-| User esquece PIN | Backup inacessível | Restore impossível — perde acesso a recuperação. Histórico em devices ativos continua íntegro. Peers verão mudança de identity na próxima conversa. | ⚠️ Recuperação parcial |
+| User esquece senha de login | Backup inacessível (cifrado com senha antiga) | Se IDB intacto: sem impacto. Se IDB limpo + senha diferente: nova identidade gerada, peers veem `IdentityChangedError`. | ⚠️ Depende do IDB |
 | Servidor age maliciosamente (entrega prekey bundle adulterado) | Tenta MITM cifrando pra chave do atacante | TOFU detecta troca de identity-key na primeira mensagem; safety number permite verificação out-of-band | ✅ Coberto se user verificar safety number |
 
 ## Onde ler mais

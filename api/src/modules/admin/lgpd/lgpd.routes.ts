@@ -2,10 +2,12 @@ import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod'
 import { z } from 'zod'
 import { authenticate } from '../../../shared/middleware/authenticate.js'
 import { requireRole } from '../../../shared/middleware/require-role.js'
+import { createUserRateLimiter } from '../../../shared/middleware/rate-limit.js'
 import { LgpdController } from './lgpd.controller.js'
 import { listLgpdQuerySchema, decideLgpdBodySchema } from './lgpd.schema.js'
 import type { LgpdService } from './lgpd.service.js'
 
+const mutationRateLimiter = createUserRateLimiter(20, 60 * 1000)
 const noContent = z.void()
 const idParam = z.object({ id: z.string().uuid() })
 
@@ -25,7 +27,7 @@ export const lgpdRoutes: FastifyPluginAsyncZod<{ lgpdService: LgpdService }> = a
   })
 
   app.post('/:id/approve', {
-    preHandler: [authenticate, requireRole('admin')],
+    preHandler: [authenticate, requireRole('admin'), mutationRateLimiter],
     schema: {
       operationId: 'admin_lgpd_approve',
       tags: ['Admin'],
@@ -39,7 +41,7 @@ export const lgpdRoutes: FastifyPluginAsyncZod<{ lgpdService: LgpdService }> = a
   })
 
   app.post('/:id/reject', {
-    preHandler: [authenticate, requireRole('admin')],
+    preHandler: [authenticate, requireRole('admin'), mutationRateLimiter],
     schema: {
       operationId: 'admin_lgpd_reject',
       tags: ['Admin'],
@@ -53,7 +55,7 @@ export const lgpdRoutes: FastifyPluginAsyncZod<{ lgpdService: LgpdService }> = a
   })
 
   app.post('/:id/complete', {
-    preHandler: [authenticate, requireRole('admin')],
+    preHandler: [authenticate, requireRole('admin'), mutationRateLimiter],
     schema: {
       operationId: 'admin_lgpd_complete',
       tags: ['Admin'],

@@ -2,6 +2,7 @@ import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod'
 import { z } from 'zod'
 import { authenticate } from '../../../shared/middleware/authenticate.js'
 import { requireRole } from '../../../shared/middleware/require-role.js'
+import { createUserRateLimiter } from '../../../shared/middleware/rate-limit.js'
 import { CollectionTypesController } from './collection-types.controller.js'
 import {
   collectionTypeInputSchema,
@@ -12,6 +13,7 @@ import {
 } from './collection-types.schema.js'
 import type { CollectionTypesService } from './collection-types.service.js'
 
+const mutationRateLimiter = createUserRateLimiter(20, 60 * 1000)
 const noContent = z.void()
 const idParam = z.object({ id: z.string().uuid() })
 
@@ -45,7 +47,7 @@ export const collectionTypesRoutes: FastifyPluginAsyncZod<{ collectionTypesServi
   })
 
   app.post('/', {
-    preHandler: [authenticate, requireRole('admin')],
+    preHandler: [authenticate, requireRole('admin'), mutationRateLimiter],
     schema: {
       operationId: 'admin_collection_types_create',
       tags: ['Admin'],
@@ -58,11 +60,11 @@ export const collectionTypesRoutes: FastifyPluginAsyncZod<{ collectionTypesServi
   })
 
   app.patch('/:id', {
-    preHandler: [authenticate, requireRole('admin')],
+    preHandler: [authenticate, requireRole('admin'), mutationRateLimiter],
     schema: {
       operationId: 'admin_collection_types_update',
       tags: ['Admin'],
-      summary: 'Atualizar tipo de coleção',
+      summary: 'Atualizar tipo de coleção (parcial)',
       security: [{ accessToken: [] }],
       params: idParam,
       body: collectionTypeUpdateSchema,
@@ -71,8 +73,22 @@ export const collectionTypesRoutes: FastifyPluginAsyncZod<{ collectionTypesServi
     handler: ctrl.update.bind(ctrl),
   })
 
+  app.put('/:id', {
+    preHandler: [authenticate, requireRole('admin'), mutationRateLimiter],
+    schema: {
+      operationId: 'admin_collection_types_replace',
+      tags: ['Admin'],
+      summary: 'Substituir tipo de coleção (replace completo)',
+      security: [{ accessToken: [] }],
+      params: idParam,
+      body: collectionTypeInputSchema.omit({ key: true }),
+      response: { 200: collectionTypeResponseSchema },
+    },
+    handler: ctrl.update.bind(ctrl),
+  })
+
   app.delete('/:id', {
-    preHandler: [authenticate, requireRole('admin')],
+    preHandler: [authenticate, requireRole('admin'), mutationRateLimiter],
     schema: {
       operationId: 'admin_collection_types_delete',
       tags: ['Admin'],

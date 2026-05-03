@@ -4,6 +4,9 @@ import type { FastifyRequest } from 'fastify'
 import type { AccessTokenClaims } from '../../auth/auth.service.js'
 import type { ListLgpdQuery, DecideLgpdBody } from './lgpd.schema.js'
 
+/** Prazo legal LGPD em dias (Lei 13.709/2018, art. 18). Centralizado para manter consistência com SQL. */
+export const LGPD_DEADLINE_DAYS = 15
+
 export class LgpdError extends Error {
   constructor(
     public readonly code: string,
@@ -26,7 +29,7 @@ export class LgpdService {
     // Adiciona prazo legal calculado em runtime
     const items = rows.map(r => ({
       ...r,
-      legalDeadlineAt: new Date(r.createdAt.getTime() + 15 * 24 * 60 * 60 * 1000),
+      legalDeadlineAt: new Date(r.createdAt.getTime() + LGPD_DEADLINE_DAYS * 24 * 60 * 60 * 1000),
     }))
     return { items, total, page: filters.page, pageSize: filters.pageSize }
   }

@@ -1,6 +1,6 @@
 import { eq, and, or, desc, ne, lt, sql } from 'drizzle-orm'
 import type { DatabaseClient } from '../../shared/infra/database/postgres.client.js'
-import { itemOffers, items, collections, users, offerProposals } from '../../shared/infra/database/schema.js'
+import { itemOffers, items, collections, collectionTypes, users, offerProposals } from '../../shared/infra/database/schema.js'
 import type { OfferType, OfferStatus } from './offers.schema.js'
 
 export type OfferRow = {
@@ -243,7 +243,8 @@ export class OffersRepository {
     const matched = await this.db
       .select({ id: collections.id })
       .from(collections)
-      .where(and(eq(collections.userId, userId), eq(collections.type, preferType as any)))
+      .innerJoin(collectionTypes, eq(collectionTypes.id, collections.collectionTypeId))
+      .where(and(eq(collections.userId, userId), eq(collectionTypes.key, preferType)))
       .orderBy(desc(collections.createdAt))
       .limit(1)
     if (matched[0]) return matched[0]

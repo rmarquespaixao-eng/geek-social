@@ -1,4 +1,4 @@
-import type { CollectionType, FieldDefinition } from './field-definition.repository.contract.js'
+import type { FieldDefinition } from './field-definition.repository.contract.js'
 
 export type CollectionVisibility = 'public' | 'private' | 'friends_only'
 
@@ -9,8 +9,6 @@ export type Collection = {
   description: string | null
   iconUrl: string | null
   coverUrl: string | null
-  /** @deprecated Use collectionTypeId — mantido para compatibilidade durante migração */
-  type?: CollectionType | null
   collectionTypeId: string | null
   visibility: CollectionVisibility
   autoShareToFeed: boolean
@@ -34,7 +32,6 @@ export type CreateCollectionData = {
   userId: string
   name: string
   description?: string
-  type?: CollectionType
   collectionTypeId?: string
   visibility?: CollectionVisibility
   autoShareToFeed?: boolean

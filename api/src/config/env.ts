@@ -30,6 +30,9 @@ const envSchema = z.object({
   // Auditoria #5: store distribuído pra rate-limit. Sem fallback in-memory:
   // rate-limit é controle de segurança, exige a infraestrutura definida.
   REDIS_URL: z.string().url(),
+  // Chave mestra AES-256-GCM para cifrar segredos at-rest (ex: api_key de moderação IA).
+  // Deve ser exatamente 64 hex chars (= 32 bytes). Gere com: openssl rand -hex 32
+  ADMIN_SECRETS_ENC_KEY: z.string().regex(/^[0-9a-f]{64}$/i, 'ADMIN_SECRETS_ENC_KEY deve ter exatamente 64 chars hex (32 bytes)'),
 })
 
 const parsed = envSchema.safeParse(process.env)

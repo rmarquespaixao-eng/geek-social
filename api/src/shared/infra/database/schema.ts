@@ -13,7 +13,12 @@ const bytea = customType<{ data: Uint8Array; default: false }>({
 })
 
 export const privacyEnum = pgEnum('privacy', ['public', 'friends_only', 'private'])
+// collectionTypeEnum mantido temporariamente para não quebrar código existente durante migração.
+// Após migration 0052 e atualização de todos os módulos que referenciam este enum,
+// esta linha será removida.
 export const collectionTypeEnum = pgEnum('collection_type', ['games', 'books', 'cardgames', 'boardgames', 'custom'])
+// platformRoleEnum declarado antes da tabela users (usada como default nela)
+export const platformRoleEnum = pgEnum('platform_role', ['user', 'moderator', 'admin'])
 export const collectionVisibilityEnum = pgEnum('collection_visibility', ['public', 'private', 'friends_only'])
 export const fieldTypeEnum = pgEnum('field_type', ['text', 'number', 'date', 'boolean', 'select', 'money'])
 export const friendshipStatusEnum = pgEnum('friendship_status', ['pending', 'accepted'])
@@ -49,6 +54,7 @@ export const users = pgTable('users', {
   // Incrementado em deleteAccount/changePassword/setInitialPassword para invalidar JWTs já emitidos.
   // O middleware authenticate compara contra a claim do token.
   tokenVersion: integer('token_version').notNull().default(0),
+  platformRole: platformRoleEnum('platform_role').notNull().default('user'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 })
@@ -88,7 +94,9 @@ export const fieldDefinitions = pgTable('field_definitions', {
   name: varchar('name', { length: 100 }).notNull(),
   fieldKey: varchar('field_key', { length: 50 }).notNull(),
   fieldType: fieldTypeEnum('field_type').notNull(),
+  // Substituído por collectionTypeId (FK) após migration 0052; mantido temporariamente para compatibilidade com código existente
   collectionType: collectionTypeEnum('collection_type'),
+  collectionTypeId: uuid('collection_type_id'),
   selectOptions: jsonb('select_options').$type<string[]>(),
   isSystem: boolean('is_system').default(false).notNull(),
   isHidden: boolean('is_hidden').default(false).notNull(),
@@ -102,7 +110,9 @@ export const collections = pgTable('collections', {
   description: text('description'),
   iconUrl: varchar('icon_url'),
   coverUrl: varchar('cover_url'),
-  type: collectionTypeEnum('type').notNull(),
+  // Substituído por collectionTypeId (FK) após migration 0052; mantido temporariamente para compatibilidade
+  type: collectionTypeEnum('type'),
+  collectionTypeId: uuid('collection_type_id'),
   visibility: collectionVisibilityEnum('visibility').default('public').notNull(),
   autoShareToFeed: boolean('auto_share_to_feed').default(false).notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
@@ -794,3 +804,123 @@ export const signalSenderKeyDistributions = pgTable('signal_sender_key_distribut
   pk: primaryKey({ columns: [table.conversationId, table.senderUserId, table.recipientUserId] }),
   recipientIdx: index('signal_skdm_recipient_idx').on(table.recipientUserId, table.conversationId),
 }))
+
+// ── Admin: log de auditoria global ────────────────────────────────
+export const adminActionEnum = pgEnum('admin_action', [
+  'user_role_change',
+  'user_ban',
+  'user_unban',
+  'user_suspend',
+  'user_anonymize',
+  'report_review',
+  'report_dismiss',
+  'community_suspend',
+  'community_unsuspend',
+  'feature_flag_create',
+  'feature_flag_toggle',
+  'feature_flag_delete',
+  'ai_config_update',
+  'ai_apikey_set',
+  'ai_apikey_clear',
+  'age_config_update',
+  'lgpd_approve',
+  'lgpd_reject',
+  'lgpd_complete',
+  'collection_type_create',
+  'collection_type_update',
+  'collection_type_toggle',
+  'collection_type_delete',
+])
+
+export const adminAuditLog = pgTable('admin_audit_log', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  actorId: uuid('actor_id').references(() => users.id, { onDelete: 'set null' }),
+  actorRoleAtTime: platformRoleEnum('actor_role_at_time').notNull(),
+  action: adminActionEnum('action').notNull(),
+  targetType: varchar('target_type', { length: 40 }),
+  targetId: uuid('target_id'),
+  ip: varchar('ip', { length: 45 }),
+  metadata: jsonb('metadata').$type<Record<string, unknown>>().notNull().default({}),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  actionCreatedAtIdx: index('admin_audit_log_action_created_at_idx').on(table.action, table.createdAt),
+  actorCreatedAtIdx: index('admin_audit_log_actor_created_at_idx').on(table.actorId, table.createdAt),
+  targetTypeTargetIdIdx: index('admin_audit_log_target_type_target_id_idx').on(table.targetType, table.targetId),
+}))
+
+// ── Admin: feature flags ───────────────────────────────────────────
+export const featureFlags = pgTable('feature_flags', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  key: varchar('key', { length: 80 }).unique().notNull(),
+  name: varchar('name', { length: 120 }),
+  description: text('description'),
+  enabled: boolean('enabled').notNull().default(false),
+  updatedBy: uuid('updated_by').references(() => users.id, { onDelete: 'set null' }),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+})
+
+// ── Admin: solicitações LGPD ───────────────────────────────────────
+export const lgpdRequestTypeEnum = pgEnum('lgpd_request_type', ['export', 'delete', 'rectify', 'portability'])
+export const lgpdRequestStatusEnum = pgEnum('lgpd_request_status', ['pending', 'processing', 'completed', 'rejected'])
+
+export const lgpdRequests = pgTable('lgpd_requests', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  type: lgpdRequestTypeEnum('type').notNull(),
+  status: lgpdRequestStatusEnum('status').notNull().default('pending'),
+  notes: text('notes'),
+  decidedBy: uuid('decided_by').references(() => users.id, { onDelete: 'set null' }),
+  decidedAt: timestamp('decided_at', { withTimezone: true }),
+  completedAt: timestamp('completed_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  statusCreatedAtIdx: index('lgpd_requests_status_created_at_idx').on(table.status, table.createdAt),
+  userIdIdx: index('lgpd_requests_user_id_idx').on(table.userId),
+}))
+
+// ── Admin: configurações de moderação automatizada ─────────────────
+export const aiModerationConfig = pgTable('ai_moderation_config', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  provider: varchar('provider', { length: 40 }),
+  model: varchar('model', { length: 80 }),
+  endpoint: varchar('endpoint', { length: 500 }),
+  enabled: boolean('enabled').notNull().default(false),
+  moderateText: boolean('moderate_text').notNull().default(true),
+  moderateImages: boolean('moderate_images').notNull().default(false),
+  moderateVideos: boolean('moderate_videos').notNull().default(false),
+  textThreshold: numeric('text_threshold', { precision: 3, scale: 2 }),
+  imageThreshold: numeric('image_threshold', { precision: 3, scale: 2 }),
+  autoRemove: boolean('auto_remove').notNull().default(false),
+  autoFlag: boolean('auto_flag').notNull().default(true),
+  notifyModerators: boolean('notify_moderators').notNull().default(true),
+  apiKeyCiphertext: bytea('api_key_ciphertext'),
+  apiKeyIv: bytea('api_key_iv'),
+  apiKeyTag: bytea('api_key_tag'),
+  updatedBy: uuid('updated_by').references(() => users.id, { onDelete: 'set null' }),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+})
+
+export const ageModerationConfig = pgTable('age_moderation_config', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  enabled: boolean('enabled').notNull().default(false),
+  minimumAge: smallint('minimum_age').notNull().default(13),
+  method: varchar('method', { length: 40 }).notNull().default('declaration'),
+  requireVerification: boolean('require_verification').notNull().default(false),
+  updatedBy: uuid('updated_by').references(() => users.id, { onDelete: 'set null' }),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+})
+
+// ── Tipos de coleção (migrado de pgEnum para tabela) ───────────────
+export const collectionTypes = pgTable('collection_types', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  key: varchar('key', { length: 40 }).unique().notNull(),
+  name: varchar('name', { length: 80 }),
+  description: text('description'),
+  icon: varchar('icon', { length: 20 }),
+  isSystem: boolean('is_system').notNull().default(false),
+  active: boolean('active').notNull().default(true),
+  createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+})

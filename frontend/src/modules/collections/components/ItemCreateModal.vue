@@ -121,6 +121,14 @@ const inputClass = 'w-full bg-[#0f0f1a] border border-[#252640] hover:border-[#f
     <!-- Body scrollável -->
     <div class="overflow-y-auto flex-1 px-5 py-4 space-y-4">
 
+      <!-- Sem coleções -->
+      <div v-if="collections.length === 0" class="py-6 text-center space-y-3">
+        <p class="text-[#94a3b8] text-[13px]">Você ainda não tem nenhuma coleção.</p>
+        <p class="text-[#475569] text-[12px]">Crie uma coleção primeiro para poder adicionar itens.</p>
+      </div>
+
+      <template v-else>
+
       <!-- Picker de coleção -->
       <div v-if="collections.length > 1">
         <label class="block text-[11px] font-medium text-[#94a3b8] mb-1.5 uppercase tracking-wider">Coleção</label>
@@ -270,18 +278,22 @@ const inputClass = 'w-full bg-[#0f0f1a] border border-[#252640] hover:border-[#f
       </div>
 
       <p v-if="error && name.trim()" class="text-[12px] text-red-400">{{ error }}</p>
+
+      </template><!-- /v-else (tem coleções) -->
     </div>
 
     <!-- Footer -->
     <div class="px-5 py-4 border-t border-[#252640] flex gap-3 shrink-0">
       <button
         type="button"
-        class="flex-1 bg-[#0f0f1a] hover:bg-[#252640] border border-[#252640] text-[#94a3b8] text-[13px] font-medium py-2.5 rounded-lg transition-colors"
+        :class="collections.length === 0 ? 'flex-1' : 'flex-1'"
+        class="bg-[#0f0f1a] hover:bg-[#252640] border border-[#252640] text-[#94a3b8] text-[13px] font-medium py-2.5 rounded-lg transition-colors"
         @click="emit('close')"
       >
-        Cancelar
+        {{ collections.length === 0 ? 'Fechar' : 'Cancelar' }}
       </button>
       <button
+        v-if="collections.length > 0"
         type="button"
         :disabled="submitting || loadingSchema"
         class="flex-1 flex items-center justify-center gap-2 bg-[#f59e0b] hover:bg-[#d97706] disabled:opacity-50 disabled:cursor-not-allowed text-black text-[13px] font-semibold py-2.5 rounded-lg transition-colors active:scale-95"

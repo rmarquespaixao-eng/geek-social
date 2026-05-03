@@ -271,7 +271,6 @@ const isEmpty = computed(() => !store.loading && store.collections.length === 0)
           <ChevronDown :size="13" class="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#475569] pointer-events-none" />
         </div>
         <button
-          v-if="store.collections.length > 0"
           class="flex items-center gap-1.5 bg-[#f59e0b] hover:bg-[#d97706] active:scale-95 text-black text-[13px] font-semibold px-3.5 py-2 rounded-lg transition-all shadow-md shadow-[#f59e0b]/20 shrink-0"
           @click="showItemCreateModal = true"
         >
@@ -294,7 +293,6 @@ const isEmpty = computed(() => !store.loading && store.collections.length === 0)
       <div v-else-if="allItems.items.length === 0" class="py-12 text-center">
         <p class="text-[#94a3b8] text-[13px]">Nenhum item encontrado.</p>
         <button
-          v-if="store.collections.length > 0"
           class="mt-4 flex items-center gap-1.5 bg-[#f59e0b] hover:bg-[#d97706] active:scale-95 text-black text-[13px] font-semibold px-4 py-2 rounded-lg transition-all mx-auto"
           @click="showItemCreateModal = true"
         >
@@ -357,7 +355,7 @@ const isEmpty = computed(() => !store.loading && store.collections.length === 0)
     </AppModal>
 
     <!-- Modal: criar item -->
-    <AppModal v-if="showItemCreateModal && store.collections.length > 0" size="lg" @close="showItemCreateModal = false">
+    <AppModal v-if="showItemCreateModal" size="lg" @close="showItemCreateModal = false">
       <ItemCreateModal
         :collections="store.collections"
         @close="showItemCreateModal = false"

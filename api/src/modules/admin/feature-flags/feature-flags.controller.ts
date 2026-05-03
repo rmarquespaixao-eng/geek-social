@@ -1,7 +1,7 @@
 import type { FastifyRequest, FastifyReply } from 'fastify'
 import type { FeatureFlagsService } from './feature-flags.service.js'
 import { FeatureFlagsError } from './feature-flags.service.js'
-import type { CreateFlagBody, UpdateFlagBody } from './feature-flags.schema.js'
+import type { CreateFlagBody, UpdateFlagBody, SetUserOverrideBody } from './feature-flags.schema.js'
 
 export class FeatureFlagsController {
   constructor(private readonly service: FeatureFlagsService) {}
@@ -35,6 +35,35 @@ export class FeatureFlagsController {
   async delete(request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) {
     try {
       await this.service.delete(request, request.params.id)
+      return reply.status(204).send()
+    } catch (err) { return this.handleError(err, reply) }
+  }
+
+  // ── User overrides ────────────────────────────────────────────────
+
+  async listOverrides(request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) {
+    try {
+      const overrides = await this.service.listFlagOverrides(request.params.id)
+      return reply.send(overrides)
+    } catch (err) { return this.handleError(err, reply) }
+  }
+
+  async setUserOverride(
+    request: FastifyRequest<{ Params: { id: string; userId: string }; Body: SetUserOverrideBody }>,
+    reply: FastifyReply,
+  ) {
+    try {
+      const override = await this.service.setUserOverride(request, request.params.id, request.params.userId, request.body)
+      return reply.send(override)
+    } catch (err) { return this.handleError(err, reply) }
+  }
+
+  async removeUserOverride(
+    request: FastifyRequest<{ Params: { id: string; userId: string } }>,
+    reply: FastifyReply,
+  ) {
+    try {
+      await this.service.removeUserOverride(request, request.params.id, request.params.userId)
       return reply.status(204).send()
     } catch (err) { return this.handleError(err, reply) }
   }

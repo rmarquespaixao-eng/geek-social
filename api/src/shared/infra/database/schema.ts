@@ -814,6 +814,8 @@ export const adminActionEnum = pgEnum('admin_action', [
   'feature_flag_toggle',
   'feature_flag_update',
   'feature_flag_delete',
+  'feature_flag_user_override_set',
+  'feature_flag_user_override_remove',
   'ai_config_update',
   'ai_apikey_set',
   'ai_apikey_clear',
@@ -854,6 +856,20 @@ export const featureFlags = pgTable('feature_flags', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 })
+
+// ── Admin: feature flags por usuário ──────────────────────────────
+export const userFeatureFlags = pgTable('user_feature_flags', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  flagId: uuid('flag_id').notNull().references(() => featureFlags.id, { onDelete: 'cascade' }),
+  enabled: boolean('enabled').notNull(),
+  updatedBy: uuid('updated_by').references(() => users.id, { onDelete: 'set null' }),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  userFlagUnique: uniqueIndex('user_feature_flags_user_flag_unique').on(table.userId, table.flagId),
+  userIdIdx: index('user_feature_flags_user_id_idx').on(table.userId),
+  flagIdIdx: index('user_feature_flags_flag_id_idx').on(table.flagId),
+}))
 
 // ── Admin: solicitações LGPD ───────────────────────────────────────
 export const lgpdRequestTypeEnum = pgEnum('lgpd_request_type', ['export', 'delete', 'rectify', 'portability'])

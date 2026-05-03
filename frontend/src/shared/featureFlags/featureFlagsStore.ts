@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { api } from '@/shared/http/api'
+import { useAuthStore } from '@/shared/auth/authStore'
 
 const POLL_INTERVAL_MS = 60_000
 const CACHE_KEY = 'geek:ff'
@@ -17,7 +18,9 @@ export const useFeatureFlagsStore = defineStore('featureFlags', () => {
 
   async function load() {
     try {
-      const { data } = await api.get<Record<string, boolean>>('/feature-flags')
+      const authStore = useAuthStore()
+      const endpoint = authStore.token ? '/feature-flags/me' : '/feature-flags'
+      const { data } = await api.get<Record<string, boolean>>(endpoint)
       flags.value = data
       localStorage.setItem(CACHE_KEY, JSON.stringify(data))
     } catch {

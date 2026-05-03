@@ -1,9 +1,18 @@
-import { eq, count } from 'drizzle-orm'
+import { eq, and } from 'drizzle-orm'
 import type { DatabaseClient } from '../../../shared/infra/database/postgres.client.js'
-import { featureFlags } from '../../../shared/infra/database/schema.js'
+import { featureFlags, userFeatureFlags, users } from '../../../shared/infra/database/schema.js'
 import type { CreateFlagBody, UpdateFlagBody } from './feature-flags.schema.js'
 
 export type FeatureFlagRow = typeof featureFlags.$inferSelect
+export type UserFeatureFlagRow = typeof userFeatureFlags.$inferSelect
+
+export type FlagOverrideWithUser = {
+  userId: string
+  displayName: string | null
+  email: string | null
+  enabled: boolean
+  updatedAt: Date
+}
 
 export class FeatureFlagsRepository {
   constructor(private readonly db: DatabaseClient) {}
@@ -55,6 +64,73 @@ export class FeatureFlagsRepository {
     const result = await this.db.delete(featureFlags)
       .where(eq(featureFlags.id, id))
       .returning({ id: featureFlags.id })
+    return result.length > 0
+  }
+
+  // ── User overrides ────────────────────────────────────────────────
+
+  async resolveForUser(userId: string): Promise<Record<string, boolean>> {
+    const rows = await this.db
+      .select({
+        key: featureFlags.key,
+        globalEnabled: featureFlags.enabled,
+        userEnabled: userFeatureFlags.enabled,
+      })
+      .from(featureFlags)
+      .leftJoin(
+        userFeatureFlags,
+        and(
+          eq(userFeatureFlags.flagId, featureFlags.id),
+          eq(userFeatureFlags.userId, userId),
+        ),
+      )
+    return Object.fromEntries(
+      rows.map(r => [r.key, r.userEnabled ?? r.globalEnabled]),
+    )
+  }
+
+  async listFlagOverrides(flagId: string): Promise<FlagOverrideWithUser[]> {
+    return this.db
+      .select({
+        userId: userFeatureFlags.userId,
+        displayName: users.displayName,
+        email: users.email,
+        enabled: userFeatureFlags.enabled,
+        updatedAt: userFeatureFlags.updatedAt,
+      })
+      .from(userFeatureFlags)
+      .leftJoin(users, eq(users.id, userFeatureFlags.userId))
+      .where(eq(userFeatureFlags.flagId, flagId))
+      .orderBy(userFeatureFlags.updatedAt)
+  }
+
+  async setUserOverride(
+    userId: string,
+    flagId: string,
+    enabled: boolean,
+    updatedBy: string | null,
+  ): Promise<UserFeatureFlagRow> {
+    const [row] = await this.db
+      .insert(userFeatureFlags)
+      .values({ userId, flagId, enabled, updatedBy })
+      .onConflictDoUpdate({
+        target: [userFeatureFlags.userId, userFeatureFlags.flagId],
+        set: { enabled, updatedBy, updatedAt: new Date() },
+      })
+      .returning()
+    return row
+  }
+
+  async removeUserOverride(userId: string, flagId: string): Promise<boolean> {
+    const result = await this.db
+      .delete(userFeatureFlags)
+      .where(
+        and(
+          eq(userFeatureFlags.userId, userId),
+          eq(userFeatureFlags.flagId, flagId),
+        ),
+      )
+      .returning({ id: userFeatureFlags.id })
     return result.length > 0
   }
 }

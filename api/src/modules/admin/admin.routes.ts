@@ -15,6 +15,8 @@ import { AdminCommunitiesRepository } from './communities/admin-communities.repo
 import { AdminCommunitiesService } from './communities/admin-communities.service.js'
 import { adminCommunitiesRoutes } from './communities/admin-communities.routes.js'
 import { adminLogsRoutes } from './logs/admin-logs.routes.js'
+import { UserAccessLogRepository } from './logs/user-access-log.repository.js'
+import { userAccessLogRoutes } from './logs/user-access-log.routes.js'
 import { FeatureFlagsRepository } from './feature-flags/feature-flags.repository.js'
 import { FeatureFlagsService } from './feature-flags/feature-flags.service.js'
 import { featureFlagsRoutes } from './feature-flags/feature-flags.routes.js'
@@ -59,8 +61,12 @@ export async function adminRoutes(app: FastifyInstance, opts: { db: DatabaseClie
   const adminCommunitiesService = new AdminCommunitiesService(adminCommunitiesRepo, auditLogService)
   await app.register(adminCommunitiesRoutes, { prefix: '/communities', adminCommunitiesService })
 
-  // Audit logs
+  // Audit logs (ações administrativas)
   await app.register(adminLogsRoutes, { prefix: '/logs', auditLogService })
+
+  // User access logs
+  const userAccessLogRepo = new UserAccessLogRepository(db)
+  await app.register(userAccessLogRoutes, { prefix: '/user-access-logs', repo: userAccessLogRepo })
 
   // Feature flags
   const featureFlagsRepo = new FeatureFlagsRepository(db)

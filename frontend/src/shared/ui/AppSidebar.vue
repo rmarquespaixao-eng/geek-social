@@ -132,20 +132,17 @@ const notificationsStore = useNotifications()
 const featureFlagsStore = useFeatureFlagsStore()
 
 const navItems = computed(() => {
-  const items = [
-    { to: '/feed', label: 'Feed', icon: Home, badge: 0 },
-    { to: '/comunidades', label: 'Comunidades', icon: MessagesSquare, badge: 0 },
-    { to: '/collections', label: 'Coleções', icon: Library, badge: 0 },
-    { to: '/vitrine', label: 'Vitrine', icon: Store, badge: 0 },
-    { to: '/roles', label: 'Rolê', icon: Ticket, badge: 0 },
-    { to: '/friends', label: 'Amigos', icon: Users, badge: friendsStore.pendingCount },
-    { to: '/chat', label: 'Chat', icon: MessageSquare, badge: chatStore.totalUnread },
-    { to: '/notifications', label: 'Notificações', icon: Bell, badge: notificationsStore.unreadCount },
+  const all = [
+    { to: '/feed', label: 'Feed', icon: Home, badge: 0, flag: 'module_feed' },
+    { to: '/comunidades', label: 'Comunidades', icon: MessagesSquare, badge: 0, flag: 'module_communities' },
+    { to: '/collections', label: 'Coleções', icon: Library, badge: 0, flag: 'module_collections' },
+    { to: '/vitrine', label: 'Vitrine', icon: Store, badge: 0, flag: 'module_marketplace' },
+    { to: '/roles', label: 'Rolê', icon: Ticket, badge: 0, flag: 'module_roles' },
+    { to: '/friends', label: 'Amigos', icon: Users, badge: friendsStore.pendingCount, flag: 'module_friends' },
+    { to: '/chat', label: 'Chat', icon: MessageSquare, badge: chatStore.totalUnread, flag: 'module_chat' },
+    { to: '/notifications', label: 'Notificações', icon: Bell, badge: notificationsStore.unreadCount, flag: 'module_notifications' },
   ]
-  if (!featureFlagsStore.isEnabled('offers_marketplace')) {
-    return items.filter(item => item.to !== '/vitrine')
-  }
-  return items
+  return all.filter(item => featureFlagsStore.isEnabled(item.flag))
 })
 
 function isItemActive(to: string): boolean {

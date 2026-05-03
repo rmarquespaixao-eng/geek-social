@@ -118,6 +118,8 @@ import { FeatureFlagsRepository } from './modules/admin/feature-flags/feature-fl
 import { FeatureFlagsService } from './modules/admin/feature-flags/feature-flags.service.js'
 import { featureFlagsPublicRoutes } from './modules/admin/feature-flags/feature-flags.public.routes.js'
 import { seedFeatureFlags } from './shared/infra/database/seeds/feature-flags.seed.js'
+import { UserAccessLogRepository } from './modules/admin/logs/user-access-log.repository.js'
+import { activityRoutes } from './modules/activity/activity.routes.js'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 
@@ -277,6 +279,9 @@ export async function buildApp() {
   const featureFlagsServicePublic = new FeatureFlagsService(featureFlagsRepository, featureFlagsAuditLogService)
   await seedFeatureFlags(featureFlagsRepository)
   await app.register(featureFlagsPublicRoutes, { prefix: '/feature-flags', featureFlagsService: featureFlagsServicePublic })
+
+  const userAccessLogRepository = new UserAccessLogRepository(db)
+  await app.register(activityRoutes, { prefix: '/activity', repo: userAccessLogRepository })
 
   const userRepository = new UserRepository(db)
   const usersRepository = new UsersRepository(db)

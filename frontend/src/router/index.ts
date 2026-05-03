@@ -1,5 +1,18 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '@/shared/auth/authStore'
+import { useFeatureFlagsStore } from '@/shared/featureFlags/featureFlagsStore'
+import { api } from '@/shared/http/api'
+
+const MODULE_FLAG_MAP: Record<string, string> = {
+  '/feed': 'module_feed',
+  '/comunidades': 'module_communities',
+  '/collections': 'module_collections',
+  '/vitrine': 'module_marketplace',
+  '/roles': 'module_roles',
+  '/friends': 'module_friends',
+  '/chat': 'module_chat',
+  '/notifications': 'module_notifications',
+}
 
 const router = createRouter({
   history: createWebHistory(),
@@ -210,6 +223,25 @@ router.beforeEach((to) => {
   }
   if (to.meta.public && store.isAuthenticated && to.name !== 'auth-callback') {
     return { name: 'feed' }
+  }
+
+  // Bloqueia módulos desabilitados via feature flag
+  const flags = useFeatureFlagsStore()
+  if (flags.loaded && store.isAuthenticated) {
+    const basePath = '/' + to.path.split('/')[1]
+    const flagKey = MODULE_FLAG_MAP[basePath]
+    if (flagKey && !flags.isEnabled(flagKey)) {
+      // Redireciona pro primeiro módulo habilitado ou para /feed sem loop
+      const firstEnabled = Object.entries(MODULE_FLAG_MAP).find(([, k]) => k !== flagKey && flags.isEnabled(k))
+      return firstEnabled ? { path: firstEnabled[0] } : false
+    }
+  }
+})
+
+router.afterEach((to) => {
+  const store = useAuthStore()
+  if (store.isAuthenticated && !to.meta.public) {
+    api.post('/activity/page-view', { path: to.path }).catch(() => {})
   }
 })
 

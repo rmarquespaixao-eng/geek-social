@@ -3,6 +3,8 @@ import type { DatabaseClient } from '../../../shared/infra/database/postgres.cli
 import { users, refreshTokens, emailVerificationTokens, passwordResetTokens } from '../../../shared/infra/database/schema.js'
 import type { ListUsersQuery } from './admin-users.schema.js'
 
+type UserStatus = 'active' | 'suspended' | 'banned'
+
 export type AdminUserRow = typeof users.$inferSelect
 
 export class AdminUsersRepository {
@@ -25,10 +27,9 @@ export class AdminUsersRepository {
     if (filters.role) {
       conditions.push(eq(users.platformRole, filters.role))
     }
-    // status filtering via ban/suspend flags — stored implicitly in tokenVersion + email pattern
-    // Para simplificar: banned users terão email pattern 'deleted-*@anonymous.invalid'
-    // suspended users terão tokenVersion incrementado (sem campo status explícito)
-    // Nesta entrega filtramos apenas por role; status admin-side não tem coluna dedicada ainda.
+    if (filters.status) {
+      conditions.push(eq(users.status, filters.status))
+    }
 
     const where = conditions.length > 0 ? and(...conditions) : undefined
 
@@ -54,6 +55,12 @@ export class AdminUsersRepository {
       .where(eq(users.id, id))
       .returning()
     return row ?? null
+  }
+
+  async setStatus(id: string, status: UserStatus): Promise<void> {
+    await this.db.update(users)
+      .set({ status, updatedAt: new Date() })
+      .where(eq(users.id, id))
   }
 
   async bumpTokenVersion(id: string): Promise<void> {

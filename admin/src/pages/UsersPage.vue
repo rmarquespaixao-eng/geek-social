@@ -16,6 +16,7 @@ interface User {
   displayName: string
   email: string
   platformRole: string
+  status: 'active' | 'suspended' | 'banned'
   avatarUrl?: string
   emailVerified: boolean
   createdAt: string
@@ -26,6 +27,7 @@ const total = ref(0)
 const page = ref(1)
 const search = ref('')
 const roleFilter = ref('')
+const statusFilter = ref('')
 const loading = ref(false)
 const actionOpen = ref<string | null>(null)
 
@@ -35,6 +37,24 @@ const roleOptions = [
   { value: 'moderator', label: 'Moderador' },
   { value: 'admin', label: 'Admin' },
 ]
+
+const statusOptions = [
+  { value: '', label: 'Todos os status' },
+  { value: 'active', label: 'Ativo' },
+  { value: 'suspended', label: 'Suspenso' },
+  { value: 'banned', label: 'Banido' },
+]
+
+const statusVariant: Record<string, string> = {
+  active: 'success',
+  suspended: 'warning',
+  banned: 'destructive',
+}
+const statusLabel: Record<string, string> = {
+  active: 'Ativo',
+  suspended: 'Suspenso',
+  banned: 'Banido',
+}
 
 const roleVariant: Record<string, string> = {
   admin: 'destructive',
@@ -51,7 +71,12 @@ async function load() {
   loading.value = true
   try {
     const { data } = await api.get('/admin/users', {
-      params: { page: page.value, search: search.value, role: roleFilter.value || undefined },
+      params: {
+        page: page.value,
+        search: search.value || undefined,
+        role: roleFilter.value || undefined,
+        status: statusFilter.value || undefined,
+      },
     })
     users.value = data.items
     total.value = data.total
@@ -84,7 +109,8 @@ onMounted(load)
         <Search class="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
         <Input v-model="search" placeholder="Buscar por nome ou e-mail..." class="pl-9" @keyup.enter="load" />
       </div>
-      <Select v-model="roleFilter" :options="roleOptions" class="w-48" />
+      <Select v-model="roleFilter" :options="roleOptions" class="w-44" />
+      <Select v-model="statusFilter" :options="statusOptions" class="w-44" />
       <Button @click="load" :disabled="loading" size="sm">{{ loading ? 'Buscando...' : 'Buscar' }}</Button>
     </div>
 
@@ -97,14 +123,15 @@ onMounted(load)
                 <th class="px-4 py-3 text-left font-medium text-slate-500">Usuário</th>
                 <th class="px-4 py-3 text-left font-medium text-slate-500">E-mail</th>
                 <th class="px-4 py-3 text-left font-medium text-slate-500">Perfil</th>
-                <th class="px-4 py-3 text-left font-medium text-slate-500">E-mail</th>
+                <th class="px-4 py-3 text-left font-medium text-slate-500">Status</th>
+                <th class="px-4 py-3 text-left font-medium text-slate-500">E-mail verificado</th>
                 <th class="px-4 py-3 text-left font-medium text-slate-500">Cadastro</th>
                 <th class="px-4 py-3 text-right font-medium text-slate-500">Ações</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-slate-100">
               <tr v-if="users.length === 0">
-                <td colspan="6" class="px-4 py-8 text-center text-slate-400">
+                <td colspan="7" class="px-4 py-8 text-center text-slate-400">
                   {{ loading ? 'Carregando...' : 'Nenhum usuário encontrado' }}
                 </td>
               </tr>
@@ -120,6 +147,9 @@ onMounted(load)
                 <td class="px-4 py-3 text-slate-600">{{ user.email }}</td>
                 <td class="px-4 py-3">
                   <Badge :variant="roleVariant[user.platformRole] || 'secondary'">{{ roleLabel[user.platformRole] || user.platformRole }}</Badge>
+                </td>
+                <td class="px-4 py-3">
+                  <Badge :variant="statusVariant[user.status] || 'secondary'">{{ statusLabel[user.status] || user.status }}</Badge>
                 </td>
                 <td class="px-4 py-3">
                   <Badge :variant="user.emailVerified ? 'success' : 'warning'">{{ user.emailVerified ? 'Verificado' : 'Pendente' }}</Badge>

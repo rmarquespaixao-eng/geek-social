@@ -21,6 +21,7 @@ export const friendshipStatusEnum = pgEnum('friendship_status', ['pending', 'acc
 export const postTypeEnum = pgEnum('post_type', ['manual', 'item_share'])
 export const postVisibilityEnum = pgEnum('post_visibility', ['public', 'friends_only', 'private'])
 export const reactionTypeEnum = pgEnum('reaction_type', ['power_up', 'epic', 'critical', 'loot', 'gg'])
+export const userStatusEnum = pgEnum('user_status', ['active', 'suspended', 'banned'])
 
 export const users = pgTable('users', {
   id: uuid('id').defaultRandom().primaryKey(),
@@ -51,6 +52,7 @@ export const users = pgTable('users', {
   // O middleware authenticate compara contra a claim do token.
   tokenVersion: integer('token_version').notNull().default(0),
   platformRole: platformRoleEnum('platform_role').notNull().default('user'),
+  status: userStatusEnum('status').notNull().default('active'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 })
@@ -908,6 +910,22 @@ export const ageModerationConfig = pgTable('age_moderation_config', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 }, (table) => ({
   singletonUniq: uniqueIndex('age_moderation_config_singleton_uniq').on(table.singleton),
+}))
+
+// ── Log de acessos de usuários (page views + ações do app) ────────
+export const userAccessLog = pgTable('user_access_log', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  userId: uuid('user_id').references(() => users.id, { onDelete: 'set null' }),
+  action: varchar('action', { length: 100 }).notNull(),
+  path: varchar('path', { length: 500 }),
+  ip: varchar('ip', { length: 45 }),
+  userAgent: varchar('user_agent', { length: 512 }),
+  metadata: jsonb('metadata').notNull().default({}),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  userIdIdx: index('user_access_log_user_id_idx').on(table.userId, table.createdAt),
+  actionIdx: index('user_access_log_action_idx').on(table.action, table.createdAt),
+  createdAtIdx: index('user_access_log_created_at_idx').on(table.createdAt),
 }))
 
 // ── Tipos de coleção (migrado de pgEnum para tabela) ───────────────

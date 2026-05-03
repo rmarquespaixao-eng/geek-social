@@ -37,13 +37,12 @@ export class AdminUsersService {
     const items = rows.map(u => ({
       id: u.id,
       displayName: u.displayName,
-      // Moderador vê e-mail mascarado; admin vê completo
       email: isAdmin ? u.email : maskEmail(u.email),
       avatarUrl: u.avatarUrl,
       platformRole: u.platformRole,
+      status: u.status,
       emailVerified: u.emailVerified,
       createdAt: u.createdAt,
-      // IP nunca é exposto na listagem — só nos logs para admin
     }))
 
     return { items, total, page: filters.page, pageSize: filters.pageSize }
@@ -62,6 +61,7 @@ export class AdminUsersService {
     if (!target) throw new AdminUsersError('NOT_FOUND', 'Usuário não encontrado', 404)
 
     if (body.status === 'banned') {
+      await this.repo.setStatus(targetId, 'banned')
       await this.repo.bumpTokenVersion(targetId)
       await this.auditLog.recordFromRequest(request, 'user_ban', {
         targetType: 'user',
@@ -69,13 +69,14 @@ export class AdminUsersService {
         metadata: { reason: body.reason ?? null },
       })
     } else if (body.status === 'active') {
-      // F-28: unban/reactivate não tem suporte completo enquanto não houver coluna status dedicada no DB.
-      throw new AdminUsersError(
-        'STATUS_NOT_SUPPORTED',
-        'Gerenciamento de status "active" depende de implementação futura (coluna status no DB). Use suspensão/ban por tokenVersion.',
-        400,
-      )
+      await this.repo.setStatus(targetId, 'active')
+      await this.auditLog.recordFromRequest(request, 'user_unban', {
+        targetType: 'user',
+        targetId,
+        metadata: { reason: body.reason ?? null },
+      })
     } else if (body.status === 'suspended') {
+      await this.repo.setStatus(targetId, 'suspended')
       await this.repo.bumpTokenVersion(targetId)
       await this.auditLog.recordFromRequest(request, 'user_suspend', {
         targetType: 'user',

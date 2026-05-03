@@ -54,7 +54,12 @@
     <!-- Rodapé: usuário + toggle -->
     <div class="border-t border-(--color-bg-elevated) p-2">
       <div class="flex items-center gap-1" :class="ui.sidebarMode === 'collapsed' ? 'flex-col' : ''">
-        <RouterLink :to="`/profile/${user?.id}`" class="flex-1 min-w-0" :class="ui.sidebarMode === 'collapsed' ? 'w-full' : ''">
+        <component
+          :is="hasSocialFeatures ? 'RouterLink' : 'div'"
+          v-bind="hasSocialFeatures ? { to: `/profile/${user?.id}` } : {}"
+          class="flex-1 min-w-0"
+          :class="ui.sidebarMode === 'collapsed' ? 'w-full' : ''"
+        >
           <div class="flex items-center gap-3 px-2 py-2 rounded-lg hover:bg-(--color-bg-elevated) transition-colors cursor-pointer">
             <AppAvatar
               :src="user?.avatarUrl"
@@ -67,7 +72,7 @@
               <p class="text-xs text-(--color-status-online)">Online</p>
             </div>
           </div>
-        </RouterLink>
+        </component>
         <RouterLink to="/settings" class="flex-shrink-0 p-2 rounded-lg text-(--color-text-muted) hover:bg-(--color-bg-elevated) hover:text-(--color-text-primary) transition-colors" title="Configurações">
           <Settings :size="16" />
         </RouterLink>
@@ -130,6 +135,11 @@ const friendsStore = useFriends()
 const chatStore = useChat()
 const notificationsStore = useNotifications()
 const featureFlagsStore = useFeatureFlagsStore()
+const hasSocialFeatures = computed(() =>
+  featureFlagsStore.isEnabled('module_feed') ||
+  featureFlagsStore.isEnabled('module_friends') ||
+  featureFlagsStore.isEnabled('module_communities'),
+)
 
 const navItems = computed(() => {
   const all = [

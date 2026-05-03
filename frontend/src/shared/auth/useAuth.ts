@@ -7,6 +7,7 @@ import { connectSocket, disconnectSocket } from '@/shared/socket/socket'
 import { requestPushPermission } from '@/shared/pwa/usePush'
 import { resetSignalSession } from '@/shared/crypto/signal/SignalClient'
 import { initCrypto } from './cryptoBootstrap'
+import { useFeatureFlagsStore } from '@/shared/featureFlags/featureFlagsStore'
 
 export function useAuth() {
   const store = useAuthStore()
@@ -19,7 +20,9 @@ export function useAuth() {
     await loadUser()
     connectSocket(data.accessToken)
     requestPushPermission().catch(() => {})
-    await initCrypto(store.user!.id, payload.password)
+    if (useFeatureFlagsStore().isEnabled('e2ee_chat')) {
+      await initCrypto(store.user!.id, payload.password)
+    }
   }
 
   async function register(payload: RegisterPayload): Promise<void> {
@@ -27,7 +30,9 @@ export function useAuth() {
     store.setAuth(data.accessToken, { avatarUrl: null, ...data.user })
     await loadUser()
     connectSocket(data.accessToken)
-    await initCrypto(store.user!.id, payload.password)
+    if (useFeatureFlagsStore().isEnabled('e2ee_chat')) {
+      await initCrypto(store.user!.id, payload.password)
+    }
   }
 
   async function logout(): Promise<void> {

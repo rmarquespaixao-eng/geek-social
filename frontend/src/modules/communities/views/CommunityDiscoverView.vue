@@ -3,6 +3,10 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import CommunityCard from '../components/CommunityCard.vue'
 import { useCommunitiesStore } from '../stores/communitiesStore'
+import { useFeatureFlagsStore } from '@/shared/featureFlags/featureFlagsStore'
+
+const featureFlags = useFeatureFlagsStore()
+const canCreateCommunity = computed(() => featureFlags.isEnabled('community_creation'))
 import type { CommunityCategory } from '../types'
 
 const router = useRouter()
@@ -77,6 +81,7 @@ onMounted(() => {
       <div class="max-w-5xl mx-auto px-4 flex items-center justify-between">
         <h1 class="text-xl font-bold text-slate-100">Comunidades</h1>
         <button
+          v-if="canCreateCommunity"
           type="button"
           @click="router.push('/comunidades/nova')"
           class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-500 hover:bg-amber-400 text-[#0f0f1a] transition-colors"
@@ -196,6 +201,7 @@ onMounted(() => {
           Você ainda não criou nenhuma comunidade.
           <br />
           <button
+            v-if="canCreateCommunity"
             type="button"
             @click="router.push('/comunidades/nova')"
             class="mt-3 px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-500 hover:bg-amber-400 text-[#0f0f1a] transition-colors"

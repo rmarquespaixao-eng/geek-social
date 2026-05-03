@@ -9,6 +9,8 @@ import { MembersController } from './members.controller.js'
 import { JoinRequestsController } from './join-requests.controller.js'
 import { TopicsController } from './topics.controller.js'
 import { authenticate } from '../../shared/middleware/authenticate.js'
+import { requireFlag } from '../../shared/middleware/require-flag.js'
+import type { DatabaseClient } from '../../shared/infra/database/postgres.client.js'
 import {
   listCommunitiesQuerySchema,
   idOrSlugParam,
@@ -28,6 +30,7 @@ export type CommunitiesRoutesOptions = {
   membersService: MembersService
   joinRequestsService: JoinRequestsService
   topicsService: TopicsService
+  db: DatabaseClient
 }
 
 export const communitiesRoutes: FastifyPluginAsyncZod<CommunitiesRoutesOptions> = async (app, opts) => {
@@ -46,7 +49,7 @@ export const communitiesRoutes: FastifyPluginAsyncZod<CommunitiesRoutesOptions> 
       security: [{ accessToken: [] }],
       consumes: ['multipart/form-data'],
     },
-    preHandler: [authenticate],
+    preHandler: [authenticate, requireFlag(opts.db, 'community_creation')],
     handler: commCtrl.create.bind(commCtrl),
   })
 

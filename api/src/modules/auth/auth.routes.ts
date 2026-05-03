@@ -1,8 +1,10 @@
 import { z } from 'zod'
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod'
 import type { AuthService } from './auth.service.js'
+import type { DatabaseClient } from '../../shared/infra/database/postgres.client.js'
 import { AuthController } from './auth.controller.js'
 import { authenticate } from '../../shared/middleware/authenticate.js'
+import { requireFlag } from '../../shared/middleware/require-flag.js'
 import { createIpRateLimiter, createUserRateLimiter } from '../../shared/middleware/rate-limit.js'
 import {
   registerSchema,
@@ -35,7 +37,7 @@ const setPasswordRateLimiter = createUserRateLimiter(3, 60 * 60 * 1000)
 // atual (#4). 5/hora por userId é coerente com setPassword e ainda cobre uso legítimo.
 const changePasswordRateLimiter = createUserRateLimiter(5, 60 * 60 * 1000)
 
-export const authRoutes: FastifyPluginAsyncZod<{ authService: AuthService }> = async (app, options) => {
+export const authRoutes: FastifyPluginAsyncZod<{ authService: AuthService; db: DatabaseClient }> = async (app, options) => {
   const controller = new AuthController(options.authService)
 
   app.post('/register', {
@@ -50,7 +52,7 @@ export const authRoutes: FastifyPluginAsyncZod<{ authService: AuthService }> = a
         409: errorResponseSchema,
       },
     },
-    preHandler: [registerRateLimiter],
+    preHandler: [registerRateLimiter, requireFlag(options.db, 'new_registrations')],
     handler: controller.register.bind(controller),
   })
 

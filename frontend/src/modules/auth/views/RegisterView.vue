@@ -15,6 +15,14 @@
         </RouterLink>
       </div>
 
+      <!-- Registros desabilitados -->
+      <div v-else-if="!registrationsEnabled()" class="bg-(--color-bg-card) rounded-2xl p-8 shadow-xl border border-(--color-bg-elevated) text-center flex flex-col items-center gap-4">
+        <Lock :size="48" class="text-(--color-text-muted)" />
+        <h2 class="text-xl font-bold text-(--color-text-primary)">Cadastros pausados</h2>
+        <p class="text-(--color-text-secondary) text-sm">No momento não estamos aceitando novos cadastros. Volte em breve!</p>
+        <RouterLink to="/login" class="text-sm text-(--color-accent-amber) hover:underline">Já tem uma conta? Fazer login</RouterLink>
+      </div>
+
       <!-- Formulário de registro -->
       <template v-else>
       <!-- Logo + título -->
@@ -142,14 +150,17 @@
 
 <script setup lang="ts">
 import { ref, reactive } from 'vue'
-import { Gamepad2, Eye, EyeOff, CheckCircle } from 'lucide-vue-next'
+import { Gamepad2, Eye, EyeOff, CheckCircle, Lock } from 'lucide-vue-next'
 import AppButton from '@/shared/ui/AppButton.vue'
 import { useAuth } from '@/shared/auth/useAuth'
 import { useAuthStore } from '@/shared/auth/authStore'
 import { getGoogleLoginUrl } from '../services/googleAuthService'
+import { useFeatureFlagsStore } from '@/shared/featureFlags/featureFlagsStore'
 
 const { register } = useAuth()
 const authStore = useAuthStore()
+const featureFlags = useFeatureFlagsStore()
+const registrationsEnabled = () => featureFlags.isEnabled('new_registrations')
 const googleLoginUrl = getGoogleLoginUrl()
 
 const form = reactive({ displayName: '', email: '', password: '', confirmPassword: '' })

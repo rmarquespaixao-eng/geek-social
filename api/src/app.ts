@@ -340,7 +340,7 @@ export async function buildApp() {
   const itemsRepository = new ItemsRepository(db)
   const itemsService = new ItemsService(itemsRepository, collectionsRepository, storageService, friendsRepository, postsService)
 
-  await app.register(authRoutes, { prefix: '/auth', authService })
+  await app.register(authRoutes, { prefix: '/auth', authService, db })
   await app.register(usersRoutes, { prefix: '/users', usersService })
   await app.register(fieldDefinitionsRoutes, { prefix: '/field-definitions', fieldDefinitionsService })
   await app.register(collectionsRoutes, { prefix: '/collections', collectionsService })
@@ -605,6 +605,7 @@ export async function buildApp() {
     membersService,
     joinRequestsService,
     topicsService,
+    db,
   })
 
   // Steam integration (opcional — exige fila; STEAM_WEB_API_KEY pode estar vazia (link funciona, import falha com STEAM_AUTH_FAILED))

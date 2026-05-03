@@ -6,6 +6,7 @@ import { api } from '@/shared/http/api'
 const MODULE_FLAG_MAP: Record<string, string> = {
   '/feed': 'module_feed',
   '/comunidades': 'module_communities',
+  '/comunidades/nova': 'community_creation',
   '/collections': 'module_collections',
   '/vitrine': 'module_marketplace',
   '/roles': 'module_roles',
@@ -225,14 +226,21 @@ router.beforeEach((to) => {
     return { name: 'feed' }
   }
 
-  // Bloqueia módulos desabilitados via feature flag
+  // Bloqueia módulos e sub-rotas desabilitados via feature flag
   const flags = useFeatureFlagsStore()
   if (flags.loaded && store.isAuthenticated) {
+    // Checar path exato primeiro (ex: /comunidades/nova), depois prefixo (ex: /comunidades)
+    const exactKey = MODULE_FLAG_MAP[to.path]
     const basePath = '/' + to.path.split('/')[1]
-    const flagKey = MODULE_FLAG_MAP[basePath]
+    const prefixKey = MODULE_FLAG_MAP[basePath]
+    const flagKey = exactKey ?? prefixKey
     if (flagKey && !flags.isEnabled(flagKey)) {
-      // Redireciona pro primeiro módulo habilitado ou para /feed sem loop
-      const firstEnabled = Object.entries(MODULE_FLAG_MAP).find(([, k]) => k !== flagKey && flags.isEnabled(k))
+      // Para sub-rotas de módulo habilitado (ex: /comunidades/nova com community_creation off),
+      // volta para o módulo pai se ele estiver habilitado
+      if (exactKey && prefixKey && flags.isEnabled(prefixKey)) {
+        return { path: basePath }
+      }
+      const firstEnabled = Object.entries(MODULE_FLAG_MAP).find(([p, k]) => k !== flagKey && flags.isEnabled(k) && !p.includes('/', 1))
       return firstEnabled ? { path: firstEnabled[0] } : false
     }
   }

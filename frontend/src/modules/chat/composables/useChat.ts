@@ -3,6 +3,7 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import * as chatService from '../services/chatService'
 import * as chatCrypto from '../services/chatCrypto'
+import { useFeatureFlagsStore } from '@/shared/featureFlags/featureFlagsStore'
 import { CryptoNotReadyError, PeerHasNoKeysError } from '../services/chatCrypto'
 import {
   cacheDmPlaintext,
@@ -250,7 +251,7 @@ export const useChat = defineStore('chat', () => {
     let finalContent = payload.content
     let isEncrypted = false
 
-    if (payload.content && myId && conv && chatCrypto.isReady()) {
+    if (payload.content && myId && conv && chatCrypto.isReady() && useFeatureFlagsStore().isEnabled('e2ee_chat')) {
       try {
         if (conv.type === 'dm') {
           const peer = conv.participants.find(p => p.userId !== myId)
@@ -305,7 +306,7 @@ export const useChat = defineStore('chat', () => {
     const conv = conversations.value.find(c => c.id === conversationId)
 
     let finalContent = content
-    if (myId && conv && chatCrypto.isReady()) {
+    if (myId && conv && chatCrypto.isReady() && useFeatureFlagsStore().isEnabled('e2ee_chat')) {
       try {
         if (conv.type === 'dm') {
           const peer = conv.participants.find(p => p.userId !== myId)
@@ -353,7 +354,7 @@ export const useChat = defineStore('chat', () => {
         let encContent = sourceMessage.content
         let isEncrypted = false
         try {
-          if (chatCrypto.isReady()) {
+          if (chatCrypto.isReady() && useFeatureFlagsStore().isEnabled('e2ee_chat')) {
             if (targetConv.type === 'dm') {
               const peer = targetConv.participants.find(p => p.userId !== myId)
               if (peer) {

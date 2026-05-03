@@ -15,7 +15,7 @@ import type {
 export type CollectionStats = {
   totalCollections: number
   itemsByType: { typeKey: string; typeName: string; typeIcon: string; count: number }[]
-  gamesByStatus: { status: string | null; count: number }[]
+  statusByType: { typeKey: string; typeName: string; typeIcon: string; status: string | null; count: number }[]
   itemsByRating: { rating: number | null; count: number }[]
   gamesByCompletionYear: { year: number; count: number }[]
 }
@@ -219,7 +219,7 @@ export class CollectionsRepository implements ICollectionRepository {
   }
 
   async getStats(userId: string): Promise<CollectionStats> {
-    const [totalResult, itemsByTypeRows, gamesByStatusRows, itemsByRatingRows, gamesByYearRows] = await Promise.all([
+    const [totalResult, itemsByTypeRows, statusByTypeRows, itemsByRatingRows, gamesByYearRows] = await Promise.all([
 
       this.db.select({ total: count() })
         .from(collections)
@@ -238,15 +238,29 @@ export class CollectionsRepository implements ICollectionRepository {
         .where(eq(collections.userId, userId))
         .groupBy(collectionTypes.id, collectionTypes.key, collectionTypes.name, collectionTypes.icon),
 
+      // status por tipo de coleção (genérico — todos os tipos do usuário)
       this.db.select({
+          typeKey: sql<string>`COALESCE(${collectionTypes.key}, 'other')`,
+          typeName: sql<string>`COALESCE(${collectionTypes.name}, 'Sem categoria')`,
+          typeIcon: sql<string>`COALESCE(${collectionTypes.icon}, '')`,
           status: sql<string | null>`${items.fields}->>'status'`,
           count: count(),
         })
         .from(items)
         .innerJoin(collections, eq(items.collectionId, collections.id))
-        .innerJoin(collectionTypes, eq(collections.collectionTypeId, collectionTypes.id))
-        .where(and(eq(collections.userId, userId), eq(collectionTypes.key, 'games')))
-        .groupBy(sql`${items.fields}->>'status'`),
+        .leftJoin(collectionTypes, eq(collections.collectionTypeId, collectionTypes.id))
+        .where(and(
+          eq(collections.userId, userId),
+          sql`(${items.fields}->>'status') IS NOT NULL`,
+          sql`(${items.fields}->>'status') <> ''`,
+        ))
+        .groupBy(
+          collectionTypes.id,
+          collectionTypes.key,
+          collectionTypes.name,
+          collectionTypes.icon,
+          sql`${items.fields}->>'status'`,
+        ),
 
       this.db.select({ rating: items.rating, count: count() })
         .from(items)
@@ -279,7 +293,7 @@ export class CollectionsRepository implements ICollectionRepository {
     return {
       totalCollections: Number(totalResult[0]?.total ?? 0),
       itemsByType: itemsByTypeRows.map(r => ({ typeKey: r.typeKey, typeName: r.typeName, typeIcon: r.typeIcon, count: Number(r.count) })),
-      gamesByStatus: gamesByStatusRows.map(r => ({ status: r.status ?? null, count: Number(r.count) })),
+      statusByType: statusByTypeRows.map(r => ({ typeKey: r.typeKey, typeName: r.typeName, typeIcon: r.typeIcon, status: r.status ?? null, count: Number(r.count) })),
       itemsByRating: itemsByRatingRows.map(r => ({ rating: r.rating ?? null, count: Number(r.count) })),
       gamesByCompletionYear: gamesByYearRows.map(r => ({ year: Number(r.year), count: Number(r.count) })),
     }

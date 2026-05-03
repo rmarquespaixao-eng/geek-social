@@ -2,58 +2,214 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { BarChart2, Library, Package, ArrowLeft } from 'lucide-vue-next'
+import {
+  Chart as ChartJS,
+  CategoryScale,
+  LinearScale,
+  BarElement,
+  Tooltip,
+  Legend,
+} from 'chart.js'
+import { Bar } from 'vue-chartjs'
 import AppPageHeader from '@/shared/ui/AppPageHeader.vue'
 import { getCollectionStats } from '../services/collectionsService'
 import type { CollectionStats } from '../types'
+
+ChartJS.register(CategoryScale, LinearScale, BarElement, Tooltip, Legend)
 
 const router = useRouter()
 const stats = ref<CollectionStats | null>(null)
 const loading = ref(false)
 const error = ref<string | null>(null)
 
-const STATUS_ORDER = ['Na fila', 'Em andamento', 'Zerado', 'Platinado']
+// Cores por status (todos os tipos de coleção)
 const STATUS_COLORS: Record<string, string> = {
+  // games
   'Na fila': '#60a5fa',
   'Em andamento': '#fbbf24',
   'Zerado': '#4ade80',
   'Platinado': '#c084fc',
+  // books
+  'Quero ler': '#60a5fa',
+  'Lendo': '#fbbf24',
+  'Lido': '#4ade80',
+  // boardgames
+  'Tenho': '#4ade80',
+  'Quero': '#60a5fa',
+  'Emprestado': '#fbbf24',
 }
 
+// Ordem preferida de status por tipo
+const STATUS_ORDER: Record<string, string[]> = {
+  games: ['Na fila', 'Em andamento', 'Zerado', 'Platinado'],
+  books: ['Quero ler', 'Lendo', 'Lido'],
+  boardgames: ['Tenho', 'Quero', 'Emprestado'],
+}
+
+const CHART_DEFAULTS = {
+  responsive: true,
+  maintainAspectRatio: false,
+  animation: { duration: 600 },
+  plugins: {
+    legend: { display: false },
+    tooltip: {
+      backgroundColor: '#1e2038',
+      titleColor: '#e2e8f0',
+      bodyColor: '#94a3b8',
+      borderColor: '#2e3050',
+      borderWidth: 1,
+      padding: 10,
+    },
+  },
+  scales: {
+    x: {
+      grid: { color: '#252640' },
+      ticks: { color: '#94a3b8', font: { size: 11 } },
+      border: { color: '#252640' },
+    },
+    y: {
+      grid: { color: '#252640' },
+      ticks: { color: '#94a3b8', font: { size: 11 }, precision: 0 },
+      border: { color: '#252640' },
+      beginAtZero: true,
+    },
+  },
+}
+
+const HORIZONTAL_DEFAULTS = {
+  ...CHART_DEFAULTS,
+  indexAxis: 'y' as const,
+  scales: {
+    x: {
+      ...CHART_DEFAULTS.scales.x,
+      ticks: { ...CHART_DEFAULTS.scales.x.ticks, precision: 0 },
+      beginAtZero: true,
+    },
+    y: {
+      grid: { color: 'transparent' },
+      ticks: { color: '#94a3b8', font: { size: 12 } },
+      border: { color: '#252640' },
+    },
+  },
+}
+
+// --- Totais ---
 const totalItems = computed(() =>
   stats.value?.itemsByType.reduce((s, r) => s + r.count, 0) ?? 0,
 )
 
-const maxByType = computed(() =>
-  Math.max(1, ...(stats.value?.itemsByType.map(r => r.count) ?? [0])),
-)
-
-const orderedStatuses = computed(() => {
-  if (!stats.value) return []
-  const map = new Map(stats.value.gamesByStatus.map(r => [r.status, r.count]))
-  const result = STATUS_ORDER
-    .filter(s => map.has(s))
-    .map(s => ({ status: s, count: map.get(s)! }))
-  if (map.has(null) && (map.get(null) ?? 0) > 0)
-    result.push({ status: null, count: map.get(null)! })
-  return result
+// --- Itens por categoria ---
+const itemsByTypeChart = computed(() => {
+  const rows = stats.value?.itemsByType ?? []
+  return {
+    data: {
+      labels: rows.map(r => `${r.typeIcon} ${r.typeName}`),
+      datasets: [{
+        data: rows.map(r => r.count),
+        backgroundColor: '#f59e0b',
+        borderRadius: 4,
+        barThickness: 18,
+      }],
+    },
+    options: { ...HORIZONTAL_DEFAULTS },
+    height: Math.max(80, rows.length * 36),
+  }
 })
 
-const maxByStatus = computed(() =>
-  Math.max(1, ...orderedStatuses.value.map(r => r.count)),
-)
+// --- Status por tipo de coleção ---
+const statusByTypeCharts = computed(() => {
+  if (!stats.value?.statusByType.length) return []
 
-const orderedRatings = computed(() => {
-  if (!stats.value) return []
-  const map = new Map(stats.value.itemsByRating.map(r => [r.rating, r.count]))
-  return [5, 4, 3, 2, 1, null].map(r => ({ rating: r, count: map.get(r) ?? 0 }))
+  // Agrupa por typeKey
+  const map = new Map<string, {
+    typeKey: string; typeName: string; typeIcon: string
+    statuses: Map<string, number>
+  }>()
+
+  for (const row of stats.value.statusByType) {
+    if (!map.has(row.typeKey)) {
+      map.set(row.typeKey, {
+        typeKey: row.typeKey,
+        typeName: row.typeName,
+        typeIcon: row.typeIcon,
+        statuses: new Map(),
+      })
+    }
+    if (row.status) {
+      map.get(row.typeKey)!.statuses.set(row.status, row.count)
+    }
+  }
+
+  return [...map.values()].map(({ typeKey, typeName, typeIcon, statuses }) => {
+    const order = STATUS_ORDER[typeKey] ?? [...statuses.keys()]
+    const labels = order.filter(s => statuses.has(s))
+    const data = labels.map(s => statuses.get(s)!)
+    const colors = labels.map(s => STATUS_COLORS[s] ?? '#94a3b8')
+
+    return {
+      title: `${typeIcon} ${typeName} — por status`,
+      data: {
+        labels,
+        datasets: [{
+          data,
+          backgroundColor: colors,
+          borderRadius: 4,
+          barThickness: 18,
+        }],
+      },
+      options: { ...HORIZONTAL_DEFAULTS },
+      height: Math.max(80, labels.length * 36),
+    }
+  })
 })
 
-const maxByRating = computed(() =>
-  Math.max(1, ...orderedRatings.value.map(r => r.count)),
-)
+// --- Zerados por ano (games) ---
+const yearChart = computed(() => {
+  const rows = stats.value?.gamesByCompletionYear ?? []
+  if (!rows.length) return null
+  return {
+    data: {
+      labels: rows.map(r => String(r.year)),
+      datasets: [{
+        label: 'Jogos zerados',
+        data: rows.map(r => r.count),
+        backgroundColor: '#f59e0b',
+        borderRadius: 4,
+        barThickness: 28,
+      }],
+    },
+    options: {
+      ...CHART_DEFAULTS,
+      plugins: {
+        ...CHART_DEFAULTS.plugins,
+        legend: { display: false },
+      },
+    },
+    height: 180,
+  }
+})
 
-const completionYears = computed(() => stats.value?.gamesByCompletionYear ?? [])
-const maxByYear = computed(() => Math.max(1, ...completionYears.value.map(r => r.count)))
+// --- Classificações ---
+const ratingsChart = computed(() => {
+  const rows = [5, 4, 3, 2, 1, null].map(r => ({
+    rating: r,
+    count: stats.value?.itemsByRating.find(x => x.rating === r)?.count ?? 0,
+  }))
+  const labels = rows.map(r => r.rating !== null ? '★'.repeat(r.rating) + '☆'.repeat(5 - r.rating) : 'sem nota')
+  return {
+    data: {
+      labels,
+      datasets: [{
+        data: rows.map(r => r.count),
+        backgroundColor: rows.map(r => r.rating !== null ? '#f59e0b' : '#475569'),
+        borderRadius: 4,
+        barThickness: 18,
+      }],
+    },
+    options: { ...HORIZONTAL_DEFAULTS },
+    height: Math.max(80, rows.length * 36),
+  }
+})
 
 onMounted(async () => {
   loading.value = true
@@ -70,9 +226,7 @@ onMounted(async () => {
 <template>
   <div class="min-h-screen bg-[#0f0f1a]">
     <AppPageHeader :icon="BarChart2" title="Dashboard">
-      <template #subtitle>
-        visão geral das suas coleções
-      </template>
+      <template #subtitle>visão geral das suas coleções</template>
       <template #action>
         <button
           class="flex items-center gap-1.5 bg-[#1e2038] hover:bg-[#252640] border border-[#2e3050] text-[#94a3b8] hover:text-[#e2e8f0] text-[13px] font-semibold px-3.5 py-2 rounded-lg transition-all"
@@ -89,7 +243,7 @@ onMounted(async () => {
       <div class="grid grid-cols-2 gap-4">
         <div v-for="n in 2" :key="n" class="bg-[#1e2038] rounded-xl border border-[#252640] p-4 h-24 animate-pulse" />
       </div>
-      <div v-for="n in 4" :key="n" class="bg-[#1e2038] rounded-xl border border-[#252640] p-5 h-36 animate-pulse" />
+      <div v-for="n in 4" :key="n" class="bg-[#1e2038] rounded-xl border border-[#252640] p-5 h-48 animate-pulse" />
     </div>
 
     <!-- Error -->
@@ -115,101 +269,42 @@ onMounted(async () => {
       </div>
 
       <!-- Itens por categoria -->
-      <div class="bg-[#1e2038] rounded-xl border border-[#252640] p-4 md:p-5">
+      <div v-if="stats.itemsByType.length > 0" class="bg-[#1e2038] rounded-xl border border-[#252640] p-4 md:p-5">
         <h2 class="text-[#e2e8f0] font-semibold text-[14px] mb-4">Itens por categoria</h2>
-        <div v-if="stats.itemsByType.length === 0" class="text-[#94a3b8] text-[13px]">
-          Nenhum item ainda.
+        <div :style="{ height: itemsByTypeChart.height + 'px' }">
+          <Bar :data="itemsByTypeChart.data" :options="itemsByTypeChart.options" />
         </div>
-        <div v-else class="space-y-3">
-          <div v-for="row in stats.itemsByType" :key="row.typeKey">
-            <div class="flex items-center justify-between text-[13px] mb-1.5">
-              <span class="text-[#cbd5e1]">{{ row.typeIcon }} {{ row.typeName }}</span>
-              <span class="font-bold text-[#e2e8f0]">{{ row.count }}</span>
-            </div>
-            <div class="h-2 rounded-full bg-[#252640]">
-              <div
-                class="h-2 rounded-full bg-[#f59e0b] transition-all duration-500"
-                :style="{ width: `${(row.count / maxByType) * 100}%` }"
-              />
-            </div>
-          </div>
+      </div>
+      <div v-else class="bg-[#1e2038] rounded-xl border border-[#252640] p-4 md:p-5">
+        <h2 class="text-[#e2e8f0] font-semibold text-[14px] mb-2">Itens por categoria</h2>
+        <p class="text-[#94a3b8] text-[13px]">Nenhum item ainda.</p>
+      </div>
+
+      <!-- Status por tipo de coleção -->
+      <div
+        v-for="chart in statusByTypeCharts"
+        :key="chart.title"
+        class="bg-[#1e2038] rounded-xl border border-[#252640] p-4 md:p-5"
+      >
+        <h2 class="text-[#e2e8f0] font-semibold text-[14px] mb-4">{{ chart.title }}</h2>
+        <div :style="{ height: chart.height + 'px' }">
+          <Bar :data="chart.data" :options="chart.options" />
         </div>
       </div>
 
-      <!-- Jogos zerados por ano (barra vertical) -->
-      <div v-if="completionYears.length > 0" class="bg-[#1e2038] rounded-xl border border-[#252640] p-4 md:p-5">
-        <h2 class="text-[#e2e8f0] font-semibold text-[14px] mb-5">Jogos zerados por ano</h2>
-        <div class="flex items-end gap-2 overflow-x-auto pb-2" style="min-height: 140px;">
-          <div
-            v-for="row in completionYears"
-            :key="row.year"
-            class="flex flex-col items-center gap-1.5 flex-shrink-0"
-            style="min-width: 44px;"
-          >
-            <!-- Quantidade acima da barra -->
-            <span class="text-[11px] font-bold text-[#f59e0b]">{{ row.count }}</span>
-            <!-- Barra vertical -->
-            <div class="w-8 rounded-t-md bg-[#f59e0b]/20 relative" style="height: 100px;">
-              <div
-                class="absolute bottom-0 left-0 right-0 rounded-t-md bg-[#f59e0b] transition-all duration-700"
-                :style="{ height: `${Math.max(4, (row.count / maxByYear) * 100)}%` }"
-              />
-            </div>
-            <!-- Ano -->
-            <span class="text-[11px] text-[#64748b] font-medium">{{ row.year }}</span>
-          </div>
+      <!-- Jogos zerados por ano -->
+      <div v-if="yearChart" class="bg-[#1e2038] rounded-xl border border-[#252640] p-4 md:p-5">
+        <h2 class="text-[#e2e8f0] font-semibold text-[14px] mb-4">Jogos zerados por ano</h2>
+        <div :style="{ height: yearChart.height + 'px' }">
+          <Bar :data="yearChart.data" :options="yearChart.options" />
         </div>
       </div>
 
-      <!-- Jogos por status -->
-      <div v-if="orderedStatuses.length > 0" class="bg-[#1e2038] rounded-xl border border-[#252640] p-4 md:p-5">
-        <h2 class="text-[#e2e8f0] font-semibold text-[14px] mb-4">Jogos por status</h2>
-        <div class="space-y-3">
-          <div v-for="row in orderedStatuses" :key="row.status ?? 'sem-status'">
-            <div class="flex items-center justify-between text-[13px] mb-1.5">
-              <span
-                class="font-medium"
-                :style="{ color: row.status ? STATUS_COLORS[row.status] ?? '#94a3b8' : '#94a3b8' }"
-              >{{ row.status ?? 'Sem status' }}</span>
-              <span class="font-bold text-[#e2e8f0]">{{ row.count }}</span>
-            </div>
-            <div class="h-2 rounded-full bg-[#252640]">
-              <div
-                class="h-2 rounded-full transition-all duration-500"
-                :style="{
-                  width: `${(row.count / maxByStatus) * 100}%`,
-                  backgroundColor: row.status ? STATUS_COLORS[row.status] ?? '#94a3b8' : '#94a3b8',
-                }"
-              />
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Classificações por estrelas -->
+      <!-- Classificações -->
       <div class="bg-[#1e2038] rounded-xl border border-[#252640] p-4 md:p-5">
         <h2 class="text-[#e2e8f0] font-semibold text-[14px] mb-4">Classificações</h2>
-        <div class="space-y-3">
-          <div v-for="row in orderedRatings" :key="row.rating ?? 0" class="flex items-center gap-3">
-            <div class="w-24 flex gap-0.5 shrink-0">
-              <template v-if="row.rating !== null">
-                <span
-                  v-for="s in 5"
-                  :key="s"
-                  class="text-[15px] leading-none"
-                  :class="s <= row.rating! ? 'text-[#f59e0b]' : 'text-[#2e3050]'"
-                >★</span>
-              </template>
-              <span v-else class="text-[#475569] text-[12px] leading-none">sem nota</span>
-            </div>
-            <div class="flex-1 h-2 rounded-full bg-[#252640]">
-              <div
-                class="h-2 rounded-full bg-[#f59e0b] transition-all duration-500"
-                :style="{ width: `${(row.count / maxByRating) * 100}%` }"
-              />
-            </div>
-            <span class="w-8 text-right text-[13px] font-bold text-[#e2e8f0] shrink-0">{{ row.count }}</span>
-          </div>
+        <div :style="{ height: ratingsChart.height + 'px' }">
+          <Bar :data="ratingsChart.data" :options="ratingsChart.options" />
         </div>
       </div>
 

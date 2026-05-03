@@ -142,20 +142,8 @@ const isEmpty = computed(() => !store.loading && store.collections.length === 0)
             <span class="hidden sm:inline">Dashboard</span>
           </button>
 
-          <!-- Novo item (só na view de itens) -->
+          <!-- Nova coleção (sempre visível no header) -->
           <button
-            v-if="activeView === 'items' && store.collections.length > 0"
-            class="flex items-center gap-1.5 bg-[#f59e0b] hover:bg-[#d97706] active:scale-95 text-black text-[13px] font-semibold px-3.5 md:px-4 py-2 rounded-lg transition-all shadow-md shadow-[#f59e0b]/20"
-            @click="showItemCreateModal = true"
-          >
-            <Plus :size="16" :stroke-width="2.5" />
-            <span class="hidden sm:inline">Novo item</span>
-            <span class="sm:hidden">Novo</span>
-          </button>
-
-          <!-- Nova coleção (só na view de coleções) -->
-          <button
-            v-else
             class="flex items-center gap-1.5 bg-[#f59e0b] hover:bg-[#d97706] active:scale-95 text-black text-[13px] font-semibold px-3.5 md:px-4 py-2 rounded-lg transition-all shadow-md shadow-[#f59e0b]/20"
             @click="showCreateCollectionModal = true"
           >
@@ -260,7 +248,7 @@ const isEmpty = computed(() => !store.loading && store.collections.length === 0)
     <!-- ── VISÃO: ITENS ── -->
     <div v-else class="px-4 md:px-6 py-4 space-y-4">
       <!-- Controles -->
-      <div class="flex gap-2">
+      <div class="flex gap-2 items-center">
         <div class="relative flex-1 max-w-sm">
           <Search :size="14" class="absolute left-3 top-1/2 -translate-y-1/2 text-[#475569]" />
           <input
@@ -282,6 +270,14 @@ const isEmpty = computed(() => !store.loading && store.collections.length === 0)
           </select>
           <ChevronDown :size="13" class="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#475569] pointer-events-none" />
         </div>
+        <button
+          v-if="store.collections.length > 0"
+          class="flex items-center gap-1.5 bg-[#f59e0b] hover:bg-[#d97706] active:scale-95 text-black text-[13px] font-semibold px-3.5 py-2 rounded-lg transition-all shadow-md shadow-[#f59e0b]/20 shrink-0"
+          @click="showItemCreateModal = true"
+        >
+          <Plus :size="15" :stroke-width="2.5" />
+          <span class="hidden sm:inline">Novo item</span>
+        </button>
       </div>
 
       <!-- Loading inicial -->

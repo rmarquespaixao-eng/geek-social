@@ -13,6 +13,18 @@ const publicItemsParam = z.object({ userId: z.string().uuid(), collectionId: z.s
 export const itemsRoutes: FastifyPluginAsyncZod<{ itemsService: ItemsService }> = async (app, options) => {
   const controller = new ItemsController(options.itemsService)
 
+  app.get('/items', {
+    schema: {
+      operationId: 'items_list_all',
+      tags: ['Items'],
+      summary: 'Listar todos os itens do usuário',
+      description: 'Cursor pagination de todos os itens de todas as coleções do usuário. Inclui collectionName, collectionTypeKey, collectionTypeIcon. Suporta: q, cursor, limit, sort, rating_min, has_cover.',
+      security: [{ accessToken: [] }],
+    },
+    preHandler: [authenticate],
+    handler: controller.listAll.bind(controller),
+  })
+
   app.get('/:collectionId/items', {
     schema: {
       operationId: 'items_list',

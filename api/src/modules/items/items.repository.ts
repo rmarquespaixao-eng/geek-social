@@ -4,6 +4,7 @@ import { items, collections, collectionTypes } from '../../shared/infra/database
 import type {
   IItemRepository, Item, CreateItemData, UpdateItemData, ExistingSteamItem,
   SearchItemsParams, ItemsPage, FieldFilter,
+  SearchAllUserItemsParams, AllItemsPage, ItemWithCollection,
 } from '../../shared/contracts/item.repository.contract.js'
 
 type CursorPayload = { k: string | number | null; id: string }
@@ -162,6 +163,65 @@ export class ItemsRepository implements IItemRepository {
       case 'rating':
         return sql`(COALESCE(${items.rating}, 0) < ${k} OR (COALESCE(${items.rating}, 0) = ${k} AND ${items.id} < ${id}))`
     }
+  }
+
+  async searchAllByUser(params: SearchAllUserItemsParams): Promise<AllItemsPage> {
+    const conditions: SQL[] = [eq(collections.userId, params.userId)]
+
+    if (params.q) {
+      const like = `%${params.q}%`
+      conditions.push(or(
+        ilike(items.name, like),
+        sql`${items.fields}::text ILIKE ${like}`,
+      )!)
+    }
+
+    if (params.ratingMin !== undefined) {
+      conditions.push(sql`${items.rating} >= ${params.ratingMin}`)
+    }
+
+    if (params.hasCover === true) {
+      conditions.push(sql`${items.coverUrl} IS NOT NULL`)
+    } else if (params.hasCover === false) {
+      conditions.push(sql`${items.coverUrl} IS NULL`)
+    }
+
+    const cursor = params.cursor ? decodeCursor(params.cursor) : null
+    const orderClauses = this.buildOrder(params.sort)
+    const cursorCondition = cursor ? this.buildCursorCondition(params.sort, cursor) : null
+    if (cursorCondition) conditions.push(cursorCondition)
+
+    const rows = await this.db
+      .select({
+        id: items.id,
+        collectionId: items.collectionId,
+        name: items.name,
+        coverUrl: items.coverUrl,
+        fields: items.fields,
+        rating: items.rating,
+        comment: items.comment,
+        createdAt: items.createdAt,
+        updatedAt: items.updatedAt,
+        collectionName: collections.name,
+        collectionTypeKey: collectionTypes.key,
+        collectionTypeIcon: collectionTypes.icon,
+      })
+      .from(items)
+      .innerJoin(collections, eq(items.collectionId, collections.id))
+      .innerJoin(collectionTypes, eq(collectionTypes.id, collections.collectionTypeId))
+      .where(and(...conditions))
+      .orderBy(...orderClauses)
+      .limit(params.limit + 1)
+
+    let nextCursor: string | null = null
+    let result = rows as unknown as ItemWithCollection[]
+    if (rows.length > params.limit) {
+      result = rows.slice(0, params.limit) as unknown as ItemWithCollection[]
+      const last = result[result.length - 1]
+      nextCursor = encodeCursor({ k: this.cursorKey(params.sort, last), id: last.id })
+    }
+
+    return { items: result, nextCursor }
   }
 
   async findByCollectionAndAppId(collectionId: string, steamAppId: number): Promise<Item | null> {

@@ -122,6 +122,17 @@ export interface ItemsPage {
   nextCursor: string | null
 }
 
+export interface ItemWithCollection extends Item {
+  collectionName: string
+  collectionTypeKey: string
+  collectionTypeIcon: string | null
+}
+
+export interface AllItemsPage {
+  items: ItemWithCollection[]
+  nextCursor: string | null
+}
+
 export interface CollectionStats {
   totalCollections: number
   itemsByType: { typeKey: string; typeName: string; typeIcon: string; count: number }[]

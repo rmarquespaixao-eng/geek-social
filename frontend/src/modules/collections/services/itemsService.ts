@@ -1,7 +1,7 @@
 import { api } from '@/shared/http/api'
 import type {
   Item, CreateItemPayload, UpdateItemPayload,
-  ItemListQuery, ItemsPage, FieldFilterValue,
+  ItemListQuery, ItemsPage, AllItemsPage, FieldFilterValue,
 } from '../types'
 
 function buildListParams(query: ItemListQuery): Record<string, string> {
@@ -39,6 +39,13 @@ export async function listItemsPage(
   query: ItemListQuery,
 ): Promise<ItemsPage> {
   const { data } = await api.get<ItemsPage>(`/collections/${collectionId}/items`, {
+    params: buildListParams(query),
+  })
+  return data
+}
+
+export async function listAllItemsPage(query: ItemListQuery): Promise<AllItemsPage> {
+  const { data } = await api.get<AllItemsPage>('/collections/items', {
     params: buildListParams(query),
   })
   return data

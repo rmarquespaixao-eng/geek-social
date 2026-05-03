@@ -138,6 +138,17 @@ services:
       - api
     restart: unless-stopped
 
+  admin:
+    build:
+      context: ./admin
+      args:
+        VITE_API_URL: http://localhost:${API_PORT:-3000}
+    ports:
+      - "${ADMIN_PORT:-8090}:80"
+    depends_on:
+      - api
+    restart: unless-stopped
+
   docs:
     build:
       context: ./docs

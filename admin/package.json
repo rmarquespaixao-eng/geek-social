@@ -1,0 +1,34 @@
+{
+  "name": "geek-social-admin",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc --noEmit && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "vue": "^3.5.13",
+    "vue-router": "^4.5.0",
+    "pinia": "^3.0.4",
+    "axios": "^1.7.9",
+    "@vueuse/core": "^12.7.0",
+    "lucide-vue-next": "^0.468.0",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "tailwind-merge": "^2.5.4",
+    "date-fns": "^4.1.0",
+    "vue-sonner": "^1.3.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.2.1",
+    "@vue/tsconfig": "^0.7.0",
+    "@types/node": "^22.10.0",
+    "typescript": "~5.7.2",
+    "vite": "^6.0.5",
+    "@tailwindcss/vite": "^4.0.0",
+    "tailwindcss": "^4.0.0",
+    "vue-tsc": "^2.2.0"
+  }
+}

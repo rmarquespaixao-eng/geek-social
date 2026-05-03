@@ -130,7 +130,7 @@ const inputClass = 'w-full bg-[#0f0f1a] border border-[#252640] hover:border-[#f
       <template v-else>
 
       <!-- Picker de coleção -->
-      <div v-if="collections.length > 1">
+      <div>
         <label class="block text-[11px] font-medium text-[#94a3b8] mb-1.5 uppercase tracking-wider">Coleção</label>
         <div class="relative">
           <select

@@ -3,6 +3,7 @@ import type { AdminAuditLogService } from '../audit-log.service.js'
 import type { FastifyRequest } from 'fastify'
 import type { AccessTokenClaims } from '../../auth/auth.service.js'
 import type { CreateFlagBody, UpdateFlagBody } from './feature-flags.schema.js'
+import { invalidateFlagCache } from '../../../shared/middleware/require-flag.js'
 
 export class FeatureFlagsError extends Error {
   constructor(
@@ -52,6 +53,7 @@ export class FeatureFlagsService {
     if (!existing) throw new FeatureFlagsError('NOT_FOUND', 'Feature flag não encontrada', 404)
 
     const updated = await this.repo.update(id, body, claims.userId)
+    invalidateFlagCache(existing.key)
 
     const wasToggled = body.enabled !== undefined && body.enabled !== existing.enabled
     await this.auditLog.recordFromRequest(request, wasToggled ? 'feature_flag_toggle' : 'feature_flag_update', {

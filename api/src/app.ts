@@ -120,6 +120,7 @@ import { featureFlagsPublicRoutes } from './modules/admin/feature-flags/feature-
 import { seedFeatureFlags } from './shared/infra/database/seeds/feature-flags.seed.js'
 import { UserAccessLogRepository } from './modules/admin/logs/user-access-log.repository.js'
 import { activityRoutes } from './modules/activity/activity.routes.js'
+import { requireFlag } from './shared/middleware/require-flag.js'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 
@@ -343,17 +344,26 @@ export async function buildApp() {
   await app.register(authRoutes, { prefix: '/auth', authService, db })
   await app.register(usersRoutes, { prefix: '/users', usersService })
   await app.register(fieldDefinitionsRoutes, { prefix: '/field-definitions', fieldDefinitionsService })
-  await app.register(collectionsRoutes, { prefix: '/collections', collectionsService })
-  await app.register(collectionsPublicRoutes, { prefix: '/users', collectionsService })
-  await app.register(itemsRoutes, { prefix: '/collections', itemsService })
-  await app.register(itemsPublicRoutes, { prefix: '/users', itemsService })
-  await app.register(friendsRoutes, { prefix: '/friends', friendsService })
-  await app.register(blocksRoutes, { prefix: '/blocks', friendsService })
+  await app.register(async (s) => {
+    s.addHook('preHandler', requireFlag(db, 'module_collections'))
+    await s.register(collectionsRoutes, { prefix: '/collections', collectionsService })
+    await s.register(collectionsPublicRoutes, { prefix: '/users', collectionsService })
+    await s.register(itemsRoutes, { prefix: '/collections', itemsService })
+    await s.register(itemsPublicRoutes, { prefix: '/users', itemsService })
+  })
+  await app.register(async (s) => {
+    s.addHook('preHandler', requireFlag(db, 'module_friends'))
+    await s.register(friendsRoutes, { prefix: '/friends', friendsService })
+    await s.register(blocksRoutes, { prefix: '/blocks', friendsService })
+  })
   await app.register(postsRoutes, { prefix: '/posts', postsService })
   await app.register(commentsRoutes, { prefix: '/posts', commentsService })
   await app.register(reactionsRoutes, { prefix: '/posts', reactionsService })
-  await app.register(feedRoutes, { prefix: '/feed', feedService })
-  await app.register(profilePostsRoutes, { prefix: '/users', feedService })
+  await app.register(async (s) => {
+    s.addHook('preHandler', requireFlag(db, 'module_feed'))
+    await s.register(feedRoutes, { prefix: '/feed', feedService })
+    await s.register(profilePostsRoutes, { prefix: '/users', feedService })
+  })
 
   // Chat
   PushService.configure(env.VAPID_PUBLIC_KEY, env.VAPID_PRIVATE_KEY, env.VAPID_CONTACT)
@@ -391,20 +401,22 @@ export async function buildApp() {
     (token: string) => app.jwt.verify(token) as { userId: string; tokenVersion?: number },
   )
 
-  await app.register(chatRoutes, {
-    prefix: '/chat',
-    conversationsService,
-    messagesService,
-    dmRequestsService,
-    pushService,
-    chatGateway,
-    usersRepository,
-    friendsService,
+  await app.register(async (s) => {
+    s.addHook('preHandler', requireFlag(db, 'module_chat'))
+    await s.register(chatRoutes, {
+      prefix: '/chat',
+      conversationsService,
+      messagesService,
+      dmRequestsService,
+      pushService,
+      chatGateway,
+      usersRepository,
+      friendsService,
+    })
+    const cryptoRepository = new CryptoRepository(db)
+    const cryptoService = new CryptoService(cryptoRepository, conversationsRepository)
+    await s.register(cryptoRoutes, { prefix: '/crypto', cryptoService })
   })
-
-  const cryptoRepository = new CryptoRepository(db)
-  const cryptoService = new CryptoService(cryptoRepository, conversationsRepository)
-  await app.register(cryptoRoutes, { prefix: '/crypto', cryptoService })
 
   const reportsRepository = new ReportsRepository(db)
   const reportsService = new ReportsService(reportsRepository)
@@ -554,13 +566,22 @@ export async function buildApp() {
     chatGateway.unlinkFriendship(userId, friendId).catch(() => {})
   }
 
-  await app.register(notificationsRoutes, { prefix: '/notifications', notificationsService })
+  await app.register(async (s) => {
+    s.addHook('preHandler', requireFlag(db, 'module_notifications'))
+    await s.register(notificationsRoutes, { prefix: '/notifications', notificationsService })
+  })
   await app.register(reportsRoutes, { prefix: '/reports', reportsService })
-  await app.register(offersRoutes, { prefix: '/offers', offersService })
-  await app.register(listingsRoutes, { prefix: '/listings', listingsService })
-  await app.register(marketplaceRoutes, { prefix: '/marketplace', listingsService })
-  await app.register(listingRatingsRoutes, { prefix: '/ratings', listingRatingsService })
-  await app.register(eventsRoutes, { prefix: '/events', eventsService, participantsService, invitesService })
+  await app.register(async (s) => {
+    s.addHook('preHandler', requireFlag(db, 'module_marketplace'))
+    await s.register(offersRoutes, { prefix: '/offers', offersService })
+    await s.register(listingsRoutes, { prefix: '/listings', listingsService })
+    await s.register(marketplaceRoutes, { prefix: '/marketplace', listingsService })
+    await s.register(listingRatingsRoutes, { prefix: '/ratings', listingRatingsService })
+  })
+  await app.register(async (s) => {
+    s.addHook('preHandler', requireFlag(db, 'module_roles'))
+    await s.register(eventsRoutes, { prefix: '/events', eventsService, participantsService, invitesService })
+  })
 
   // Communities
   const communitiesRepository = new CommunitiesRepository(db)
@@ -599,13 +620,16 @@ export async function buildApp() {
     communitiesService,
   )
 
-  await app.register(communitiesRoutes, {
-    prefix: '/communities',
-    communitiesService,
-    membersService,
-    joinRequestsService,
-    topicsService,
-    db,
+  await app.register(async (s) => {
+    s.addHook('preHandler', requireFlag(db, 'module_communities'))
+    await s.register(communitiesRoutes, {
+      prefix: '/communities',
+      communitiesService,
+      membersService,
+      joinRequestsService,
+      topicsService,
+      db,
+    })
   })
 
   // Steam integration (opcional — exige fila; STEAM_WEB_API_KEY pode estar vazia (link funciona, import falha com STEAM_AUTH_FAILED))

@@ -9,6 +9,7 @@ export const statsResponseSchema = z.object({
   upcomingEvents: z.number().int(),
   messages24h: z.number().int(),
   messages7d: z.number().int(),
+  reportsByReason: z.record(z.string(), z.number().int()),
   staleAfterSeconds: z.number().int(),
 })
 

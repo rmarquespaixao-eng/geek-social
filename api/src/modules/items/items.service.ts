@@ -1,6 +1,6 @@
 import sharp from 'sharp'
 import type {
-  IItemRepository, Item, FieldFilter, ItemSort, ItemsPage,
+  IItemRepository, Item, FieldFilter, ItemSort, ItemsPage, AllItemsPage,
 } from '../../shared/contracts/item.repository.contract.js'
 import type { ICollectionRepository, CollectionSchemaEntry } from '../../shared/contracts/collection.repository.contract.js'
 import type { IStorageService } from '../../shared/contracts/storage.service.contract.js'
@@ -133,6 +133,18 @@ export class ItemsService {
   async list(userId: string, collectionId: string, query?: string): Promise<Item[]> {
     await this.assertCollectionReadable(userId, collectionId)
     return this.itemRepo.findByCollectionId(collectionId, query)
+  }
+
+  async listAllUserItems(userId: string, query: Omit<ListItemsQuery, 'rawFieldParams'>): Promise<AllItemsPage> {
+    return this.itemRepo.searchAllByUser({
+      userId,
+      q: query.q,
+      cursor: query.cursor,
+      limit: query.limit,
+      sort: query.sort,
+      ratingMin: query.ratingMin,
+      hasCover: query.hasCover,
+    })
   }
 
   async listPage(userId: string, collectionId: string, query: ListItemsQuery): Promise<ItemsPage> {

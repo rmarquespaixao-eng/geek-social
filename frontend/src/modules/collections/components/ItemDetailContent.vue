@@ -5,7 +5,11 @@ import { formatFieldValue } from '../utils/formatField'
 import { formatLongDate } from '@/shared/utils/timeAgo'
 import AppImageLightbox from '@/shared/ui/AppImageLightbox.vue'
 import OfferDialog from '@/modules/offers/components/OfferDialog.vue'
+import { useFeatureFlagsStore } from '@/shared/featureFlags/featureFlagsStore'
 import type { Item, CollectionSchemaEntry } from '../types'
+
+const featureFlags = useFeatureFlagsStore()
+const hasMarketplace = computed(() => featureFlags.isEnabled('module_marketplace'))
 
 const props = withDefaults(defineProps<{
   item: Item
@@ -122,7 +126,7 @@ function formatPrice(p: string | number | null | undefined): string {
           </span>
         </div>
         <button
-          v-if="isAvailable"
+          v-if="isAvailable && hasMarketplace"
           type="button"
           class="inline-flex items-center gap-1.5 rounded-full bg-(--color-accent-amber) hover:brightness-110 text-black px-3 py-1.5 text-[12px] font-semibold transition-all"
           @click="offerOpen = true"

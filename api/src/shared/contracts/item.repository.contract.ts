@@ -67,11 +67,33 @@ export type ItemsPage = {
   nextCursor: string | null
 }
 
+export type ItemWithCollection = Item & {
+  collectionName: string
+  collectionTypeKey: string
+  collectionTypeIcon: string | null
+}
+
+export type SearchAllUserItemsParams = {
+  userId: string
+  q?: string
+  sort: ItemSort
+  limit: number
+  cursor?: string
+  ratingMin?: number
+  hasCover?: boolean
+}
+
+export type AllItemsPage = {
+  items: ItemWithCollection[]
+  nextCursor: string | null
+}
+
 export interface IItemRepository {
   create(data: CreateItemData): Promise<Item>
   findById(id: string): Promise<Item | null>
   findByCollectionId(collectionId: string, query?: string): Promise<Item[]>
   searchByCollection(params: SearchItemsParams): Promise<ItemsPage>
+  searchAllByUser(params: SearchAllUserItemsParams): Promise<AllItemsPage>
   findByCollectionAndAppId(collectionId: string, steamAppId: number): Promise<Item | null>
   findExistingSteamItemsForUser(userId: string): Promise<ExistingSteamItem[]>
   update(id: string, data: UpdateItemData): Promise<Item>

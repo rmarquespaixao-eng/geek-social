@@ -181,10 +181,12 @@ export class SteamController {
 }
 
 import { authenticate } from '../../../shared/middleware/authenticate.js'
+import { createUserRateLimiter } from '../../../shared/middleware/rate-limit.js'
 import { z } from 'zod'
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod'
 
 const noContent = z.void()
+const importRateLimiter = createUserRateLimiter(5, 60 * 60 * 1000)
 const setApiKeyBody = z.object({ apiKey: z.string().length(32, 'Chave inválida (Steam Web API key tem 32 chars)') })
 const importBatchParam = z.object({ batchId: z.string().uuid() })
 
@@ -265,7 +267,7 @@ export const steamRoutes: FastifyPluginAsyncZod<{ controller: SteamController }>
       security: [{ accessToken: [] }],
       body: startImportSchema,
     },
-    preHandler: [authenticate],
+    preHandler: [authenticate, importRateLimiter],
   }, opts.controller.startImport.bind(opts.controller))
 
   app.get('/import/:batchId/status', {

@@ -386,6 +386,27 @@
       "when": 1777455700000,
       "tag": "0054_user_status_and_access_log",
       "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "7",
+      "when": 1777836539265,
+      "tag": "0055_user_feature_flags",
+      "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1777900000000,
+      "tag": "0056_drop_reports_unique_constraint",
+      "breakpoints": true
+    },
+    {
+      "idx": 57,
+      "version": "7",
+      "when": 1777900100000,
+      "tag": "0057_admin_content_delete_action",
+      "breakpoints": true
     }
   ]
 }

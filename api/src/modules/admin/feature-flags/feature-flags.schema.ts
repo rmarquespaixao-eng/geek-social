@@ -18,5 +18,10 @@ export const updateFlagBodySchema = z.object({
   description: z.string().max(500).optional(),
 })
 
+export const setUserOverrideBodySchema = z.object({
+  enabled: z.boolean(),
+})
+
 export type CreateFlagBody = z.infer<typeof createFlagBodySchema>
 export type UpdateFlagBody = z.infer<typeof updateFlagBodySchema>
+export type SetUserOverrideBody = z.infer<typeof setUserOverrideBodySchema>

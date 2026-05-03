@@ -81,6 +81,12 @@ const router = createRouter({
       meta: { requiresAuth: true },
     },
     {
+      path: '/collections/dashboard',
+      name: 'CollectionsDashboard',
+      component: () => import('@/modules/collections/views/CollectionsDashboardView.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
       path: '/collections/:id',
       name: 'CollectionDetail',
       component: () => import('@/modules/collections/views/CollectionDetailView.vue'),
@@ -242,6 +248,15 @@ router.beforeEach((to) => {
       }
       const firstEnabled = Object.entries(MODULE_FLAG_MAP).find(([p, k]) => k !== flagKey && flags.isEnabled(k) && !p.includes('/', 1))
       return firstEnabled ? { path: firstEnabled[0] } : false
+    }
+
+    // Bloqueia perfil de usuário quando nenhum módulo social está ativo
+    if (basePath === '/profile') {
+      const hasSocial = flags.isEnabled('module_feed') || flags.isEnabled('module_friends') || flags.isEnabled('module_communities')
+      if (!hasSocial) {
+        const firstEnabled = Object.entries(MODULE_FLAG_MAP).find(([p, k]) => flags.isEnabled(k) && !p.includes('/', 1))
+        return firstEnabled ? { path: firstEnabled[0] } : false
+      }
     }
   }
 })

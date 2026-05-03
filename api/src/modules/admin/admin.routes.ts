@@ -29,8 +29,14 @@ import { moderationRoutes } from './moderation/moderation.routes.js'
 import { CollectionTypesRepository } from './collection-types/collection-types.repository.js'
 import { CollectionTypesService } from './collection-types/collection-types.service.js'
 import { collectionTypesRoutes } from './collection-types/collection-types.routes.js'
+import { AdminContentRepository } from './content/admin-content.repository.js'
+import { AdminContentService } from './content/admin-content.service.js'
+import { adminContentRoutes } from './content/admin-content.routes.js'
 
-export async function adminRoutes(app: FastifyInstance, opts: { db: DatabaseClient }) {
+export async function adminRoutes(app: FastifyInstance, opts: {
+  db: DatabaseClient
+  onUserDeactivated?: (userId: string) => void
+}) {
   const { db } = opts
 
   // Shared audit log
@@ -49,6 +55,7 @@ export async function adminRoutes(app: FastifyInstance, opts: { db: DatabaseClie
   // Users
   const adminUsersRepo = new AdminUsersRepository(db)
   const adminUsersService = new AdminUsersService(adminUsersRepo, auditLogService)
+  if (opts.onUserDeactivated) adminUsersService.afterUserDeactivated = opts.onUserDeactivated
   await app.register(adminUsersRoutes, { prefix: '/users', adminUsersService })
 
   // Reports
@@ -87,4 +94,9 @@ export async function adminRoutes(app: FastifyInstance, opts: { db: DatabaseClie
   const collectionTypesRepo = new CollectionTypesRepository(db)
   const collectionTypesService = new CollectionTypesService(collectionTypesRepo, auditLogService)
   await app.register(collectionTypesRoutes, { prefix: '/collection-types', collectionTypesService })
+
+  // Content moderation (delete posts/comments)
+  const adminContentRepo = new AdminContentRepository(db)
+  const adminContentService = new AdminContentService(adminContentRepo, auditLogService)
+  await app.register(adminContentRoutes, { prefix: '/content', adminContentService })
 }

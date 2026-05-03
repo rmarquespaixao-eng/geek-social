@@ -112,6 +112,23 @@ export class ItemsController {
     } catch (error) { return this.handleError(error, reply) }
   }
 
+  async listAll(request: FastifyRequest, reply: FastifyReply) {
+    const { userId } = request.user as AccessTokenClaims
+    const parsed = listItemsQuerySchema.safeParse(request.query ?? {})
+    if (!parsed.success) {
+      return reply.status(400).send({ error: 'INVALID_QUERY', details: parsed.error.flatten() })
+    }
+    const { q, cursor, limit, sort, rating_min, has_cover } = parsed.data
+    try {
+      const page = await this.service.listAllUserItems(userId, {
+        q, cursor, limit, sort,
+        ratingMin: rating_min,
+        hasCover: has_cover === undefined ? undefined : has_cover === 'true',
+      })
+      return reply.send(page)
+    } catch (error) { return this.handleError(error, reply) }
+  }
+
   async listPublic(
     request: FastifyRequest<{ Params: { userId: string; collectionId: string } }>,
     reply: FastifyReply,

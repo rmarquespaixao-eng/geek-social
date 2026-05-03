@@ -343,8 +343,20 @@ async function deleteTopic(topicId: string) {
     <div v-if="loading && !community" class="text-slate-400 text-sm text-center py-12">
       Carregando…
     </div>
-    <div v-else-if="error" class="text-red-400 text-sm text-center py-12">
-      Erro ao carregar comunidade.
+    <div v-else-if="error" class="text-center py-16 px-4">
+      <template v-if="(error as any)?.response?.data?.error === 'COMMUNITY_DELETED'">
+        <div class="text-4xl mb-4">🚫</div>
+        <h2 class="text-lg font-semibold text-slate-300 mb-2">Comunidade suspensa</h2>
+        <p class="text-sm text-slate-500">Esta comunidade foi suspensa pelos administradores da plataforma.</p>
+      </template>
+      <template v-else-if="(error as any)?.response?.data?.error === 'COMMUNITY_NOT_FOUND'">
+        <div class="text-4xl mb-4">🔍</div>
+        <h2 class="text-lg font-semibold text-slate-300 mb-2">Comunidade não encontrada</h2>
+        <p class="text-sm text-slate-500">Esta comunidade não existe ou foi removida.</p>
+      </template>
+      <template v-else>
+        <p class="text-red-400 text-sm">Erro ao carregar comunidade.</p>
+      </template>
     </div>
 
     <template v-else-if="community">

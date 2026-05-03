@@ -1,9 +1,9 @@
-import { eq, and, count, desc } from 'drizzle-orm'
+import { eq, and, count, desc, sql, or } from 'drizzle-orm'
 import type { DatabaseClient } from '../../../shared/infra/database/postgres.client.js'
-import { reports } from '../../../shared/infra/database/schema.js'
+import { reports, posts, postComments, messages } from '../../../shared/infra/database/schema.js'
 import type { ListReportsQuery } from './admin-reports.schema.js'
 
-export type AdminReportRow = typeof reports.$inferSelect
+export type AdminReportRow = typeof reports.$inferSelect & { reportedUserId: string | null }
 
 export class AdminReportsRepository {
   constructor(private readonly db: DatabaseClient) {}
@@ -13,7 +13,6 @@ export class AdminReportsRepository {
     const conditions = []
 
     if (filters.status) {
-      // Mapeia status 'reviewing'/'resolved' para os valores do DB
       const dbStatus = filters.status === 'reviewing' ? 'reviewed'
         : filters.status === 'resolved' ? 'reviewed'
         : filters.status
@@ -24,21 +23,54 @@ export class AdminReportsRepository {
 
     const where = conditions.length > 0 ? and(...conditions) : undefined
 
+    // reportedUserId: resolves the author of the reported content across all target types
+    const reportedUserIdExpr = sql<string | null>`
+      CASE
+        WHEN ${reports.targetType} = 'user' THEN ${reports.targetId}
+        WHEN ${reports.targetType} IN ('post', 'community_topic') THEN ${posts.userId}
+        WHEN ${reports.targetType} = 'community_comment' THEN ${postComments.userId}
+        WHEN ${reports.targetType} = 'message' THEN ${messages.userId}
+        ELSE NULL
+      END
+    `.as('reported_user_id')
+
     const [totalRes, rows] = await Promise.all([
       this.db.select({ count: count() }).from(reports).where(where),
-      this.db.select().from(reports).where(where)
+      this.db
+        .select({
+          id: reports.id,
+          reporterId: reports.reporterId,
+          targetType: reports.targetType,
+          targetId: reports.targetId,
+          reason: reports.reason,
+          description: reports.description,
+          status: reports.status,
+          createdAt: reports.createdAt,
+          updatedAt: reports.updatedAt,
+          reportedUserId: reportedUserIdExpr,
+        })
+        .from(reports)
+        .leftJoin(posts, and(
+          or(eq(reports.targetType, 'post'), eq(reports.targetType, 'community_topic')),
+          eq(posts.id, reports.targetId),
+        ))
+        .leftJoin(postComments, and(
+          eq(reports.targetType, 'community_comment'),
+          eq(postComments.id, reports.targetId),
+        ))
+        .leftJoin(messages, and(
+          eq(reports.targetType, 'message'),
+          eq(messages.id, reports.targetId),
+        ))
+        .where(where)
         .orderBy(desc(reports.createdAt))
         .limit(pageSize)
         .offset((page - 1) * pageSize),
     ])
 
-    return { rows, total: Number(totalRes[0]?.count ?? 0) }
+    return { rows: rows as AdminReportRow[], total: Number(totalRes[0]?.count ?? 0) }
   }
 
-  /**
-   * Atualiza status com guarda de concorrência otimista.
-   * Retorna false se o status atual diverge de `expectedCurrentStatus`.
-   */
   async updateStatus(
     id: string,
     newStatus: 'reviewed' | 'dismissed',
@@ -53,6 +85,6 @@ export class AdminReportsRepository {
       .set({ status: newStatus, updatedAt: new Date() })
       .where(and(...conditions))
       .returning()
-    return row ?? null
+    return row ? { ...row, reportedUserId: null } : null
   }
 }

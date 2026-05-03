@@ -23,6 +23,8 @@ function maskEmail(email: string): string {
 }
 
 export class AdminUsersService {
+  afterUserDeactivated: ((userId: string) => void) | null = null
+
   constructor(
     private readonly repo: AdminUsersRepository,
     private readonly auditLog: AdminAuditLogService,
@@ -63,6 +65,7 @@ export class AdminUsersService {
     if (body.status === 'banned') {
       await this.repo.setStatus(targetId, 'banned')
       await this.repo.bumpTokenVersion(targetId)
+      this.afterUserDeactivated?.(targetId)
       await this.auditLog.recordFromRequest(request, 'user_ban', {
         targetType: 'user',
         targetId,
@@ -78,6 +81,7 @@ export class AdminUsersService {
     } else if (body.status === 'suspended') {
       await this.repo.setStatus(targetId, 'suspended')
       await this.repo.bumpTokenVersion(targetId)
+      this.afterUserDeactivated?.(targetId)
       await this.auditLog.recordFromRequest(request, 'user_suspend', {
         targetType: 'user',
         targetId,

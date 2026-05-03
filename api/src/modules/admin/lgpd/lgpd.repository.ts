@@ -36,6 +36,20 @@ export class LgpdRepository {
     }
   }
 
+  async create(userId: string, type: typeof lgpdRequests.$inferInsert['type']): Promise<LgpdRequestRow> {
+    const [row] = await this.db.insert(lgpdRequests).values({ userId, type }).returning()
+    return row
+  }
+
+  async findPendingByUserId(userId: string): Promise<LgpdRequestRow | null> {
+    const [row] = await this.db
+      .select()
+      .from(lgpdRequests)
+      .where(and(eq(lgpdRequests.userId, userId), inArray(lgpdRequests.status, ['pending', 'processing'])))
+      .limit(1)
+    return row ?? null
+  }
+
   async findById(id: string): Promise<LgpdRequestRow | null> {
     const [row] = await this.db.select().from(lgpdRequests).where(eq(lgpdRequests.id, id)).limit(1)
     return row ?? null

@@ -236,15 +236,43 @@
       </div>
 
       <!-- Aba: Conta -->
-      <div v-if="activeTab === 'account'" class="bg-(--color-bg-card) rounded-2xl p-6 border border-(--color-bg-elevated)">
-        <h2 class="text-base font-semibold text-(--color-text-primary) mb-2">Excluir conta</h2>
-        <p class="text-sm text-(--color-text-muted) mb-4">
-          Esta ação remove permanentemente sua conta e todos os dados associados — perfil, coleções, posts, ofertas, mensagens e arquivos. Não há como desfazer.
-        </p>
-        <AppButton variant="danger" @click="showDeleteAccountModal = true">
-          <Trash2 :size="14" />
-          Excluir minha conta
-        </AppButton>
+      <div v-if="activeTab === 'account'" class="flex flex-col gap-4">
+        <!-- LGPD -->
+        <div class="bg-(--color-bg-card) rounded-2xl p-6 border border-(--color-bg-elevated)">
+          <h2 class="text-base font-semibold text-(--color-text-primary) mb-1">Seus dados (LGPD)</h2>
+          <p class="text-sm text-(--color-text-muted) mb-4">
+            Pela Lei Geral de Proteção de Dados (Lei 13.709/2018) você pode solicitar acesso, portabilidade ou exclusão dos seus dados pessoais. Respondemos em até 15 dias úteis.
+          </p>
+          <p v-if="lgpdSuccess" class="text-sm text-(--color-status-online) bg-(--color-status-online)/10 rounded-lg px-3 py-2 mb-3">
+            Solicitação enviada. Entraremos em contato em até 15 dias úteis.
+          </p>
+          <p v-if="lgpdError" class="text-sm text-(--color-danger) bg-(--color-danger)/10 rounded-lg px-3 py-2 mb-3">
+            {{ lgpdError }}
+          </p>
+          <div class="flex flex-wrap gap-2">
+            <AppButton variant="secondary" :loading="lgpdLoading === 'export'" :disabled="!!lgpdLoading" @click="submitLgpdRequest('export')">
+              Exportar meus dados
+            </AppButton>
+            <AppButton variant="secondary" :loading="lgpdLoading === 'portability'" :disabled="!!lgpdLoading" @click="submitLgpdRequest('portability')">
+              Portabilidade
+            </AppButton>
+            <AppButton variant="danger" :loading="lgpdLoading === 'delete'" :disabled="!!lgpdLoading" @click="submitLgpdRequest('delete')">
+              Solicitar exclusão de dados
+            </AppButton>
+          </div>
+        </div>
+
+        <!-- Excluir conta -->
+        <div class="bg-(--color-bg-card) rounded-2xl p-6 border border-(--color-bg-elevated)">
+          <h2 class="text-base font-semibold text-(--color-text-primary) mb-2">Excluir conta</h2>
+          <p class="text-sm text-(--color-text-muted) mb-4">
+            Esta ação remove permanentemente sua conta e todos os dados associados — perfil, coleções, posts, ofertas, mensagens e arquivos. Não há como desfazer.
+          </p>
+          <AppButton variant="danger" @click="showDeleteAccountModal = true">
+            <Trash2 :size="14" />
+            Excluir minha conta
+          </AppButton>
+        </div>
       </div>
       </div>
     </div>
@@ -266,13 +294,14 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   Settings as SettingsIcon, Lock, Eye as EyeIcon, Plug, LogOut, Trash2, ShieldCheck,
 } from 'lucide-vue-next'
 import { useAuthStore } from '@/shared/auth/authStore'
 import { useAuth } from '@/shared/auth/useAuth'
+import { useFeatureFlagsStore } from '@/shared/featureFlags/featureFlagsStore'
 import { useChat } from '@/modules/chat/composables/useChat'
 import {
   isReady as cryptoIsReady,
@@ -286,18 +315,37 @@ import AppButton from '@/shared/ui/AppButton.vue'
 import AppConfirmDialog from '@/shared/ui/AppConfirmDialog.vue'
 import AppPageHeader from '@/shared/ui/AppPageHeader.vue'
 import * as usersService from '../services/usersService'
+import { api } from '@/shared/http/api'
 
 type TabId = 'security' | 'privacy' | 'encryption' | 'integrations' | 'session' | 'account'
 
-const tabs: { id: TabId; label: string; icon: any }[] = [
-  { id: 'security', label: 'Segurança', icon: Lock },
-  { id: 'privacy', label: 'Privacidade', icon: EyeIcon },
-  { id: 'encryption', label: 'Criptografia', icon: ShieldCheck },
-  { id: 'integrations', label: 'Integrações', icon: Plug },
-  { id: 'session', label: 'Sessão', icon: LogOut },
-  { id: 'account', label: 'Conta', icon: Trash2 },
+const featureFlags = useFeatureFlagsStore()
+const hasSocialFeatures = computed(() =>
+  featureFlags.isEnabled('module_feed') ||
+  featureFlags.isEnabled('module_friends') ||
+  featureFlags.isEnabled('module_communities'),
+)
+
+const ALL_TABS: { id: TabId; label: string; icon: any; requiresSocial?: boolean }[] = [
+  { id: 'security',     label: 'Segurança',    icon: Lock },
+  { id: 'privacy',      label: 'Privacidade',  icon: EyeIcon,    requiresSocial: true },
+  { id: 'encryption',   label: 'Criptografia', icon: ShieldCheck, requiresSocial: true },
+  { id: 'integrations', label: 'Integrações',  icon: Plug },
+  { id: 'session',      label: 'Sessão',       icon: LogOut },
+  { id: 'account',      label: 'Conta',        icon: Trash2 },
 ]
+
+const tabs = computed(() =>
+  ALL_TABS.filter(t => !t.requiresSocial || hasSocialFeatures.value),
+)
+
 const activeTab = ref<TabId>('security')
+
+watch(hasSocialFeatures, (social) => {
+  if (!social && (activeTab.value === 'privacy' || activeTab.value === 'encryption')) {
+    activeTab.value = 'security'
+  }
+})
 
 const router = useRouter()
 
@@ -442,6 +490,30 @@ async function handleRepair(peerUserId: string) {
     repairResults[peerUserId] = ok ? 'ok' : 'fail'
   } finally {
     repairingPeer.value = null
+  }
+}
+
+const lgpdLoading = ref<'export' | 'portability' | 'delete' | null>(null)
+const lgpdSuccess = ref(false)
+const lgpdError = ref('')
+
+async function submitLgpdRequest(type: 'export' | 'portability' | 'delete') {
+  lgpdLoading.value = type
+  lgpdSuccess.value = false
+  lgpdError.value = ''
+  try {
+    await api.post('/lgpd-requests', { type })
+    lgpdSuccess.value = true
+    setTimeout(() => { lgpdSuccess.value = false }, 5000)
+  } catch (err: any) {
+    const code = err.response?.data?.error
+    if (code === 'LGPD_REQUEST_PENDING') {
+      lgpdError.value = 'Você já tem uma solicitação em andamento. Aguarde a conclusão antes de abrir uma nova.'
+    } else {
+      lgpdError.value = err.response?.data?.message ?? 'Erro ao enviar solicitação.'
+    }
+  } finally {
+    lgpdLoading.value = null
   }
 }
 

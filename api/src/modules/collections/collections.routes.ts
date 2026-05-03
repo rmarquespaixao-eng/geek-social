@@ -44,6 +44,17 @@ export const collectionsRoutes: FastifyPluginAsyncZod<{ collectionsService: Coll
     handler: controller.create.bind(controller),
   })
 
+  app.get('/stats', {
+    schema: {
+      operationId: 'collections_stats',
+      tags: ['Collections'],
+      summary: 'Dashboard de estatísticas das coleções',
+      security: [{ accessToken: [] }],
+    },
+    preHandler: [authenticate],
+    handler: controller.getStats.bind(controller),
+  })
+
   app.get('/:id', {
     schema: {
       operationId: 'collections_get',

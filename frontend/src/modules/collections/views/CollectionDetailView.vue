@@ -17,12 +17,20 @@ import AppConfirmDialog from '@/shared/ui/AppConfirmDialog.vue'
 import { Camera, Edit3, MoreHorizontal, Settings2, Trash2, Grid3x3, List, Plus, Gamepad2, Search, ListFilter, X } from 'lucide-vue-next'
 import type { ItemSort, FieldFilterValue } from '../types'
 import { useAuthStore } from '@/shared/auth/authStore'
+import { useFeatureFlagsStore } from '@/shared/featureFlags/featureFlagsStore'
 
 const route = useRoute()
 const router = useRouter()
 const collectionsStore = useCollectionsStore()
 const itemsStore = useItemsStore()
 const auth = useAuthStore()
+const featureFlags = useFeatureFlagsStore()
+const hasSocialFeatures = computed(() =>
+  featureFlags.isEnabled('module_feed') ||
+  featureFlags.isEnabled('module_friends') ||
+  featureFlags.isEnabled('module_communities'),
+)
+const hasMarketplace = computed(() => featureFlags.isEnabled('module_marketplace'))
 
 const collectionId = computed(() => route.params.id as string)
 
@@ -286,6 +294,7 @@ function onListingSaved() {
                 <span class="text-white/75">{{ collection.itemCount === 1 ? 'item' : 'itens' }}</span>
               </span>
               <span
+                v-if="hasSocialFeatures"
                 class="inline-flex items-center px-2 py-0.5 rounded-full backdrop-blur-sm font-semibold border"
                 :class="collection.visibility === 'public'
                   ? 'bg-[#22c55e]/25 text-[#86efac] border-[#22c55e]/40'
@@ -517,7 +526,7 @@ function onListingSaved() {
             :field-schema="collection.fieldSchema"
             :collection-type="collection.type"
             :listing="listingByItemId[item.id] ?? null"
-            :can-list="isOwner"
+            :can-list="isOwner && hasMarketplace"
             @click="goToItem"
             @list-action="onListAction"
           />
@@ -532,7 +541,7 @@ function onListingSaved() {
             :field-schema="collection.fieldSchema"
             :collection-type="collection.type"
             :listing="listingByItemId[item.id] ?? null"
-            :can-list="isOwner"
+            :can-list="isOwner && hasMarketplace"
             @click="goToItem"
             @list-action="onListAction"
           />

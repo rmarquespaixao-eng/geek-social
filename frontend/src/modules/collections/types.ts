@@ -1,4 +1,13 @@
-export type CollectionType = 'games' | 'books' | 'cardgames' | 'boardgames' | 'custom'
+export type CollectionType = string
+
+export interface CollectionTypeDefinition {
+  id: string
+  key: string
+  name: string | null
+  description: string | null
+  icon: string | null
+  isSystem: boolean
+}
 
 export type CollectionVisibility = 'public' | 'private' | 'friends_only'
 
@@ -120,4 +129,22 @@ export interface ItemListQuery {
 export interface ItemsPage {
   items: Item[]
   nextCursor: string | null
+}
+
+export interface ItemWithCollection extends Item {
+  collectionName: string
+  collectionTypeKey: string
+  collectionTypeIcon: string | null
+}
+
+export interface AllItemsPage {
+  items: ItemWithCollection[]
+  nextCursor: string | null
+}
+
+export interface CollectionStats {
+  totalCollections: number
+  itemsByType: { typeKey: string; typeName: string; typeIcon: string; count: number }[]
+  gamesByStatus: { status: string | null; count: number }[]
+  itemsByRating: { rating: number | null; count: number }[]
 }

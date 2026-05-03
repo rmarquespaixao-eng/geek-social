@@ -266,13 +266,14 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   Settings as SettingsIcon, Lock, Eye as EyeIcon, Plug, LogOut, Trash2, ShieldCheck,
 } from 'lucide-vue-next'
 import { useAuthStore } from '@/shared/auth/authStore'
 import { useAuth } from '@/shared/auth/useAuth'
+import { useFeatureFlagsStore } from '@/shared/featureFlags/featureFlagsStore'
 import { useChat } from '@/modules/chat/composables/useChat'
 import {
   isReady as cryptoIsReady,
@@ -289,15 +290,33 @@ import * as usersService from '../services/usersService'
 
 type TabId = 'security' | 'privacy' | 'encryption' | 'integrations' | 'session' | 'account'
 
-const tabs: { id: TabId; label: string; icon: any }[] = [
-  { id: 'security', label: 'Segurança', icon: Lock },
-  { id: 'privacy', label: 'Privacidade', icon: EyeIcon },
-  { id: 'encryption', label: 'Criptografia', icon: ShieldCheck },
-  { id: 'integrations', label: 'Integrações', icon: Plug },
-  { id: 'session', label: 'Sessão', icon: LogOut },
-  { id: 'account', label: 'Conta', icon: Trash2 },
+const featureFlags = useFeatureFlagsStore()
+const hasSocialFeatures = computed(() =>
+  featureFlags.isEnabled('module_feed') ||
+  featureFlags.isEnabled('module_friends') ||
+  featureFlags.isEnabled('module_communities'),
+)
+
+const ALL_TABS: { id: TabId; label: string; icon: any; requiresSocial?: boolean }[] = [
+  { id: 'security',     label: 'Segurança',    icon: Lock },
+  { id: 'privacy',      label: 'Privacidade',  icon: EyeIcon,    requiresSocial: true },
+  { id: 'encryption',   label: 'Criptografia', icon: ShieldCheck, requiresSocial: true },
+  { id: 'integrations', label: 'Integrações',  icon: Plug },
+  { id: 'session',      label: 'Sessão',       icon: LogOut },
+  { id: 'account',      label: 'Conta',        icon: Trash2 },
 ]
+
+const tabs = computed(() =>
+  ALL_TABS.filter(t => !t.requiresSocial || hasSocialFeatures.value),
+)
+
 const activeTab = ref<TabId>('security')
+
+watch(hasSocialFeatures, (social) => {
+  if (!social && (activeTab.value === 'privacy' || activeTab.value === 'encryption')) {
+    activeTab.value = 'security'
+  }
+})
 
 const router = useRouter()
 

@@ -112,6 +112,12 @@ import { SteamController, steamRoutes } from './modules/integrations/steam/steam
 import { ImportBatchFinalizationRepository } from './modules/integrations/steam/import-batch-finalization.repository.js'
 import { createSteamImportGameWorker } from './shared/infra/jobs/workers/steam-import-game.worker.js'
 import { adminRoutes } from './modules/admin/admin.routes.js'
+import { AdminAuditLogRepository } from './modules/admin/audit-log.repository.js'
+import { AdminAuditLogService } from './modules/admin/audit-log.service.js'
+import { FeatureFlagsRepository } from './modules/admin/feature-flags/feature-flags.repository.js'
+import { FeatureFlagsService } from './modules/admin/feature-flags/feature-flags.service.js'
+import { featureFlagsPublicRoutes } from './modules/admin/feature-flags/feature-flags.public.routes.js'
+import { seedFeatureFlags } from './shared/infra/database/seeds/feature-flags.seed.js'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 
@@ -265,6 +271,12 @@ export async function buildApp() {
   const fieldDefinitionRepository = new FieldDefinitionRepository(db)
   await seedFieldDefinitions(fieldDefinitionRepository, db)
   const fieldDefinitionsService = new FieldDefinitionsService(fieldDefinitionRepository)
+
+  const featureFlagsRepository = new FeatureFlagsRepository(db)
+  const featureFlagsAuditLogService = new AdminAuditLogService(new AdminAuditLogRepository(db))
+  const featureFlagsServicePublic = new FeatureFlagsService(featureFlagsRepository, featureFlagsAuditLogService)
+  await seedFeatureFlags(featureFlagsRepository)
+  await app.register(featureFlagsPublicRoutes, { prefix: '/feature-flags', featureFlagsService: featureFlagsServicePublic })
 
   const userRepository = new UserRepository(db)
   const usersRepository = new UsersRepository(db)

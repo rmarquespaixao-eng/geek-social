@@ -14,7 +14,7 @@
     <!-- Globais de chamada (sobre qualquer rota) -->
     <IncomingCallModal />
     <CallScreen />
-    <SteamImportBanner v-if="store.isAuthenticated" />
+    <SteamImportBanner v-if="store.isAuthenticated && featureFlagsStore.isEnabled('steam_integration')" />
     <FloatingChatBar v-if="store.isAuthenticated" />
 
   </div>
@@ -24,6 +24,7 @@
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { useAuthStore } from '@/shared/auth/authStore'
+import { useFeatureFlagsStore } from '@/shared/featureFlags/featureFlagsStore'
 import AppSidebar from '@/shared/ui/AppSidebar.vue'
 import IncomingCallModal from '@/modules/chat/components/IncomingCallModal.vue'
 import CallScreen from '@/modules/chat/components/CallScreen.vue'
@@ -36,6 +37,8 @@ useFloatingChats()
 
 const route = useRoute()
 const store = useAuthStore()
+const featureFlagsStore = useFeatureFlagsStore()
+featureFlagsStore.load()
 
 const publicRoutes = ['/login', '/register', '/forgot-password']
 const fullHeightRoutes = ['/chat']

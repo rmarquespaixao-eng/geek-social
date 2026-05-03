@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { Plus, X } from 'lucide-vue-next'
+import { Plus, X, Trash2 } from 'lucide-vue-next'
 import { api } from '@/lib/api'
 import { toast } from 'vue-sonner'
 import Button from '@/components/ui/Button.vue'
@@ -27,7 +27,7 @@ const flags = ref<FeatureFlag[]>([])
 const loading = ref(false)
 const showForm = ref(false)
 const saving = ref(false)
-const form = ref({ key: '', name: '', description: '' })
+const form = ref({ key: '', name: '', description: '', enabled: false })
 
 async function load() {
   loading.value = true
@@ -55,15 +55,26 @@ async function toggle(flag: FeatureFlag) {
 async function create() {
   saving.value = true
   try {
-    const { data } = await api.post('/admin/feature-flags', { ...form.value, enabled: false })
+    const { data } = await api.post('/admin/feature-flags', { ...form.value })
     flags.value.push(data)
-    form.value = { key: '', name: '', description: '' }
+    form.value = { key: '', name: '', description: '', enabled: false }
     showForm.value = false
     toast.success('Feature flag criada')
   } catch {
     toast.error('Erro ao criar flag')
   } finally {
     saving.value = false
+  }
+}
+
+async function remove(flag: FeatureFlag) {
+  if (!confirm(`Remover flag "${flag.key}"?`)) return
+  try {
+    await api.delete(`/admin/feature-flags/${flag.id}`)
+    flags.value = flags.value.filter(f => f.id !== flag.id)
+    toast.success('Flag removida')
+  } catch {
+    toast.error('Erro ao remover flag')
   }
 }
 
@@ -96,6 +107,10 @@ onMounted(load)
             <Label>Descrição</Label>
             <Input v-model="form.description" placeholder="Descrição opcional" />
           </div>
+          <div class="space-y-1.5">
+            <Label>Ativar imediatamente</Label>
+            <Switch v-model="form.enabled" />
+          </div>
           <div class="sm:col-span-3">
             <Button type="submit" size="sm" :disabled="saving">
               {{ saving ? 'Salvando...' : 'Criar Flag' }}
@@ -119,7 +134,12 @@ onMounted(load)
             </div>
             <p v-if="flag.description" class="mt-0.5 text-sm text-slate-500">{{ flag.description }}</p>
           </div>
-          <Switch :modelValue="flag.enabled" @update:modelValue="toggle(flag)" />
+          <div class="flex items-center gap-2">
+            <Switch :modelValue="flag.enabled" @update:modelValue="toggle(flag)" />
+            <Button size="sm" variant="ghost" class="text-red-500 hover:text-red-700" @click="remove(flag)">
+              <Trash2 class="h-4 w-4" />
+            </Button>
+          </div>
         </CardContent>
       </Card>
     </div>

@@ -25,6 +25,11 @@ export class FeatureFlagsService {
     return this.repo.list()
   }
 
+  async getPublicMap(): Promise<Record<string, boolean>> {
+    const rows = await this.repo.list()
+    return Object.fromEntries(rows.map(r => [r.key, r.enabled]))
+  }
+
   async create(request: FastifyRequest, body: CreateFlagBody) {
     const claims = request.user as AccessTokenClaims
     const existing = await this.repo.findByKey(body.key)

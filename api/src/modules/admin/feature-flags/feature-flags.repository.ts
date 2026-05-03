@@ -22,7 +22,7 @@ export class FeatureFlagsRepository {
     return row ?? null
   }
 
-  async create(data: CreateFlagBody, updatedBy: string): Promise<FeatureFlagRow> {
+  async create(data: CreateFlagBody, updatedBy: string | null): Promise<FeatureFlagRow> {
     const [row] = await this.db.insert(featureFlags)
       .values({
         key: data.key,

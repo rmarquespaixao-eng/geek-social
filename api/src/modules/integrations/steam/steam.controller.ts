@@ -186,7 +186,7 @@ import { z } from 'zod'
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod'
 
 const noContent = z.void()
-const importRateLimiter = createUserRateLimiter(1, 60 * 60 * 1000)
+const importRateLimiter = createUserRateLimiter(5, 60 * 60 * 1000)
 const setApiKeyBody = z.object({ apiKey: z.string().length(32, 'Chave inválida (Steam Web API key tem 32 chars)') })
 const importBatchParam = z.object({ batchId: z.string().uuid() })
 

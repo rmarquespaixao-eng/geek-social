@@ -60,11 +60,12 @@ async function load() {
   }
 }
 
-async function process(id: string, action: 'approve' | 'reject') {
+async function process(id: string, action: 'approve' | 'reject' | 'complete') {
   try {
     await api.post(`/admin/lgpd-requests/${id}/${action}`)
     await load()
-    toast.success(action === 'approve' ? 'Solicitação aprovada' : 'Solicitação rejeitada')
+    const msgs = { approve: 'Solicitação aprovada', reject: 'Solicitação rejeitada', complete: 'Solicitação concluída' }
+    toast.success(msgs[action])
   } catch {
     toast.error('Erro ao processar solicitação')
   }
@@ -123,6 +124,10 @@ onMounted(load)
                 <td class="px-4 py-3 text-right">
                   <div v-if="r.status === 'pending'" class="flex justify-end gap-1">
                     <Button size="sm" @click="process(r.id, 'approve')">Aprovar</Button>
+                    <Button size="sm" variant="outline" class="text-red-600 border-red-300" @click="process(r.id, 'reject')">Rejeitar</Button>
+                  </div>
+                  <div v-else-if="r.status === 'processing'" class="flex justify-end gap-1">
+                    <Button size="sm" variant="outline" class="text-green-700 border-green-400" @click="process(r.id, 'complete')">Concluir</Button>
                     <Button size="sm" variant="outline" class="text-red-600 border-red-300" @click="process(r.id, 'reject')">Rejeitar</Button>
                   </div>
                 </td>

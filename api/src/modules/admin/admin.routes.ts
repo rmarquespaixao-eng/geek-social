@@ -30,7 +30,10 @@ import { CollectionTypesRepository } from './collection-types/collection-types.r
 import { CollectionTypesService } from './collection-types/collection-types.service.js'
 import { collectionTypesRoutes } from './collection-types/collection-types.routes.js'
 
-export async function adminRoutes(app: FastifyInstance, opts: { db: DatabaseClient }) {
+export async function adminRoutes(app: FastifyInstance, opts: {
+  db: DatabaseClient
+  onUserDeactivated?: (userId: string) => void
+}) {
   const { db } = opts
 
   // Shared audit log
@@ -49,6 +52,7 @@ export async function adminRoutes(app: FastifyInstance, opts: { db: DatabaseClie
   // Users
   const adminUsersRepo = new AdminUsersRepository(db)
   const adminUsersService = new AdminUsersService(adminUsersRepo, auditLogService)
+  if (opts.onUserDeactivated) adminUsersService.afterUserDeactivated = opts.onUserDeactivated
   await app.register(adminUsersRoutes, { prefix: '/users', adminUsersService })
 
   // Reports

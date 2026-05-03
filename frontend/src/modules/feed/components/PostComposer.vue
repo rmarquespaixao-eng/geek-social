@@ -1,15 +1,19 @@
 <!-- src/modules/feed/components/PostComposer.vue -->
 <script setup lang="ts">
-import { ref, computed, onUnmounted } from 'vue'
+import { ref, computed, watch, onUnmounted } from 'vue'
 import { ImagePlus, Send, X, Globe, Users, Lock, Play } from 'lucide-vue-next'
 import { postsService } from '../services/postsService'
 import { useFeed } from '../composables/useFeed'
 import { useAuthStore } from '@/shared/auth/authStore'
+import { useFeatureFlagsStore } from '@/shared/featureFlags/featureFlagsStore'
 
 const emit = defineEmits<{ posted: [] }>()
 
 const feed = useFeed()
 const auth = useAuthStore()
+const featureFlags = useFeatureFlagsStore()
+
+const hasFriends = computed(() => featureFlags.isEnabled('module_friends'))
 
 const content = ref('')
 const visibility = ref<'public' | 'friends_only' | 'private'>('public')
@@ -23,11 +27,19 @@ const textareaEl = ref<HTMLTextAreaElement | null>(null)
 
 const canSubmit = computed(() => content.value.trim().length > 0 && !submitting.value)
 
-const visibilityOptions = [
+const allVisibilityOptions = [
   { value: 'public', label: 'Público', icon: Globe },
   { value: 'friends_only', label: 'Amigos', icon: Users },
   { value: 'private', label: 'Privado', icon: Lock },
 ] as const
+
+const visibilityOptions = computed(() =>
+  allVisibilityOptions.filter(o => o.value !== 'friends_only' || hasFriends.value),
+)
+
+watch(hasFriends, (enabled) => {
+  if (!enabled && visibility.value === 'friends_only') visibility.value = 'public'
+})
 
 const MAX_FILES = 8
 const VIDEO_MAX_BYTES = 50 * 1024 * 1024

@@ -30,6 +30,7 @@ const hasSocialFeatures = computed(() =>
   featureFlags.isEnabled('module_friends') ||
   featureFlags.isEnabled('module_communities'),
 )
+const hasMarketplace = computed(() => featureFlags.isEnabled('module_marketplace'))
 
 const collectionId = computed(() => route.params.id as string)
 
@@ -525,7 +526,7 @@ function onListingSaved() {
             :field-schema="collection.fieldSchema"
             :collection-type="collection.type"
             :listing="listingByItemId[item.id] ?? null"
-            :can-list="isOwner"
+            :can-list="isOwner && hasMarketplace"
             @click="goToItem"
             @list-action="onListAction"
           />
@@ -540,7 +541,7 @@ function onListingSaved() {
             :field-schema="collection.fieldSchema"
             :collection-type="collection.type"
             :listing="listingByItemId[item.id] ?? null"
-            :can-list="isOwner"
+            :can-list="isOwner && hasMarketplace"
             @click="goToItem"
             @list-action="onListAction"
           />

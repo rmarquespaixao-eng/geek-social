@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { reactive, ref, watch } from 'vue'
+import { reactive, ref, computed, watch } from 'vue'
 import DurationPicker from './DurationPicker.vue'
 import AddressFields from './AddressFields.vue'
+import { useFeatureFlagsStore } from '@/shared/featureFlags/featureFlagsStore'
 import type {
   CreateEventPayload,
   EventAddress,
@@ -10,6 +11,9 @@ import type {
   EventType,
   EventVisibility,
 } from '../types'
+
+const featureFlags = useFeatureFlagsStore()
+const hasFriends = computed(() => featureFlags.isEnabled('module_friends'))
 
 const props = defineProps<{
   initial?: EventDetail | null
@@ -85,6 +89,10 @@ watch(
     if (next) Object.assign(form, makeInitialForm())
   },
 )
+
+watch(hasFriends, (enabled) => {
+  if (!enabled && form.visibility === 'friends') form.visibility = 'public'
+})
 
 const cover = ref<File | null>(null)
 const coverPreview = ref<string | null>(props.initial?.coverUrl ?? null)
@@ -220,7 +228,7 @@ function onSubmit() {
           class="bg-[#252640] text-slate-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-amber-500/50"
         >
           <option value="public">Público</option>
-          <option value="friends">Só amigos</option>
+          <option v-if="hasFriends" value="friends">Só amigos</option>
           <option value="invite">Por convite</option>
         </select>
       </label>

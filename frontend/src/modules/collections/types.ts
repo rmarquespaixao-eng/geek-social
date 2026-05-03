@@ -1,4 +1,13 @@
-export type CollectionType = 'games' | 'books' | 'cardgames' | 'boardgames' | 'custom'
+export type CollectionType = string
+
+export interface CollectionTypeDefinition {
+  id: string
+  key: string
+  name: string | null
+  description: string | null
+  icon: string | null
+  isSystem: boolean
+}
 
 export type CollectionVisibility = 'public' | 'private' | 'friends_only'
 

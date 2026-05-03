@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { useCollectionsStore } from '../composables/useCollections'
+import { useFeatureFlagsStore } from '@/shared/featureFlags/featureFlagsStore'
+import { useCollectionTypes } from '../composables/useCollectionTypes'
 import type { Collection, CollectionType } from '../types'
 
 const props = defineProps<{
@@ -12,6 +14,14 @@ const emit = defineEmits<{
 }>()
 
 const store = useCollectionsStore()
+const featureFlags = useFeatureFlagsStore()
+const { types: collectionTypes } = useCollectionTypes()
+
+const hasSocialFeatures = computed(() =>
+  featureFlags.isEnabled('module_feed') ||
+  featureFlags.isEnabled('module_friends') ||
+  featureFlags.isEnabled('module_communities'),
+)
 
 const isEditMode = computed(() => !!props.collection)
 
@@ -20,14 +30,6 @@ const description = ref(props.collection?.description ?? '')
 const type = ref<CollectionType>(props.collection?.type ?? 'games')
 const isPublic = ref(props.collection?.visibility !== 'private')
 const autoShareToFeed = ref(props.collection?.autoShareToFeed ?? false)
-
-const typeOptions: { value: CollectionType; label: string }[] = [
-  { value: 'games',      label: '🎮 Jogos' },
-  { value: 'books',      label: '📚 Livros' },
-  { value: 'cardgames',  label: '🃏 Card Games' },
-  { value: 'boardgames', label: '🎲 Boardgames' },
-  { value: 'custom',     label: '⚙️ Customizado' },
-]
 
 const submitting = ref(false)
 const fieldError = ref('')
@@ -40,14 +42,15 @@ async function submit() {
   fieldError.value = ''
   submitting.value = true
 
-  const visibility = isPublic.value ? 'public' : 'private'
+  const visibility = hasSocialFeatures.value && isPublic.value ? 'public' : 'private'
+  const shareToFeed = hasSocialFeatures.value && autoShareToFeed.value
 
   if (isEditMode.value && props.collection) {
     await store.updateCollection(props.collection.id, {
       name: name.value.trim(),
       description: description.value.trim() || undefined,
       visibility,
-      autoShareToFeed: autoShareToFeed.value,
+      autoShareToFeed: shareToFeed,
     })
   } else {
     await store.createCollection({
@@ -55,7 +58,7 @@ async function submit() {
       description: description.value.trim() || undefined,
       type: type.value,
       visibility,
-      autoShareToFeed: autoShareToFeed.value,
+      autoShareToFeed: shareToFeed,
     })
   }
 
@@ -117,14 +120,14 @@ async function submit() {
           v-model="type"
           class="w-full bg-[#252640] border border-[#252640] hover:border-[#f59e0b]/40 focus:border-[#f59e0b] text-[#e2e8f0] text-[13px] px-3 py-2 rounded-[6px] outline-none transition-colors cursor-pointer"
         >
-          <option v-for="opt in typeOptions" :key="opt.value" :value="opt.value">
-            {{ opt.label }}
+          <option v-for="t in collectionTypes" :key="t.key" :value="t.key">
+            {{ t.icon ? `${t.icon} ` : '' }}{{ t.name ?? t.key }}
           </option>
         </select>
       </div>
 
-      <!-- Public/private toggle -->
-      <div class="flex items-center justify-between py-1">
+      <!-- Public/private toggle — oculto quando rede social desabilitada -->
+      <div v-if="hasSocialFeatures" class="flex items-center justify-between py-1">
         <div>
           <p class="text-[13px] font-medium text-[#e2e8f0]">Coleção pública</p>
           <p class="text-[11px] text-[#94a3b8]">Visível para outros usuários</p>
@@ -146,8 +149,8 @@ async function submit() {
         </button>
       </div>
 
-      <!-- Auto-share to feed toggle -->
-      <div class="flex items-center justify-between py-1">
+      <!-- Auto-share to feed toggle — oculto quando rede social desabilitada -->
+      <div v-if="hasSocialFeatures" class="flex items-center justify-between py-1">
         <div class="pr-3">
           <p class="text-[13px] font-medium text-[#e2e8f0]">Publicar novos itens no feed</p>
           <p class="text-[11px] text-[#94a3b8]">

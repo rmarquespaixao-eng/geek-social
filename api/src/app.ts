@@ -112,12 +112,16 @@ import { SteamController, steamRoutes } from './modules/integrations/steam/steam
 import { ImportBatchFinalizationRepository } from './modules/integrations/steam/import-batch-finalization.repository.js'
 import { createSteamImportGameWorker } from './shared/infra/jobs/workers/steam-import-game.worker.js'
 import { adminRoutes } from './modules/admin/admin.routes.js'
+import { LgpdRepository } from './modules/admin/lgpd/lgpd.repository.js'
+import { lgpdUserRoutes } from './modules/admin/lgpd/lgpd-user.routes.js'
 import { AdminAuditLogRepository } from './modules/admin/audit-log.repository.js'
 import { AdminAuditLogService } from './modules/admin/audit-log.service.js'
 import { FeatureFlagsRepository } from './modules/admin/feature-flags/feature-flags.repository.js'
 import { FeatureFlagsService } from './modules/admin/feature-flags/feature-flags.service.js'
 import { featureFlagsPublicRoutes } from './modules/admin/feature-flags/feature-flags.public.routes.js'
 import { seedFeatureFlags } from './shared/infra/database/seeds/feature-flags.seed.js'
+import { CollectionTypesRepository } from './modules/admin/collection-types/collection-types.repository.js'
+import { collectionTypesPublicRoutes } from './modules/admin/collection-types/collection-types.public.routes.js'
 import { UserAccessLogRepository } from './modules/admin/logs/user-access-log.repository.js'
 import { activityRoutes } from './modules/activity/activity.routes.js'
 import { requireFlag } from './shared/middleware/require-flag.js'
@@ -280,6 +284,9 @@ export async function buildApp() {
   const featureFlagsServicePublic = new FeatureFlagsService(featureFlagsRepository, featureFlagsAuditLogService)
   await seedFeatureFlags(featureFlagsRepository)
   await app.register(featureFlagsPublicRoutes, { prefix: '/feature-flags', featureFlagsService: featureFlagsServicePublic })
+
+  const collectionTypesPublicRepo = new CollectionTypesRepository(db)
+  await app.register(collectionTypesPublicRoutes, { prefix: '/collection-types', repo: collectionTypesPublicRepo })
 
   const userAccessLogRepository = new UserAccessLogRepository(db)
   await app.register(activityRoutes, { prefix: '/activity', repo: userAccessLogRepository })
@@ -718,8 +725,20 @@ export async function buildApp() {
     app.addHook('onClose', async () => { await jobsQueue.stop() })
   }
 
+  // LGPD — rota pública autenticada para usuários submeterem solicitações (Art. 18 LGPD)
+  const lgpdUserRepo = new LgpdRepository(db)
+  await app.register(lgpdUserRoutes, { prefix: '/lgpd-requests', repo: lgpdUserRepo })
+
   // Admin panel
-  await app.register(adminRoutes, { prefix: '/admin', db })
+  await app.register(adminRoutes, {
+    prefix: '/admin',
+    db,
+    onUserDeactivated: (userId) => {
+      chatGateway.disconnectUser(userId).catch((err) => {
+        app.log.warn({ err, userId }, 'failed to disconnect user sockets after admin deactivation')
+      })
+    },
+  })
 
   if (env.GOOGLE_OAUTH_ENABLED && env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET) {
     const { registerGoogleRoutes } = await import('./modules/auth/google.strategy.js')

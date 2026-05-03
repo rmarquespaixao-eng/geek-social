@@ -1,6 +1,6 @@
 import { eq, and, count, asc, type SQL } from 'drizzle-orm'
 import type { DatabaseClient } from '../../../shared/infra/database/postgres.client.js'
-import { collectionTypes } from '../../../shared/infra/database/schema.js'
+import { collectionTypes, collections } from '../../../shared/infra/database/schema.js'
 
 export type CollectionTypeRow = typeof collectionTypes.$inferSelect
 type CollectionTypeInsert = typeof collectionTypes.$inferInsert
@@ -52,6 +52,14 @@ export class CollectionTypesRepository {
       .where(eq(collectionTypes.id, id))
       .returning()
     return row ?? null
+  }
+
+  async countCollectionsByTypeId(typeId: string): Promise<number> {
+    const [{ value }] = await this.db
+      .select({ value: count() })
+      .from(collections)
+      .where(eq(collections.collectionTypeId, typeId))
+    return value
   }
 
   async delete(id: string): Promise<boolean> {

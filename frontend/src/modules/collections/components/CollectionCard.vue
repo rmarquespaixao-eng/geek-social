@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import { Package, Trash2 } from 'lucide-vue-next'
 import type { Collection, CollectionType, CollectionVisibility } from '../types'
 import { useCollectionsStore } from '../composables/useCollections'
+import { useFeatureFlagsStore } from '@/shared/featureFlags/featureFlagsStore'
 import CollectionCoverUpload from './CollectionCoverUpload.vue'
 
 const props = withDefaults(defineProps<{
@@ -20,6 +21,12 @@ const emit = defineEmits<{
 }>()
 
 const store = useCollectionsStore()
+const featureFlags = useFeatureFlagsStore()
+const hasSocialFeatures = computed(() =>
+  featureFlags.isEnabled('module_feed') ||
+  featureFlags.isEnabled('module_friends') ||
+  featureFlags.isEnabled('module_communities'),
+)
 const cyclingVisibility = ref(false)
 
 const visibilityCycle: Record<CollectionVisibility, CollectionVisibility> = {
@@ -110,8 +117,8 @@ const coverSrc = computed(() => {
         </button>
       </div>
 
-      <!-- Visibility badge — click cycles para owner; somente exibe para não-owner -->
-      <div class="absolute top-2 left-2" @click.stop>
+      <!-- Visibility badge — oculto quando funcionalidades de rede social estão desabilitadas -->
+      <div v-if="hasSocialFeatures" class="absolute top-2 left-2" @click.stop>
         <button
           v-if="owned"
           type="button"

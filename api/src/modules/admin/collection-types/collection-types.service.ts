@@ -93,6 +93,15 @@ export class CollectionTypesService {
       throw new CollectionTypeError('SYSTEM_LOCKED', 'Tipos de coleção do sistema não podem ser removidos', 422)
     }
 
+    const usageCount = await this.repo.countCollectionsByTypeId(id)
+    if (usageCount > 0) {
+      throw new CollectionTypeError(
+        'TYPE_IN_USE',
+        `Este tipo está em uso por ${usageCount} coleção(ões) e não pode ser removido`,
+        409,
+      )
+    }
+
     const deleted = await this.repo.delete(id)
     if (!deleted) throw new CollectionTypeError('DELETE_FAILED', 'Falha ao remover tipo de coleção', 500)
 

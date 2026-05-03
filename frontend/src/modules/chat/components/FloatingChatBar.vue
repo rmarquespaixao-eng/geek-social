@@ -55,6 +55,7 @@ function lastMessagePreview(c: Conversation): string {
   if (lm.type === 'audio') return '🎤 Áudio'
   if (lm.type === 'file') return '📎 Arquivo'
   if (lm.type === 'call') return '📞 Chamada'
+  if (lm.isEncrypted) return '🔒 Mensagem criptografada'
   return lm.content || ''
 }
 

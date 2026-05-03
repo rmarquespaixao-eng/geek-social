@@ -11,12 +11,14 @@ withDefaults(defineProps<{
   cancelLabel?: string
   variant?: 'danger' | 'primary'
   loading?: boolean
+  showCancel?: boolean
 }>(), {
   description: '',
   confirmLabel: 'Confirmar',
   cancelLabel: 'Cancelar',
   variant: 'danger',
   loading: false,
+  showCancel: true,
 })
 
 const emit = defineEmits<{
@@ -36,7 +38,7 @@ const emit = defineEmits<{
           </slot>
         </div>
         <div class="flex justify-end gap-2 pt-1">
-          <AppButton variant="secondary" :disabled="loading" @click="emit('cancel')">
+          <AppButton v-if="showCancel" variant="ghost" :disabled="loading" @click="emit('cancel')">
             {{ cancelLabel }}
           </AppButton>
           <AppButton :variant="variant" :loading="loading" @click="emit('confirm')">

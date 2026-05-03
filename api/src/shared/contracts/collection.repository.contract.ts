@@ -1,4 +1,4 @@
-import type { CollectionType, FieldDefinition } from './field-definition.repository.contract.js'
+import type { FieldDefinition } from './field-definition.repository.contract.js'
 
 export type CollectionVisibility = 'public' | 'private' | 'friends_only'
 
@@ -9,7 +9,8 @@ export type Collection = {
   description: string | null
   iconUrl: string | null
   coverUrl: string | null
-  type: CollectionType
+  collectionTypeId: string | null
+  collectionTypeKey: string | null
   visibility: CollectionVisibility
   autoShareToFeed: boolean
   itemCount: number
@@ -32,7 +33,7 @@ export type CreateCollectionData = {
   userId: string
   name: string
   description?: string
-  type: CollectionType
+  collectionTypeId?: string
   visibility?: CollectionVisibility
   autoShareToFeed?: boolean
 }
@@ -55,6 +56,7 @@ export type SchemaEntryData = {
 export interface ICollectionRepository {
   create(data: CreateCollectionData): Promise<Collection>
   findById(id: string): Promise<CollectionWithSchema | null>
+  findCollectionTypeIdByKey(key: string): Promise<string | null>
   findByUserId(userId: string, query?: string): Promise<Collection[]>
   findPublicByUserId(userId: string, visibilities: CollectionVisibility[]): Promise<Collection[]>
   update(id: string, data: UpdateCollectionData): Promise<Collection>

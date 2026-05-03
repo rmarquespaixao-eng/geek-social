@@ -269,9 +269,51 @@
       "breakpoints": true
     },
     {
-      "idx": 44,
+      "idx": 38,
       "version": "7",
       "when": 1777452000000,
+      "tag": "0039_email_verification_tokens",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1777453000000,
+      "tag": "0043_users_token_version",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1777453100000,
+      "tag": "0038_drop_private_visibility",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1777453200000,
+      "tag": "0040_event_participants_unique",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1777453300000,
+      "tag": "0041_listings_item_active_unique",
+      "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1777453400000,
+      "tag": "0042_refresh_token_family",
+      "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1746403200000,
       "tag": "0044_e2e_encryption",
       "breakpoints": true
     },
@@ -280,6 +322,69 @@
       "version": "7",
       "when": 1777454000000,
       "tag": "0045_signal_protocol",
+      "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1746490000000,
+      "tag": "0046_conv_sender_key_id",
+      "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1777455000000,
+      "tag": "0047_admin_platform_role",
+      "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1777455100000,
+      "tag": "0048_admin_audit_log",
+      "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1777455200000,
+      "tag": "0049_admin_feature_flags",
+      "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1777455300000,
+      "tag": "0050_admin_lgpd_requests",
+      "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1777455400000,
+      "tag": "0051_admin_moderation_configs",
+      "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1777455500000,
+      "tag": "0052_collection_types_table",
+      "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1777455600000,
+      "tag": "0053_moderation_singleton_constraint",
+      "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1777455700000,
+      "tag": "0054_user_status_and_access_log",
       "breakpoints": true
     }
   ]

@@ -1,0 +1,131 @@
+import { eq, and, ilike, or, count, sql } from 'drizzle-orm'
+import type { DatabaseClient } from '../../../shared/infra/database/postgres.client.js'
+import { users, refreshTokens, emailVerificationTokens, passwordResetTokens } from '../../../shared/infra/database/schema.js'
+import type { ListUsersQuery } from './admin-users.schema.js'
+
+type UserStatus = 'active' | 'suspended' | 'banned'
+
+export type AdminUserRow = typeof users.$inferSelect
+
+export class AdminUsersRepository {
+  constructor(private readonly db: DatabaseClient) {}
+
+  async list(filters: ListUsersQuery, isAdmin: boolean): Promise<{ rows: AdminUserRow[]; total: number }> {
+    const { page, pageSize } = filters
+    const conditions = []
+
+    if (filters.search) {
+      const safe = filters.search
+        .replaceAll('\\', '\\\\')
+        .replaceAll('%', '\\%')
+        .replaceAll('_', '\\_')
+      conditions.push(or(
+        ilike(users.displayName, `%${safe}%`),
+        ilike(users.email, `%${safe}%`),
+      ))
+    }
+    if (filters.role) {
+      conditions.push(eq(users.platformRole, filters.role))
+    }
+    if (filters.status) {
+      conditions.push(eq(users.status, filters.status))
+    }
+
+    const where = conditions.length > 0 ? and(...conditions) : undefined
+
+    const [totalRes, rows] = await Promise.all([
+      this.db.select({ count: count() }).from(users).where(where),
+      this.db.select().from(users).where(where)
+        .orderBy(sql`${users.createdAt} DESC`)
+        .limit(pageSize)
+        .offset((page - 1) * pageSize),
+    ])
+
+    return { rows, total: Number(totalRes[0]?.count ?? 0) }
+  }
+
+  async findById(id: string): Promise<AdminUserRow | null> {
+    const [row] = await this.db.select().from(users).where(eq(users.id, id)).limit(1)
+    return row ?? null
+  }
+
+  async updateRole(id: string, role: 'user' | 'moderator' | 'admin'): Promise<AdminUserRow | null> {
+    const [row] = await this.db.update(users)
+      .set({ platformRole: role, updatedAt: new Date() })
+      .where(eq(users.id, id))
+      .returning()
+    return row ?? null
+  }
+
+  async setStatus(id: string, status: UserStatus): Promise<void> {
+    await this.db.update(users)
+      .set({ status, updatedAt: new Date() })
+      .where(eq(users.id, id))
+  }
+
+  async bumpTokenVersion(id: string): Promise<void> {
+    await this.db.update(users)
+      .set({ tokenVersion: sql`${users.tokenVersion} + 1`, updatedAt: new Date() })
+      .where(eq(users.id, id))
+  }
+
+  async countAdmins(): Promise<number> {
+    const [res] = await this.db.select({ count: count() }).from(users)
+      .where(eq(users.platformRole, 'admin'))
+    return Number(res?.count ?? 0)
+  }
+
+  /**
+   * Verifica se o usuário é o único admin usando SELECT FOR UPDATE para evitar
+   * race condition quando dois admins tentam se rebaixar simultaneamente.
+   */
+  async isLastAdmin(id: string): Promise<boolean> {
+    // SELECT FOR UPDATE via SQL raw para travar as linhas de admin durante a transação
+    const rows = await this.db.execute(
+      sql`SELECT id FROM users WHERE platform_role = 'admin' FOR UPDATE`,
+    )
+    const adminIds = (rows as unknown as Array<{ id: string }>).map(r => r.id)
+    return adminIds.length <= 1 && adminIds[0] === id
+  }
+
+  /**
+   * Anonimiza conta para LGPD: zera PII, revoga todos os tokens e marca email como deletado.
+   * Não apaga a linha para preservar integridade referencial em logs, posts etc.
+   */
+  async anonymize(id: string): Promise<AdminUserRow | null> {
+    return this.db.transaction(async (tx) => {
+      // Revogar todos os tokens de sessão e verificação
+      await tx.delete(refreshTokens).where(eq(refreshTokens.userId, id))
+      await tx.delete(emailVerificationTokens).where(eq(emailVerificationTokens.userId, id))
+      await tx.delete(passwordResetTokens).where(eq(passwordResetTokens.userId, id))
+
+      const [row] = await tx.update(users)
+        .set({
+          email: `deleted-${id}@anonymous.invalid`,
+          displayName: 'Usuário removido',
+          bio: null,
+          avatarUrl: null,
+          coverUrl: null,
+          coverColor: null,
+          profileBackgroundUrl: null,
+          profileBackgroundColor: null,
+          birthday: null,
+          interests: [],
+          pronouns: null,
+          location: null,
+          website: null,
+          steamId: null,
+          steamApiKey: null,
+          steamLinkedAt: null,
+          googleId: null,
+          googleLinkedAt: null,
+          passwordHash: null,
+          tokenVersion: sql`${users.tokenVersion} + 1`,
+          updatedAt: new Date(),
+        })
+        .where(eq(users.id, id))
+        .returning()
+      return row ?? null
+    })
+  }
+}

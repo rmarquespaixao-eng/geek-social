@@ -126,6 +126,33 @@ export const communitiesApi = {
     return data
   },
 
+  async promoteMember(communityId: string, userId: string): Promise<Member> {
+    const { data } = await api.post<{ member: Member }>(`/communities/${communityId}/members/${userId}/promote`)
+    return data.member
+  },
+
+  async demoteMember(communityId: string, userId: string): Promise<Member> {
+    const { data } = await api.post<{ member: Member }>(`/communities/${communityId}/members/${userId}/demote`)
+    return data.member
+  },
+
+  async banMember(communityId: string, userId: string, reason?: string): Promise<Member> {
+    const { data } = await api.post<{ member: Member }>(
+      `/communities/${communityId}/members/${userId}/ban`,
+      reason ? { reason } : undefined,
+    )
+    return data.member
+  },
+
+  async unbanMember(communityId: string, userId: string): Promise<Member> {
+    const { data } = await api.post<{ member: Member }>(`/communities/${communityId}/members/${userId}/unban`)
+    return data.member
+  },
+
+  async kickMember(communityId: string, userId: string): Promise<void> {
+    await api.delete(`/communities/${communityId}/members/${userId}`)
+  },
+
   // Join requests
 
   async listJoinRequests(
@@ -167,5 +194,9 @@ export const communitiesApi = {
       `/communities/${communityId}/topics/${topicId}`,
     )
     return data
+  },
+
+  async deleteTopic(communityId: string, topicId: string): Promise<void> {
+    await api.delete(`/communities/${communityId}/topics/${topicId}`)
   },
 }

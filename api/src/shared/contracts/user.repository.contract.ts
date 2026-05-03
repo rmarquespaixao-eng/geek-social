@@ -23,6 +23,8 @@ export type User = {
   pronouns: string | null
   location: string | null
   website: string | null
+  tokenVersion: number
+  platformRole: 'user' | 'moderator' | 'admin'
   createdAt: Date
   updatedAt: Date
 }
@@ -58,6 +60,8 @@ export type RefreshToken = {
   id: string
   userId: string
   tokenHash: string
+  familyId: string
+  used: boolean
   expiresAt: Date
   createdAt: Date
 }
@@ -70,6 +74,15 @@ export type PasswordResetToken = {
   usedAt: Date | null
 }
 
+export type EmailVerificationToken = {
+  id: string
+  userId: string
+  tokenHash: string
+  expiresAt: Date
+  usedAt: Date | null
+  createdAt: Date
+}
+
 export interface IUserRepository {
   findById(id: string): Promise<User | null>
   findByEmail(email: string): Promise<User | null>
@@ -80,12 +93,21 @@ export interface IUserRepository {
   updateProfile(id: string, data: UpdateProfileData): Promise<User>
   updatePassword(userId: string, passwordHash: string): Promise<void>
   verifyEmail(userId: string): Promise<void>
-  createRefreshToken(userId: string, tokenHash: string, expiresAt: Date): Promise<void>
+  createRefreshToken(userId: string, tokenHash: string, expiresAt: Date, familyId?: string): Promise<void>
   findRefreshToken(tokenHash: string): Promise<RefreshToken | null>
+  // Retorna true se ganhou a corrida (UPDATE ... WHERE used = false). Falso significa
+  // que outra transação já marcou — sinal de reuso, caller deve revogar a família.
+  markRefreshTokenAsUsed(id: string): Promise<boolean>
+  revokeAllByFamilyId(familyId: string): Promise<void>
   deleteRefreshToken(tokenHash: string): Promise<void>
   deleteAllRefreshTokensByUserId(userId: string): Promise<void>
   createPasswordResetToken(userId: string, tokenHash: string, expiresAt: Date): Promise<void>
   findPasswordResetToken(tokenHash: string): Promise<PasswordResetToken | null>
   markPasswordResetTokenAsUsed(id: string): Promise<void>
+  createEmailVerificationToken(userId: string, tokenHash: string, expiresAt: Date): Promise<void>
+  findEmailVerificationToken(tokenHash: string): Promise<EmailVerificationToken | null>
+  markEmailVerificationTokenAsUsed(id: string): Promise<void>
+  deleteEmailVerificationTokensByUserId(userId: string): Promise<void>
   deleteUser(userId: string): Promise<void>
+  incrementTokenVersion(userId: string): Promise<void>
 }

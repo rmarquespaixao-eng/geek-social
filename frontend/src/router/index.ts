@@ -1,5 +1,19 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '@/shared/auth/authStore'
+import { useFeatureFlagsStore } from '@/shared/featureFlags/featureFlagsStore'
+import { api } from '@/shared/http/api'
+
+const MODULE_FLAG_MAP: Record<string, string> = {
+  '/feed': 'module_feed',
+  '/comunidades': 'module_communities',
+  '/comunidades/nova': 'community_creation',
+  '/collections': 'module_collections',
+  '/vitrine': 'module_marketplace',
+  '/roles': 'module_roles',
+  '/friends': 'module_friends',
+  '/chat': 'module_chat',
+  '/notifications': 'module_notifications',
+}
 
 const router = createRouter({
   history: createWebHistory(),
@@ -176,6 +190,12 @@ const router = createRouter({
       meta: { requiresAuth: true },
     },
     {
+      path: '/comunidades/:slug/topicos/:topicId',
+      name: 'community-topic',
+      component: () => import('@/modules/communities/views/CommunityTopicView.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
       path: '/minhas-comunidades',
       name: 'my-communities',
       component: () => import('@/modules/communities/views/MyCommunitiesView.vue'),
@@ -204,6 +224,32 @@ router.beforeEach((to) => {
   }
   if (to.meta.public && store.isAuthenticated && to.name !== 'auth-callback') {
     return { name: 'feed' }
+  }
+
+  // Bloqueia módulos e sub-rotas desabilitados via feature flag
+  const flags = useFeatureFlagsStore()
+  if (flags.loaded && store.isAuthenticated) {
+    // Checar path exato primeiro (ex: /comunidades/nova), depois prefixo (ex: /comunidades)
+    const exactKey = MODULE_FLAG_MAP[to.path]
+    const basePath = '/' + to.path.split('/')[1]
+    const prefixKey = MODULE_FLAG_MAP[basePath]
+    const flagKey = exactKey ?? prefixKey
+    if (flagKey && !flags.isEnabled(flagKey)) {
+      // Para sub-rotas de módulo habilitado (ex: /comunidades/nova com community_creation off),
+      // volta para o módulo pai se ele estiver habilitado
+      if (exactKey && prefixKey && flags.isEnabled(prefixKey)) {
+        return { path: basePath }
+      }
+      const firstEnabled = Object.entries(MODULE_FLAG_MAP).find(([p, k]) => k !== flagKey && flags.isEnabled(k) && !p.includes('/', 1))
+      return firstEnabled ? { path: firstEnabled[0] } : false
+    }
+  }
+})
+
+router.afterEach((to) => {
+  const store = useAuthStore()
+  if (store.isAuthenticated && !to.meta.public) {
+    api.post('/activity/page-view', { path: to.path }).catch(() => {})
   }
 })
 

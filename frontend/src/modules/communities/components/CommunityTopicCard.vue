@@ -11,9 +11,17 @@ import type { TopicSummary } from '../types'
 const props = defineProps<{
   topic: TopicSummary
   communitySlug: string
+  canDelete?: boolean
 }>()
 
+const emit = defineEmits<{ (e: 'delete', topicId: string): void }>()
+
 const router = useRouter()
+
+function onDeleteClick(e: MouseEvent) {
+  e.stopPropagation()
+  emit('delete', props.topic.postId)
+}
 
 const authorInitial = computed(() =>
   props.topic.authorName ? props.topic.authorName[0].toUpperCase() : '?',
@@ -63,6 +71,16 @@ function goTopic() {
       >
         Fechado
       </span>
+
+      <button
+        v-if="canDelete"
+        type="button"
+        @click="onDeleteClick"
+        class="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 transition-colors"
+        data-testid="topic-delete-btn"
+      >
+        Excluir
+      </button>
     </div>
 
     <!-- Content excerpt -->

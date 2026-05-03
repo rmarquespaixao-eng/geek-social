@@ -5,7 +5,6 @@ import type {
   IFieldDefinitionRepository,
   FieldDefinition,
   CreateFieldDefinitionData,
-  CollectionType,
 } from '../../shared/contracts/field-definition.repository.contract.js'
 
 export class FieldDefinitionRepository implements IFieldDefinitionRepository {
@@ -33,11 +32,11 @@ export class FieldDefinitionRepository implements IFieldDefinitionRepository {
       .where(eq(fieldDefinitions.userId, userId)) as Promise<FieldDefinition[]>
   }
 
-  async findSystemByCollectionType(type: CollectionType): Promise<FieldDefinition[]> {
+  async findSystemByCollectionTypeId(collectionTypeId: string): Promise<FieldDefinition[]> {
     return this.db.select().from(fieldDefinitions)
       .where(and(
         eq(fieldDefinitions.isSystem, true),
-        eq(fieldDefinitions.collectionType, type),
+        eq(fieldDefinitions.collectionTypeId, collectionTypeId),
       )) as Promise<FieldDefinition[]>
   }
 
@@ -57,23 +56,28 @@ export class FieldDefinitionRepository implements IFieldDefinitionRepository {
     await this.db.delete(fieldDefinitions).where(eq(fieldDefinitions.id, id))
   }
 
-  async upsertSystem(data: Omit<FieldDefinition, 'id' | 'createdAt'>): Promise<void> {
+  async upsertSystem(data: Omit<FieldDefinition, 'id' | 'createdAt' | 'isHidden'> & { isHidden?: boolean }): Promise<void> {
+    const conditions = [
+      eq(fieldDefinitions.isSystem, true),
+      eq(fieldDefinitions.fieldKey, data.fieldKey),
+    ]
+    if (data.collectionTypeId) {
+      conditions.push(eq(fieldDefinitions.collectionTypeId, data.collectionTypeId))
+    }
+
     const existing = await this.db.select({ id: fieldDefinitions.id })
       .from(fieldDefinitions)
-      .where(and(
-        eq(fieldDefinitions.isSystem, true),
-        eq(fieldDefinitions.fieldKey, data.fieldKey),
-        eq(fieldDefinitions.collectionType, data.collectionType!),
-      ))
+      .where(and(...conditions))
       .limit(1)
+
     if (existing.length > 0) {
-      // Atualiza nome/tipo/opções/hidden caso tenham mudado no seed
       await this.db.update(fieldDefinitions)
         .set({
           name: data.name,
           fieldType: data.fieldType,
           selectOptions: data.selectOptions ?? null,
           isHidden: data.isHidden ?? false,
+          ...(data.collectionTypeId ? { collectionTypeId: data.collectionTypeId } : {}),
         })
         .where(eq(fieldDefinitions.id, existing[0].id))
       return
@@ -83,7 +87,7 @@ export class FieldDefinitionRepository implements IFieldDefinitionRepository {
       name: data.name,
       fieldKey: data.fieldKey,
       fieldType: data.fieldType,
-      collectionType: data.collectionType,
+      collectionTypeId: data.collectionTypeId ?? null,
       selectOptions: data.selectOptions ?? null,
       isSystem: true,
       isHidden: data.isHidden ?? false,

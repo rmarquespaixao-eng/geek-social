@@ -57,6 +57,17 @@ const canDelete = computed(() => isOwn.value || canModerate.value)
 const canReport = computed(() => !isOwn.value && !isDeleted.value)
 const showMenuButton = computed(() => canDelete.value || canReport.value)
 const showReportDialog = ref(false)
+const retryingDecrypt = ref(false)
+
+async function onRetryDecrypt(): Promise<void> {
+  if (retryingDecrypt.value) return
+  retryingDecrypt.value = true
+  try {
+    await chat.retryDecryptMessage(props.message.conversationId, props.message.id)
+  } finally {
+    retryingDecrypt.value = false
+  }
+}
 
 function openReport() {
   menuOpen.value = false
@@ -240,6 +251,14 @@ async function downloadAttachment(attachment: MessageAttachment) {
               message.decryptError && 'italic text-(--color-text-muted)',
             ]"
           >{{ message.decryptError ? '[Mensagem criptografada]' : message.content }}</p>
+
+          <button
+            v-if="message.decryptError"
+            type="button"
+            :disabled="retryingDecrypt"
+            class="mt-1 text-xs underline text-(--color-text-muted) hover:text-(--color-text-primary) disabled:opacity-50"
+            @click="onRetryDecrypt"
+          >{{ retryingDecrypt ? 'Tentando…' : 'Tentar novamente' }}</button>
 
           <div v-if="message.attachments.length > 0" class="mt-2 space-y-2">
             <div v-for="attachment in message.attachments" :key="attachment.id">

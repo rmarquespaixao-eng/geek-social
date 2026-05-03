@@ -27,12 +27,24 @@ export const changePasswordSchema = z.object({
 
 export const setPasswordSchema = z.object({
   newPassword: z.string().min(8).max(100),
+  // Endpoint dedicado a contas Google-only (sem passwordHash). Quem já tem senha
+  // usa /change-password — esta rota retorna 409 PASSWORD_ALREADY_SET imediatamente.
+  emailVerificationToken: z.string().min(1),
+})
+
+export const verifyEmailBodySchema = z.object({
+  token: z.string().min(1).describe('Token recebido por e-mail (válido por 24h, single-use).'),
+})
+
+export const resendVerificationSchema = z.object({
+  email: z.string().email(),
 })
 
 export const userPublicSchema = z.object({
   id: z.string().uuid(),
   email: z.string().email(),
   displayName: z.string(),
+  platformRole: z.enum(['user', 'moderator', 'admin']).default('user'),
 })
 
 export const tokenResponseSchema = z.object({
@@ -49,7 +61,7 @@ export const messageResponseSchema = z.object({
 })
 
 export const errorResponseSchema = z.object({
-  error: z.string().describe('Mensagem ou código tipado do erro. Códigos canônicos: EMAIL_ALREADY_EXISTS, INVALID_CREDENTIALS, INVALID_RESET_TOKEN, PASSWORD_ALREADY_SET, USER_NOT_FOUND.'),
+  error: z.string().describe('Mensagem ou código tipado do erro. Códigos canônicos: EMAIL_ALREADY_EXISTS, INVALID_CREDENTIALS, INVALID_RESET_TOKEN, INVALID_VERIFICATION_TOKEN, PASSWORD_ALREADY_SET, USER_NOT_FOUND.'),
 })
 
 export type RegisterInput = z.infer<typeof registerSchema>
@@ -58,3 +70,5 @@ export type ForgotPasswordInput = z.infer<typeof forgotPasswordSchema>
 export type ResetPasswordInput = z.infer<typeof resetPasswordSchema>
 export type ChangePasswordInput = z.infer<typeof changePasswordSchema>
 export type SetPasswordInput = z.infer<typeof setPasswordSchema>
+export type VerifyEmailBody = z.infer<typeof verifyEmailBodySchema>
+export type ResendVerificationInput = z.infer<typeof resendVerificationSchema>

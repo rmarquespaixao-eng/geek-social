@@ -184,48 +184,20 @@ export class CommunitiesRepository {
   ): Promise<{ communities: CommunityRow[]; nextCursor: string | null }> {
     const conditions = [notDeleted()]
 
-    // Visibility filter
+    // Visibility filter: public and restricted are both discoverable by anyone
     if (query.visibility) {
       conditions.push(eq(communities.visibility, query.visibility))
-      if (query.visibility !== 'public' && viewerId) {
-        // Non-public: restrict to member-of
-        conditions.push(
-          sql`EXISTS (
-            SELECT 1 FROM community_members cm
-            WHERE cm.community_id = ${communities.id}
-              AND cm.user_id = ${viewerId}
-              AND cm.status = 'active'
-          )`,
-        )
-      }
     } else {
-      // Default: public + (restricted/private where viewer is member)
-      if (viewerId) {
-        conditions.push(
-          or(
-            eq(communities.visibility, 'public'),
-            sql`(
-              ${communities.visibility} IN ('private', 'restricted')
-              AND EXISTS (
-                SELECT 1 FROM community_members cm
-                WHERE cm.community_id = ${communities.id}
-                  AND cm.user_id = ${viewerId}
-                  AND cm.status = 'active'
-              )
-            )`,
-          )!,
-        )
-      } else {
-        conditions.push(eq(communities.visibility, 'public'))
-      }
+      conditions.push(inArray(communities.visibility, ['public', 'restricted']))
     }
 
     if (query.category) conditions.push(eq(communities.category, query.category))
     if (query.search) {
+      const escaped = query.search.replace(/[\\%_]/g, '\\$&')
       conditions.push(
         or(
-          ilike(communities.name, `%${query.search}%`),
-          ilike(communities.description, `%${query.search}%`),
+          ilike(communities.name, `%${escaped}%`),
+          ilike(communities.description, `%${escaped}%`),
         )!,
       )
     }
@@ -348,7 +320,7 @@ export class CommunitiesRepository {
     const exec = tx ?? this.db
     await exec
       .update(communities)
-      .set({ memberCount: sql`${communities.memberCount} - 1`, updatedAt: new Date() })
+      .set({ memberCount: sql`greatest(${communities.memberCount} - 1, 0)`, updatedAt: new Date() })
       .where(eq(communities.id, id))
   }
 

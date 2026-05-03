@@ -1,6 +1,6 @@
 import { eq, and, ilike, asc, inArray, count } from 'drizzle-orm'
 import type { DatabaseClient } from '../../shared/infra/database/postgres.client.js'
-import { collections, collectionFieldSchema, fieldDefinitions, items } from '../../shared/infra/database/schema.js'
+import { collections, collectionFieldSchema, collectionTypes, fieldDefinitions, items } from '../../shared/infra/database/schema.js'
 import type {
   ICollectionRepository,
   Collection,
@@ -33,24 +33,39 @@ export class CollectionsRepository implements ICollectionRepository {
     return rows.map(r => ({ ...r, itemCount: counts[r.id] ?? 0 }))
   }
 
+  private async attachTypeKeys<T extends { collectionTypeId: string | null }>(rows: T[]): Promise<(T & { collectionTypeKey: string | null })[]> {
+    const ids = [...new Set(rows.map(r => r.collectionTypeId).filter((id): id is string => id !== null))]
+    if (ids.length === 0) return rows.map(r => ({ ...r, collectionTypeKey: null }))
+    const typeRows = await this.db.select({ id: collectionTypes.id, key: collectionTypes.key }).from(collectionTypes).where(inArray(collectionTypes.id, ids))
+    const keyMap = new Map(typeRows.map(r => [r.id, r.key]))
+    return rows.map(r => ({ ...r, collectionTypeKey: r.collectionTypeId ? (keyMap.get(r.collectionTypeId) ?? null) : null }))
+  }
+
+  async findCollectionTypeIdByKey(key: string): Promise<string | null> {
+    const [row] = await this.db.select({ id: collectionTypes.id }).from(collectionTypes).where(eq(collectionTypes.key, key)).limit(1)
+    return row?.id ?? null
+  }
+
   async create(data: CreateCollectionData): Promise<Collection> {
     const result = await this.db.insert(collections).values({
       userId: data.userId,
       name: data.name,
       description: data.description,
-      type: data.type,
+      collectionTypeId: data.collectionTypeId ?? null,
       visibility: data.visibility ?? 'public',
       autoShareToFeed: data.autoShareToFeed ?? false,
     }).returning()
-    return { ...result[0], itemCount: 0 } as Collection
+    const [withTypeKey] = await this.attachTypeKeys([result[0]])
+    return { ...withTypeKey, itemCount: 0 } as Collection
   }
 
   async findById(id: string): Promise<CollectionWithSchema | null> {
     const rows = await this.db.select().from(collections).where(eq(collections.id, id)).limit(1)
     if (!rows[0]) return null
     const [withCount] = await this.attachCounts([rows[0]])
+    const [withTypeKey] = await this.attachTypeKeys([withCount])
     const schema = await this.getFieldSchema(id)
-    return { ...withCount, fieldSchema: schema } as CollectionWithSchema
+    return { ...withTypeKey, fieldSchema: schema } as CollectionWithSchema
   }
 
   async findByUserId(userId: string, query?: string): Promise<Collection[]> {
@@ -58,7 +73,8 @@ export class CollectionsRepository implements ICollectionRepository {
       ? and(eq(collections.userId, userId), ilike(collections.name, `%${query}%`))
       : eq(collections.userId, userId)
     const rows = await this.db.select().from(collections).where(condition)
-    return this.attachCounts(rows) as Promise<Collection[]>
+    const withCounts = await this.attachCounts(rows)
+    return this.attachTypeKeys(withCounts) as Promise<Collection[]>
   }
 
   async findPublicByUserId(userId: string, visibilities: CollectionVisibility[]): Promise<Collection[]> {
@@ -68,16 +84,26 @@ export class CollectionsRepository implements ICollectionRepository {
         eq(collections.userId, userId),
         inArray(collections.visibility, visibilities),
       ))
-    return this.attachCounts(rows) as Promise<Collection[]>
+    const withCounts = await this.attachCounts(rows)
+    return this.attachTypeKeys(withCounts) as Promise<Collection[]>
   }
 
   async update(id: string, data: UpdateCollectionData): Promise<Collection> {
     const result = await this.db.update(collections)
-      .set({ ...data, updatedAt: new Date() })
+      .set({
+        ...(data.name !== undefined && { name: data.name }),
+        ...(data.description !== undefined && { description: data.description }),
+        ...(data.visibility !== undefined && { visibility: data.visibility }),
+        ...(data.autoShareToFeed !== undefined && { autoShareToFeed: data.autoShareToFeed }),
+        ...(data.iconUrl !== undefined && { iconUrl: data.iconUrl }),
+        ...(data.coverUrl !== undefined && { coverUrl: data.coverUrl }),
+        updatedAt: new Date(),
+      })
       .where(eq(collections.id, id))
       .returning()
     const [withCount] = await this.attachCounts([result[0]])
-    return withCount as Collection
+    const [withTypeKey] = await this.attachTypeKeys([withCount])
+    return withTypeKey as Collection
   }
 
   async delete(id: string): Promise<void> {

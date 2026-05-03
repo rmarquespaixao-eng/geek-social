@@ -41,7 +41,7 @@ export type ListingItemSnapshot = {
   rating: number | null
   comment: string | null
   collectionId: string
-  collectionType: string
+  collectionType: string | null
 }
 
 export type ListingWithItem = Listing & {

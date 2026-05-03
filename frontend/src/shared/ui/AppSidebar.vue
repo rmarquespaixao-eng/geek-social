@@ -99,12 +99,13 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
-import { Home, Library, Users, MessageSquare, Bell, Gamepad2, Settings, PanelLeftClose, PanelLeft, PanelLeftOpen, Store, Ticket } from 'lucide-vue-next'
+import { Home, Library, Users, MessagesSquare, MessageSquare, Bell, Gamepad2, Settings, PanelLeftClose, PanelLeft, PanelLeftOpen, Store, Ticket } from 'lucide-vue-next'
 import { useAuthStore } from '@/shared/auth/authStore'
 import { useFriends } from '@/modules/friends/composables/useFriends'
 import { useChat } from '@/modules/chat/composables/useChat'
 import { useNotifications } from '@/modules/notifications/composables/useNotifications'
 import { useUiPreferences } from './useUiPreferences'
+import { useFeatureFlagsStore } from '@/shared/featureFlags/featureFlagsStore'
 import AppAvatar from './AppAvatar.vue'
 import AppBadge from './AppBadge.vue'
 
@@ -128,16 +129,21 @@ const cycleTooltip = computed(() => {
 const friendsStore = useFriends()
 const chatStore = useChat()
 const notificationsStore = useNotifications()
+const featureFlagsStore = useFeatureFlagsStore()
 
-const navItems = computed(() => [
-  { to: '/feed', label: 'Feed', icon: Home, badge: 0 },
-  { to: '/collections', label: 'Coleções', icon: Library, badge: 0 },
-  { to: '/vitrine', label: 'Vitrine', icon: Store, badge: 0 },
-  { to: '/roles', label: 'Rolê', icon: Ticket, badge: 0 },
-  { to: '/friends', label: 'Amigos', icon: Users, badge: friendsStore.pendingCount },
-  { to: '/chat', label: 'Chat', icon: MessageSquare, badge: chatStore.totalUnread },
-  { to: '/notifications', label: 'Notificações', icon: Bell, badge: notificationsStore.unreadCount },
-])
+const navItems = computed(() => {
+  const all = [
+    { to: '/feed', label: 'Feed', icon: Home, badge: 0, flag: 'module_feed' },
+    { to: '/comunidades', label: 'Comunidades', icon: MessagesSquare, badge: 0, flag: 'module_communities' },
+    { to: '/collections', label: 'Coleções', icon: Library, badge: 0, flag: 'module_collections' },
+    { to: '/vitrine', label: 'Vitrine', icon: Store, badge: 0, flag: 'module_marketplace' },
+    { to: '/roles', label: 'Rolê', icon: Ticket, badge: 0, flag: 'module_roles' },
+    { to: '/friends', label: 'Amigos', icon: Users, badge: friendsStore.pendingCount, flag: 'module_friends' },
+    { to: '/chat', label: 'Chat', icon: MessageSquare, badge: chatStore.totalUnread, flag: 'module_chat' },
+    { to: '/notifications', label: 'Notificações', icon: Bell, badge: notificationsStore.unreadCount, flag: 'module_notifications' },
+  ]
+  return all.filter(item => featureFlagsStore.isEnabled(item.flag))
+})
 
 function isItemActive(to: string): boolean {
   return route.path === to || route.path.startsWith(to + '/')

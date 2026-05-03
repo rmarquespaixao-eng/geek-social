@@ -3,6 +3,7 @@ import fastifyJwt from '@fastify/jwt'
 import fastifyCookie from '@fastify/cookie'
 import fastifyMultipart from '@fastify/multipart'
 import fastifyCors from '@fastify/cors'
+import fastifyHelmet from '@fastify/helmet'
 import fastifySwagger from '@fastify/swagger'
 import {
   hasZodFastifySchemaValidationErrors,
@@ -14,6 +15,8 @@ import {
 import { migrate } from 'drizzle-orm/node-postgres/migrator'
 import { env } from './config/env.js'
 import { createDatabaseClient } from './shared/infra/database/postgres.client.js'
+import { createRedisClient } from './shared/infra/redis/redis.client.js'
+import { setRateLimitRedis } from './shared/middleware/rate-limit.js'
 import { UserRepository } from './modules/auth/auth.repository.js'
 import { UsersRepository } from './modules/users/users.repository.js'
 import { FieldDefinitionRepository } from './modules/field-definitions/field-definitions.repository.js'
@@ -108,14 +111,38 @@ import { SteamService } from './modules/integrations/steam/steam.service.js'
 import { SteamController, steamRoutes } from './modules/integrations/steam/steam.controller.js'
 import { ImportBatchFinalizationRepository } from './modules/integrations/steam/import-batch-finalization.repository.js'
 import { createSteamImportGameWorker } from './shared/infra/jobs/workers/steam-import-game.worker.js'
+import { adminRoutes } from './modules/admin/admin.routes.js'
+import { AdminAuditLogRepository } from './modules/admin/audit-log.repository.js'
+import { AdminAuditLogService } from './modules/admin/audit-log.service.js'
+import { FeatureFlagsRepository } from './modules/admin/feature-flags/feature-flags.repository.js'
+import { FeatureFlagsService } from './modules/admin/feature-flags/feature-flags.service.js'
+import { featureFlagsPublicRoutes } from './modules/admin/feature-flags/feature-flags.public.routes.js'
+import { seedFeatureFlags } from './shared/infra/database/seeds/feature-flags.seed.js'
+import { UserAccessLogRepository } from './modules/admin/logs/user-access-log.repository.js'
+import { activityRoutes } from './modules/activity/activity.routes.js'
+import { requireFlag } from './shared/middleware/require-flag.js'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
 
+// Auditoria #3: parseia TRUST_PROXY pro formato esperado pelo Fastify.
+// Aceita: 'true'/'false', número (hops) ou CIDR/lista (ex: '10.0.0.0/8,192.168.0.0/16').
+function parseTrustProxy(raw: string): boolean | number | string[] {
+  if (raw === 'true') return true
+  if (raw === 'false') return false
+  const asNumber = Number(raw)
+  if (Number.isInteger(asNumber) && asNumber >= 0) return asNumber
+  return raw.split(',').map(s => s.trim()).filter(Boolean)
+}
+
 export async function buildApp() {
-  const app = Fastify({ logger: true, bodyLimit: 30 * 1024 * 1024 }).withTypeProvider<ZodTypeProvider>()
+  const app = Fastify({
+    logger: true,
+    bodyLimit: 30 * 1024 * 1024,
+    trustProxy: parseTrustProxy(env.TRUST_PROXY),
+  }).withTypeProvider<ZodTypeProvider>()
 
   app.setValidatorCompiler(validatorCompiler)
   app.setSerializerCompiler(serializerCompiler)
@@ -142,7 +169,10 @@ export async function buildApp() {
     }
     request.log.error({ err: error, url: request.url }, 'Unhandled error')
     const err = error as { statusCode?: number; message?: string }
-    if (err.statusCode && err.statusCode >= 400 && err.statusCode < 500) {
+    // statusCode explicitamente setado (4xx ou 5xx intencionais — ex: 429
+    // RATE_LIMIT_EXCEEDED, 503 RATE_LIMIT_UNAVAILABLE) propaga com a mensagem.
+    // Sem statusCode = erro inesperado, mascarado como 500 INTERNAL_ERROR.
+    if (err.statusCode && err.statusCode >= 400 && err.statusCode < 600) {
       return reply.status(err.statusCode).send({ error: err.message ?? 'ERROR' })
     }
     return reply.status(500).send({ error: 'INTERNAL_ERROR' })
@@ -161,6 +191,7 @@ export async function buildApp() {
       ],
       tags: [
         { name: 'Auth', description: 'Autenticação, registro, OAuth, recuperação de senha' },
+        { name: 'Admin', description: 'Painel de administração — acesso restrito a admins e moderadores' },
       ],
       components: {
         securitySchemes: {
@@ -186,10 +217,35 @@ export async function buildApp() {
     app.get('/docs/json', async () => app.swagger())
   }
 
+  const allowedOrigins = [env.FRONTEND_URL, ...(env.ADMIN_URL ? [env.ADMIN_URL] : [])]
   await app.register(fastifyCors, {
-    origin: env.FRONTEND_URL,
+    origin: allowedOrigins,
     credentials: true,
     methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  })
+  // Auditoria #4: helmet com CSP estrita + HSTS. API serve apenas JSON (e Swagger
+  // em dev), então o CSP pode ser bem restritivo: nenhum script/style/img/conexão
+  // por padrão, exceto 'self' pra UI do Swagger não quebrar em dev.
+  await app.register(fastifyHelmet, {
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'none'"],
+        baseUri: ["'self'"],
+        frameAncestors: ["'none'"],
+        formAction: ["'self'"],
+        scriptSrc: ["'self'"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        imgSrc: ["'self'", 'data:'],
+        connectSrc: ["'self'"],
+        fontSrc: ["'self'", 'data:'],
+        objectSrc: ["'none'"],
+      },
+    },
+    crossOriginEmbedderPolicy: false,
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
+    hsts: env.NODE_ENV === 'production'
+      ? { maxAge: 31536000, includeSubDomains: true, preload: true }
+      : false,
   })
   // Algoritmo HS256 fixado explicitamente em sign + verify pra prevenir confusão
   // de algoritmo (alg=none, ataques de cross-algorithm) caso a config evolua para
@@ -204,11 +260,29 @@ export async function buildApp() {
 
   const db = createDatabaseClient(env.DATABASE_URL)
 
+  // Auditoria #5: Redis pra rate-limit distribuído. Conecta antes da migração
+  // pra falhar cedo se a infra estiver incompleta.
+  const redis = createRedisClient(env.REDIS_URL)
+  redis.on('error', (err: Error) => {
+    app.log.error({ err }, 'redis: connection error (rate-limit fail-closes até reconectar)')
+  })
+  setRateLimitRedis(redis)
+  app.addHook('onClose', async () => { await redis.quit().catch(() => {}) })
+
   await migrate(db, { migrationsFolder: join(__dirname, 'shared/infra/database/migrations') })
 
   const fieldDefinitionRepository = new FieldDefinitionRepository(db)
-  await seedFieldDefinitions(fieldDefinitionRepository)
+  await seedFieldDefinitions(fieldDefinitionRepository, db)
   const fieldDefinitionsService = new FieldDefinitionsService(fieldDefinitionRepository)
+
+  const featureFlagsRepository = new FeatureFlagsRepository(db)
+  const featureFlagsAuditLogService = new AdminAuditLogService(new AdminAuditLogRepository(db))
+  const featureFlagsServicePublic = new FeatureFlagsService(featureFlagsRepository, featureFlagsAuditLogService)
+  await seedFeatureFlags(featureFlagsRepository)
+  await app.register(featureFlagsPublicRoutes, { prefix: '/feature-flags', featureFlagsService: featureFlagsServicePublic })
+
+  const userAccessLogRepository = new UserAccessLogRepository(db)
+  await app.register(activityRoutes, { prefix: '/activity', repo: userAccessLogRepository })
 
   const userRepository = new UserRepository(db)
   const usersRepository = new UsersRepository(db)
@@ -249,6 +323,7 @@ export async function buildApp() {
     storageService,
     friendsRepository,
     usersRepository,
+    db,
   )
 
   const postsRepository = new PostsRepository(db)
@@ -266,20 +341,29 @@ export async function buildApp() {
   const itemsRepository = new ItemsRepository(db)
   const itemsService = new ItemsService(itemsRepository, collectionsRepository, storageService, friendsRepository, postsService)
 
-  await app.register(authRoutes, { prefix: '/auth', authService })
+  await app.register(authRoutes, { prefix: '/auth', authService, db })
   await app.register(usersRoutes, { prefix: '/users', usersService })
   await app.register(fieldDefinitionsRoutes, { prefix: '/field-definitions', fieldDefinitionsService })
-  await app.register(collectionsRoutes, { prefix: '/collections', collectionsService })
-  await app.register(collectionsPublicRoutes, { prefix: '/users', collectionsService })
-  await app.register(itemsRoutes, { prefix: '/collections', itemsService })
-  await app.register(itemsPublicRoutes, { prefix: '/users', itemsService })
-  await app.register(friendsRoutes, { prefix: '/friends', friendsService })
-  await app.register(blocksRoutes, { prefix: '/blocks', friendsService })
+  await app.register(async (s) => {
+    s.addHook('preHandler', requireFlag(db, 'module_collections'))
+    await s.register(collectionsRoutes, { prefix: '/collections', collectionsService })
+    await s.register(collectionsPublicRoutes, { prefix: '/users', collectionsService })
+    await s.register(itemsRoutes, { prefix: '/collections', itemsService })
+    await s.register(itemsPublicRoutes, { prefix: '/users', itemsService })
+  })
+  await app.register(async (s) => {
+    s.addHook('preHandler', requireFlag(db, 'module_friends'))
+    await s.register(friendsRoutes, { prefix: '/friends', friendsService })
+    await s.register(blocksRoutes, { prefix: '/blocks', friendsService })
+  })
   await app.register(postsRoutes, { prefix: '/posts', postsService })
   await app.register(commentsRoutes, { prefix: '/posts', commentsService })
   await app.register(reactionsRoutes, { prefix: '/posts', reactionsService })
-  await app.register(feedRoutes, { prefix: '/feed', feedService })
-  await app.register(profilePostsRoutes, { prefix: '/users', feedService })
+  await app.register(async (s) => {
+    s.addHook('preHandler', requireFlag(db, 'module_feed'))
+    await s.register(feedRoutes, { prefix: '/feed', feedService })
+    await s.register(profilePostsRoutes, { prefix: '/users', feedService })
+  })
 
   // Chat
   PushService.configure(env.VAPID_PUBLIC_KEY, env.VAPID_PRIVATE_KEY, env.VAPID_CONTACT)
@@ -317,20 +401,23 @@ export async function buildApp() {
     (token: string) => app.jwt.verify(token) as { userId: string; tokenVersion?: number },
   )
 
-  await app.register(chatRoutes, {
-    prefix: '/chat',
-    conversationsService,
-    messagesService,
-    dmRequestsService,
-    pushService,
-    chatGateway,
-    usersRepository,
-    friendsService,
-  })
-
   const cryptoRepository = new CryptoRepository(db)
   const cryptoService = new CryptoService(cryptoRepository, conversationsRepository)
   await app.register(cryptoRoutes, { prefix: '/crypto', cryptoService })
+
+  await app.register(async (s) => {
+    s.addHook('preHandler', requireFlag(db, 'module_chat'))
+    await s.register(chatRoutes, {
+      prefix: '/chat',
+      conversationsService,
+      messagesService,
+      dmRequestsService,
+      pushService,
+      chatGateway,
+      usersRepository,
+      friendsService,
+    })
+  })
 
   const reportsRepository = new ReportsRepository(db)
   const reportsService = new ReportsService(reportsRepository)
@@ -480,13 +567,22 @@ export async function buildApp() {
     chatGateway.unlinkFriendship(userId, friendId).catch(() => {})
   }
 
-  await app.register(notificationsRoutes, { prefix: '/notifications', notificationsService })
+  await app.register(async (s) => {
+    s.addHook('preHandler', requireFlag(db, 'module_notifications'))
+    await s.register(notificationsRoutes, { prefix: '/notifications', notificationsService })
+  })
   await app.register(reportsRoutes, { prefix: '/reports', reportsService })
-  await app.register(offersRoutes, { prefix: '/offers', offersService })
-  await app.register(listingsRoutes, { prefix: '/listings', listingsService })
-  await app.register(marketplaceRoutes, { prefix: '/marketplace', listingsService })
-  await app.register(listingRatingsRoutes, { prefix: '/ratings', listingRatingsService })
-  await app.register(eventsRoutes, { prefix: '/events', eventsService, participantsService, invitesService })
+  await app.register(async (s) => {
+    s.addHook('preHandler', requireFlag(db, 'module_marketplace'))
+    await s.register(offersRoutes, { prefix: '/offers', offersService })
+    await s.register(listingsRoutes, { prefix: '/listings', listingsService })
+    await s.register(marketplaceRoutes, { prefix: '/marketplace', listingsService })
+    await s.register(listingRatingsRoutes, { prefix: '/ratings', listingRatingsService })
+  })
+  await app.register(async (s) => {
+    s.addHook('preHandler', requireFlag(db, 'module_roles'))
+    await s.register(eventsRoutes, { prefix: '/events', eventsService, participantsService, invitesService })
+  })
 
   // Communities
   const communitiesRepository = new CommunitiesRepository(db)
@@ -525,12 +621,16 @@ export async function buildApp() {
     communitiesService,
   )
 
-  await app.register(communitiesRoutes, {
-    prefix: '/communities',
-    communitiesService,
-    membersService,
-    joinRequestsService,
-    topicsService,
+  await app.register(async (s) => {
+    s.addHook('preHandler', requireFlag(db, 'module_communities'))
+    await s.register(communitiesRoutes, {
+      prefix: '/communities',
+      communitiesService,
+      membersService,
+      joinRequestsService,
+      topicsService,
+      db,
+    })
   })
 
   // Steam integration (opcional — exige fila; STEAM_WEB_API_KEY pode estar vazia (link funciona, import falha com STEAM_AUTH_FAILED))
@@ -617,6 +717,9 @@ export async function buildApp() {
 
     app.addHook('onClose', async () => { await jobsQueue.stop() })
   }
+
+  // Admin panel
+  await app.register(adminRoutes, { prefix: '/admin', db })
 
   if (env.GOOGLE_OAUTH_ENABLED && env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET) {
     const { registerGoogleRoutes } = await import('./modules/auth/google.strategy.js')

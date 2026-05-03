@@ -57,6 +57,9 @@ export const useNotifications = defineStore('notifications', () => {
   }
 
   function handleNewNotification(notification: Notification): void {
+    // Dedupe: socket+REST races (or duplicate listeners across init() calls) can
+    // push the same id twice, inflating unreadCount above the server truth.
+    if (items.value.some(n => n.id === notification.id)) return
     items.value.unshift(notification)
     // Fan out event-* notifications to the events store so cached state stays fresh.
     if (isEventNotification(notification.type)) {
@@ -75,6 +78,8 @@ export const useNotifications = defineStore('notifications', () => {
   function init(): void {
     const sock = getSocket()
     if (!sock) return
+    // Idempotent: init() is called from both authInit and NotificationsView.onMounted.
+    sock.off('notification:new', handleNewNotification)
     sock.on('notification:new', handleNewNotification)
   }
 

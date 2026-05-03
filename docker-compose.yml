@@ -25,6 +25,18 @@ services:
       retries: 10
     restart: unless-stopped
 
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly no --save ""
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
   minio:
     image: minio/minio:latest
     command: server /data --console-address ":9001"
@@ -80,6 +92,8 @@ services:
       PORT: 3000
       DATABASE_URL: postgresql://${POSTGRES_USER:-dev}:${POSTGRES_PASSWORD:-dev}@db:5432/${POSTGRES_DB:-geek_social}
       JOBS_DATABASE_URL: postgresql://${POSTGRES_USER:-dev}:${POSTGRES_PASSWORD:-dev}@db:5432/geek_social_jobs
+      REDIS_URL: redis://redis:6379
+      TRUST_PROXY: ${TRUST_PROXY:-false}
       JWT_SECRET: ${JWT_SECRET:-dev-only-secret-change-me-in-production-please-32}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-15m}
       REFRESH_TOKEN_EXPIRES_DAYS: ${REFRESH_TOKEN_EXPIRES_DAYS:-7}
@@ -98,10 +112,14 @@ services:
       GOOGLE_OAUTH_ENABLED: ${GOOGLE_OAUTH_ENABLED:-false}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      ADMIN_SECRETS_ENC_KEY: ${ADMIN_SECRETS_ENC_KEY:-bcca70819cacc504dbbbd81929faf5c9e5abf48727b542297b4e70b10c14149e}
+      ADMIN_URL: http://localhost:${ADMIN_PORT:-8090}
     ports:
       - "${API_PORT:-3000}:3000"
     depends_on:
       db:
+        condition: service_healthy
+      redis:
         condition: service_healthy
       minio-init:
         condition: service_completed_successfully
@@ -118,6 +136,17 @@ services:
         VITE_VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-BEzO3HA6qWVExkbRErzPLMTZ2e3DOH1NZSZvNdUXl5pynzU2rb3u2hIeUS8YNCvchHMTZNFRgOlNunQm0BmELJg}
     ports:
       - "${FRONTEND_PORT:-8080}:80"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+  admin:
+    build:
+      context: ./admin
+      args:
+        VITE_API_URL: http://localhost:${API_PORT:-3000}
+    ports:
+      - "${ADMIN_PORT:-8090}:80"
     depends_on:
       - api
     restart: unless-stopped

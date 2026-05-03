@@ -2,7 +2,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowLeft, Users, MoreVertical, Eye, UserX, Bell, BellOff, PanelLeftClose, PanelLeftOpen, Hourglass, Flag, Settings } from 'lucide-vue-next'
+import { ArrowLeft, Users, MoreVertical, Eye, UserX, Bell, BellOff, PanelLeftClose, PanelLeftOpen, Hourglass, Flag, Settings, Shield, Lock } from 'lucide-vue-next'
 import ReportDialog from '@/modules/reports/components/ReportDialog.vue'
 import { useAuthStore } from '@/shared/auth/authStore'
 import { useChat } from '../composables/useChat'
@@ -13,6 +13,8 @@ import MessageArea from '../components/MessageArea.vue'
 import OpenDmModal from '../components/OpenDmModal.vue'
 import CallButton from '../components/CallButton.vue'
 import GroupSettingsModal from '../components/GroupSettingsModal.vue'
+import SafetyNumberDialog from '../components/SafetyNumberDialog.vue'
+import IdentityChangedBanner from '../components/IdentityChangedBanner.vue'
 import AppConfirmDialog from '@/shared/ui/AppConfirmDialog.vue'
 import AppImageLightbox from '@/shared/ui/AppImageLightbox.vue'
 import { useUiPreferences } from '@/shared/ui/useUiPreferences'
@@ -31,7 +33,25 @@ const showDmModal = ref(false)
 const headerMenuOpen = ref(false)
 const blocking = ref(false)
 const showGroupSettings = ref(false)
+const showSafetyDialog = ref(false)
+const safetyInitialPeerId = ref<string | undefined>(undefined)
 const showBlockConfirm = ref(false)
+
+function openSafetyDialog() {
+  headerMenuOpen.value = false
+  safetyInitialPeerId.value = undefined
+  showSafetyDialog.value = true
+}
+
+function openSafetyForPeer(peerId: string) {
+  safetyInitialPeerId.value = peerId
+  showSafetyDialog.value = true
+}
+
+function closeSafetyDialog() {
+  showSafetyDialog.value = false
+  safetyInitialPeerId.value = undefined
+}
 const headerAvatarZoom = ref(false)
 const showReportDialog = ref(false)
 
@@ -239,9 +259,16 @@ onUnmounted(() => {
 
           <!-- Name + status -->
           <div class="flex-1 min-w-0">
-            <p class="text-sm font-semibold text-(--color-text-primary) truncate">
-              {{ conversationTitle }}
-            </p>
+            <div class="flex items-center gap-1.5">
+              <p class="text-sm font-semibold text-(--color-text-primary) truncate">
+                {{ conversationTitle }}
+              </p>
+              <Lock
+                :size="11"
+                class="shrink-0 text-(--color-status-online)"
+                title="Conversa criptografada de ponta a ponta"
+              />
+            </div>
             <p
               v-if="activeConversation.type === 'group'"
               class="text-xs text-(--color-text-muted)"
@@ -299,6 +326,13 @@ onUnmounted(() => {
               </button>
               <button
                 class="flex w-full items-center gap-2 px-4 py-2 text-sm text-[#e2e8f0] hover:bg-[#252640] transition-colors"
+                @click="openSafetyDialog"
+              >
+                <Shield :size="15" />
+                Verificar identidade
+              </button>
+              <button
+                class="flex w-full items-center gap-2 px-4 py-2 text-sm text-[#e2e8f0] hover:bg-[#252640] transition-colors"
                 @click="openReportDialog"
               >
                 <Flag :size="15" />
@@ -338,6 +372,13 @@ onUnmounted(() => {
               </button>
               <button
                 class="flex w-full items-center gap-2 px-4 py-2 text-sm text-[#e2e8f0] hover:bg-[#252640] transition-colors"
+                @click="openSafetyDialog"
+              >
+                <Shield :size="15" />
+                Verificar identidade
+              </button>
+              <button
+                class="flex w-full items-center gap-2 px-4 py-2 text-sm text-[#e2e8f0] hover:bg-[#252640] transition-colors"
                 @click="openReportDialog"
               >
                 <Flag :size="15" />
@@ -365,6 +406,12 @@ onUnmounted(() => {
           <span>Modo temporário ativo · Mensagens somem ao serem visualizadas</span>
         </div>
 
+        <!-- Banner: identidade de peer mudou (TOFU) -->
+        <IdentityChangedBanner
+          :conversation="activeConversation"
+          @verify="openSafetyForPeer"
+        />
+
         <!-- Message area -->
         <MessageArea :conversation="activeConversation" class="flex-1 min-h-0" />
       </template>
@@ -383,6 +430,14 @@ onUnmounted(() => {
       :conversation="activeConversation"
       @close="showGroupSettings = false"
       @left="router.push('/chat')"
+    />
+
+    <!-- Safety number dialog -->
+    <SafetyNumberDialog
+      v-if="showSafetyDialog && activeConversation"
+      :conversation="activeConversation"
+      :initial-peer-id="safetyInitialPeerId"
+      @close="closeSafetyDialog"
     />
 
     <AppImageLightbox

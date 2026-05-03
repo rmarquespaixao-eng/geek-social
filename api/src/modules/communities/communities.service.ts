@@ -4,6 +4,7 @@ import type { DatabaseClient } from '../../shared/infra/database/postgres.client
 import type { IStorageService } from '../../shared/contracts/storage.service.contract.js'
 import type { CommunitiesRepository, CommunityRow } from './communities.repository.js'
 import type { MembersRepository } from './members.repository.js'
+import type { JoinRequestsRepository } from './join-requests.repository.js'
 import type { AuditLogRepository } from './audit-log.repository.js'
 import type { CreateCommunityInput, UpdateCommunityInput, ListCommunitiesQuery } from './communities.schema.js'
 import { CommunitiesError } from './communities.errors.js'
@@ -32,6 +33,7 @@ export class CommunitiesService {
     private readonly db: DatabaseClient,
     private readonly repo: CommunitiesRepository,
     private readonly membersRepo: MembersRepository,
+    private readonly joinRequestsRepo: JoinRequestsRepository,
     private readonly auditLog: AuditLogRepository,
     private readonly storageService: IStorageService | null,
   ) {}
@@ -168,7 +170,11 @@ export class CommunitiesService {
     if (existing.ownerId !== actorId) throw new CommunitiesError('NOT_OWNER')
     if (existing.deletedAt) throw new CommunitiesError('COMMUNITY_DELETED')
 
-    await this.repo.softDelete(communityId)
+    await this.db.transaction(async (tx) => {
+      const exec = tx as unknown as DatabaseClient
+      await this.repo.softDelete(communityId, exec)
+      await this.joinRequestsRepo.rejectAllPending(communityId, actorId, exec)
+    })
     await this.auditLog.record('community_delete', communityId, actorId)
   }
 
@@ -183,32 +189,22 @@ export class CommunitiesService {
 
     if (!community || community.deletedAt) throw new CommunitiesError('COMMUNITY_NOT_FOUND')
 
-    if (community.visibility === 'private' || community.visibility === 'restricted') {
-      if (viewerId) {
-        const membership = await this.membersRepo.findByCommunityAndUser(community.id, viewerId)
-        if (!membership) {
-          if (community.visibility === 'private') {
-            // Private: non-members get stripped metadata — handled at controller level via isPrivateNonMember flag
-            return community
-          }
-          // Restricted: non-members can see summary
-          return community
-        }
-        if (membership.status === 'banned') throw new CommunitiesError('BANNED')
-      } else if (community.visibility === 'private') {
-        return community
-      }
+    if (viewerId) {
+      const membership = await this.membersRepo.findByCommunityAndUser(community.id, viewerId)
+      if (membership?.status === 'banned') throw new CommunitiesError('BANNED')
     }
 
     return community
   }
 
   async assertCanView(viewerId: string | null, community: CommunityRow): Promise<void> {
-    if (community.visibility === 'public') return
     if (!viewerId) {
-      throw new CommunitiesError('NOT_MEMBER')
+      if (community.visibility !== 'public') throw new CommunitiesError('NOT_MEMBER')
+      return
     }
     const membership = await this.membersRepo.findByCommunityAndUser(community.id, viewerId)
+    if (membership?.status === 'banned') throw new CommunitiesError('BANNED')
+    if (community.visibility === 'public') return
     if (!membership || membership.status !== 'active') {
       throw new CommunitiesError('NOT_MEMBER')
     }
@@ -217,20 +213,6 @@ export class CommunitiesService {
   async assertNotBanned(viewerId: string, communityId: string): Promise<void> {
     const membership = await this.membersRepo.findByCommunityAndUser(communityId, viewerId)
     if (membership && membership.status === 'banned') throw new CommunitiesError('BANNED')
-  }
-
-  async isPrivateNonMember(community: CommunityRow, viewerId: string | null): Promise<boolean> {
-    if (community.visibility !== 'private') return false
-    if (!viewerId) return true
-    const membership = await this.membersRepo.findByCommunityAndUser(community.id, viewerId)
-    return !membership || membership.status !== 'active'
-  }
-
-  async isRestrictedNonMember(community: CommunityRow, viewerId: string | null): Promise<boolean> {
-    if (community.visibility !== 'restricted') return false
-    if (!viewerId) return true
-    const membership = await this.membersRepo.findByCommunityAndUser(community.id, viewerId)
-    return !membership || membership.status !== 'active'
   }
 
   async listOwned(

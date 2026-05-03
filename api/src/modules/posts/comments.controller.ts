@@ -24,7 +24,7 @@ export class CommentsController {
   }
 
   async listComments(request: FastifyRequest<{ Params: { postId: string }; Querystring: { cursor?: string; limit?: number } }>, reply: FastifyReply) {
-    const userId = (request.user as AccessTokenClaims | undefined)?.userId ?? null
+    const { userId } = request.user as AccessTokenClaims
     try {
       const result = await this.service.listComments(userId, request.params.postId, request.query.cursor, request.query.limit ?? 20)
       return reply.send(result)

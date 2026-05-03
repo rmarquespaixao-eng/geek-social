@@ -46,8 +46,9 @@ export const reactionsRoutes: FastifyPluginAsyncZod<{ reactionsService: Reaction
       summary: 'Listar reações do post',
       description: 'Retorna { counts: { power_up, epic, ... }, mine: type | null, recent: User[] }.',
       params: postIdParam,
+      security: [{ accessToken: [] }],
     },
-    preHandler: [optionalAuthenticate],
+    preHandler: [authenticate],
     handler: controller.getReactions.bind(controller),
   })
 }

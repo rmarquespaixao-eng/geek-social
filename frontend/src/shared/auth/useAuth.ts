@@ -5,7 +5,9 @@ import type { LoginPayload, RegisterPayload, AuthResponse, User } from '@/shared
 import { useRouter } from 'vue-router'
 import { connectSocket, disconnectSocket } from '@/shared/socket/socket'
 import { requestPushPermission } from '@/shared/pwa/usePush'
-import * as cryptoService from '@/modules/chat/services/cryptoService'
+import { resetSignalSession } from '@/shared/crypto/signal/SignalClient'
+import { initCrypto } from './cryptoBootstrap'
+import { useFeatureFlagsStore } from '@/shared/featureFlags/featureFlagsStore'
 
 export function useAuth() {
   const store = useAuthStore()
@@ -15,11 +17,12 @@ export function useAuth() {
   async function login(payload: LoginPayload): Promise<void> {
     const { data } = await api.post<AuthResponse>('/auth/login', payload)
     store.setAuth(data.accessToken, { avatarUrl: null, ...data.user })
-    // Carrega perfil completo (avatar, cover, bio, steamId, etc) — login só retorna o mínimo.
     await loadUser()
     connectSocket(data.accessToken)
     requestPushPermission().catch(() => {})
-    initCrypto(store.user!.id, payload.password).catch(() => {})
+    if (useFeatureFlagsStore().isEnabled('e2ee_chat')) {
+      await initCrypto(store.user!.id, payload.password)
+    }
   }
 
   async function register(payload: RegisterPayload): Promise<void> {
@@ -27,84 +30,20 @@ export function useAuth() {
     store.setAuth(data.accessToken, { avatarUrl: null, ...data.user })
     await loadUser()
     connectSocket(data.accessToken)
-    initCrypto(store.user!.id, payload.password).catch(() => {})
+    if (useFeatureFlagsStore().isEnabled('e2ee_chat')) {
+      await initCrypto(store.user!.id, payload.password)
+    }
   }
 
   async function logout(): Promise<void> {
     try {
       await api.post('/auth/logout')
     } finally {
-      cryptoService.clearKeyCache()
+      resetSignalSession()
       disconnectSocket()
       store.clearAuth()
       router.push('/login')
     }
-  }
-
-  async function initCrypto(userId: string, password?: string): Promise<void> {
-    const existingKey = await cryptoService.loadPrivateKey(userId)
-    if (existingKey) {
-      await cryptoService.initKeyPair(userId)
-      return
-    }
-
-    // Try to restore from server backup first
-    let backup: cryptoService.EncryptedBackup | null = null
-    try {
-      const { data } = await api.get<cryptoService.EncryptedBackup>('/crypto/backup')
-      backup = data
-    } catch {
-      // 404 = no backup yet
-    }
-
-    if (backup) {
-      if (password) {
-        try {
-          await cryptoService.importFromBackup(userId, backup, password)
-          return
-        } catch {
-          // Login password ≠ backup password (typo or password rotated). Never
-          // regenerate here — that would overwrite the server pubkey and make
-          // every prior encrypted message permanently undecipherable. Prompt
-          // the user for the original PIN via the restore dialog instead.
-        }
-      }
-      store.setPendingCryptoRestore(backup)
-      return
-    }
-
-    // No backup on server: safe to generate a fresh keypair and upload.
-    const publicKey = await cryptoService.initKeyPair(userId)
-    await api.put('/crypto/my-key', { publicKey }).catch(() => {})
-
-    if (password) {
-      const encBackup = await cryptoService.exportEncryptedBackup(userId, password)
-      await api.put('/crypto/backup', encBackup).catch(() => {})
-    } else {
-      // OAuth user with no backup: prompt to create a PIN
-      store.setPendingPinSetup(true)
-    }
-  }
-
-  async function restoreKeyFromBackup(password: string): Promise<boolean> {
-    const backup = store.pendingCryptoRestore
-    if (!backup || !store.user) return false
-    try {
-      await cryptoService.importFromBackup(store.user.id, backup, password)
-      store.clearPendingCryptoRestore()
-      return true
-    } catch {
-      return false
-    }
-  }
-
-  async function setupCryptoWithPin(userId: string, pin: string): Promise<void> {
-    const publicKey = await cryptoService.initKeyPair(userId)
-    await api.put('/crypto/my-key', { publicKey }).catch(() => {})
-    const encBackup = await cryptoService.exportEncryptedBackup(userId, pin)
-    await api.put('/crypto/backup', encBackup).catch(() => {})
-    store.clearPendingCryptoRestore()
-    store.setPendingPinSetup(false)
   }
 
   async function loadUser(): Promise<void> {
@@ -129,7 +68,5 @@ export function useAuth() {
     logout,
     loadUser,
     initCrypto,
-    restoreKeyFromBackup,
-    setupCryptoWithPin,
   }
 }

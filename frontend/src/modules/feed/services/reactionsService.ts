@@ -1,6 +1,10 @@
 // src/modules/feed/services/reactionsService.ts
 import { api } from '@/shared/http/api'
-import type { Reaction } from '../types'
+
+export interface PostReactions {
+  counts: Record<string, number>
+  myReaction: string | null
+}
 
 export const reactionsService = {
   async react(postId: string, type: string): Promise<void> {
@@ -11,8 +15,8 @@ export const reactionsService = {
     await api.delete(`/posts/${postId}/reactions`)
   },
 
-  async getReactions(postId: string): Promise<Reaction[]> {
-    const { data } = await api.get<Reaction[]>(`/posts/${postId}/reactions`)
+  async getReactions(postId: string): Promise<PostReactions> {
+    const { data } = await api.get<PostReactions>(`/posts/${postId}/reactions`)
     return data
   },
 }

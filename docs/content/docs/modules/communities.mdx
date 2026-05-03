@@ -1,0 +1,225 @@
+---
+title: Comunidades
+description: Espaços temáticos com membros, tópicos, moderação e pedidos de entrada — ao estilo Orkut.
+---
+
+## Visão geral
+
+Comunidades são espaços persistentes que reúnem pessoas ao redor de um interesse (gênero de jogo, jogo específico, hobby de colecionador etc.). Qualquer usuário autenticado pode criar, participar ou moderar comunidades.
+
+Dois modelos de entrada:
+- **`public`** — qualquer membro pode entrar diretamente
+- **`restricted`** — entrada requer aprovação de owner ou moderador
+
+## Entidades principais
+
+| Tabela | Papel |
+|---|---|
+| `communities` | Container da comunidade (nome, slug, capa, ícone, visibilidade, contadores denormalizados) |
+| `community_members` | Relação user ↔ comunidade com role (`owner` / `moderator` / `member`) e status (`pending` / `active` / `banned`) |
+| `community_join_requests` | Pedidos de entrada para comunidades `restricted` (status `pending` / `approved` / `rejected`) |
+| `community_topic_meta` | Metadados de tópico — extensão de `posts` com `pinned`, `locked`, `movedFrom` |
+| `community_transfers` | Transferência de ownership pendente (1 por vez) |
+| `community_invites` | Convites diretos para comunidades restritas |
+| `community_audit_log` | Log de ações de moderação (ban, unban, promote, demote, kick, topic delete) |
+
+### Schema resumido
+
+```
+communities
+├── id, slug (auto-suffix em colisão), name, description
+├── ownerId (nullable — owner pode deletar conta sem destruir comunidade)
+├── category (boardgames | tcg | rpg-mesa | rpg-digital | mmo | souls | fps |
+│             survival | indie | retro | mobile | simulation | strategy |
+│             mods | community-events)
+├── iconUrl, coverUrl   ← multipart no create/update
+├── visibility: public | restricted
+├── rules (5000 chars), welcomeMessage (1000 chars)
+├── memberCount, topicCount  ← counters denormalizados
+└── deletedAt (soft delete — só owner)
+
+community_members
+├── communityId, userId
+├── role: owner | moderator | member
+├── status: pending | active | banned
+├── banReason, joinedAt, approvedAt
+└── unique(communityId, userId)
+
+community_join_requests
+├── communityId, userId
+├── status: pending | approved | rejected
+├── decidedBy, decidedAt
+└── partial unique(communityId, userId) WHERE status='pending'
+
+community_topic_meta        ← estende posts (PK = postId)
+├── communityId
+├── pinned, locked, pinnedAt, lockedAt
+└── movedFromCommunityId
+```
+
+## Endpoints
+
+28 rotas sob `/comunidades`:
+
+### Comunidades (CRUD)
+
+| Método | Path | Auth | Resumo |
+|---|---|---|---|
+| `POST` | `/comunidades` | ✓ | Criar comunidade (multipart: cover + icon obrigatórios) |
+| `GET` | `/comunidades` | ✓ | Listar comunidades visíveis (filtros: category, visibility, search) |
+| `GET` | `/comunidades/me/owned` | ✓ | Minhas comunidades como dono |
+| `GET` | `/comunidades/me/joined` | ✓ | Comunidades das quais faço parte |
+| `GET` | `/comunidades/:id` | ✓ | Detalhes da comunidade (id ou slug) |
+| `PATCH` | `/comunidades/:id` | ✓ | Atualizar campos (owner/moderador) |
+| `DELETE` | `/comunidades/:id` | ✓ | Soft delete (somente owner) |
+
+### Membros
+
+| Método | Path | Auth | Resumo |
+|---|---|---|---|
+| `POST` | `/comunidades/:id/members` | ✓ | Entrar (pública) ou pedir entrada (restrita) |
+| `DELETE` | `/comunidades/:id/members/me` | ✓ | Sair da comunidade |
+| `GET` | `/comunidades/:id/members` | ✓ | Listar membros (filtros: role, status) |
+| `POST` | `/comunidades/:id/members/:userId/promote` | ✓ | Promover a moderador (owner only) |
+| `POST` | `/comunidades/:id/members/:userId/demote` | ✓ | Rebaixar de moderador (owner only) |
+| `POST` | `/comunidades/:id/members/:userId/ban` | ✓ | Banir membro (owner/moderador) |
+| `POST` | `/comunidades/:id/members/:userId/unban` | ✓ | Desbanir membro (owner/moderador) |
+| `DELETE` | `/comunidades/:id/members/:userId` | ✓ | Remover (kick) membro (owner/moderador) |
+
+### Pedidos de entrada (Join Requests)
+
+| Método | Path | Auth | Resumo |
+|---|---|---|---|
+| `GET` | `/comunidades/:id/join-requests` | ✓ | Listar pedidos pendentes (owner/moderador) |
+| `POST` | `/comunidades/:id/join-requests/:userId/approve` | ✓ | Aprovar pedido (owner/moderador) |
+| `POST` | `/comunidades/:id/join-requests/:userId/reject` | ✓ | Rejeitar pedido (owner/moderador) |
+
+### Tópicos
+
+| Método | Path | Auth | Resumo |
+|---|---|---|---|
+| `GET` | `/comunidades/:id/topics` | ✓ | Listar tópicos (pinned primeiro, depois cronológico) |
+| `POST` | `/comunidades/:id/topics` | ✓ | Criar tópico (membro ativo) |
+| `GET` | `/comunidades/:id/topics/:topicId` | ✓ | Detalhes do tópico + meta |
+| `DELETE` | `/comunidades/:id/topics/:topicId` | ✓ | Deletar tópico (autor, owner ou moderador) |
+
+Tópicos reutilizam o sistema de `posts`: reactions (power_up, epic, critical, loot, gg) e comentários planos funcionam nos tópicos sem endpoints extras.
+
+## Fluxos
+
+### Criar comunidade
+
+<Mermaid chart={`sequenceDiagram
+  autonumber
+  participant U as Usuário
+  participant FE as Frontend
+  participant API as Backend
+  participant S3 as MinIO/S3
+  participant DB as PostgreSQL
+
+  U->>FE: /comunidades/nova → preenche form, envia cover + icon
+  FE->>API: POST /comunidades (multipart) {name, description, category, visibility, cover, icon}
+  API->>API: Valida Zod (name ≤80, desc ≤2000, category ∈ enum)
+  API->>S3: Upload cover → communities/{uuid}/cover-{rand}.webp
+  API->>S3: Upload icon  → communities/{uuid}/icon-{rand}.webp
+  API->>DB: BEGIN
+  API->>DB: INSERT communities (slug=slugify(name), auto-suffix se colisão)
+  API->>DB: INSERT community_members (userId=current, role=owner, status=active)
+  API->>DB: COMMIT
+  API-->>FE: 201 { community }
+  FE->>FE: Redirect → /comunidades/{slug}`} />
+
+### Entrar em comunidade restrita
+
+<Mermaid chart={`sequenceDiagram
+  autonumber
+  participant U as Usuário
+  participant API as Backend
+  participant DB as PostgreSQL
+
+  U->>API: POST /comunidades/:id/members
+  API->>DB: SELECT community (visibilidade, join_policy)
+  alt Comunidade pública
+    API->>DB: INSERT community_members (status=active, role=member)
+    API-->>U: 201 { member, status: "active" }
+  else Comunidade restrita
+    API->>DB: INSERT community_join_requests (status=pending)
+    API-->>U: 202 { joinRequest, status: "pending" }
+  end`} />
+
+### Aprovar pedido de entrada
+
+<Mermaid chart={`sequenceDiagram
+  autonumber
+  participant M as Moderador
+  participant API as Backend
+  participant DB as PostgreSQL
+
+  M->>API: POST /comunidades/:id/join-requests/:userId/approve
+  API->>DB: SELECT join_request (deve ser pending)
+  API->>DB: BEGIN
+  API->>DB: UPDATE join_requests SET status=approved, decidedBy, decidedAt
+  API->>DB: INSERT community_members (status=active, approvedAt=now())
+  API->>DB: COMMIT
+  API-->>M: 200 { member }`} />
+
+### Moderação de membro
+
+```
+ban     → status = 'banned', banReason gravado, audit log
+unban   → status = 'active', banReason limpo, audit log
+kick    → row deletada de community_members, audit log
+promote → role = 'moderator' (owner only), audit log
+demote  → role = 'member'    (owner only), audit log
+```
+
+Todas as ações de moderação são registradas em `community_audit_log` com `actorId`, `targetUserId`, `action` e `metadata`.
+
+## Regras de acesso
+
+| Ação | Quem pode |
+|---|---|
+| Ver comunidade pública (detalhes, membros, tópicos) | Qualquer autenticado |
+| Ver comunidade restrita (detalhes) | Somente membros ativos; não-membros veem só metadados mínimos |
+| Criar tópico | Membro ativo |
+| Deletar tópico | Autor do tópico, owner ou moderador |
+| Aprovar/rejeitar pedido | Owner ou moderador |
+| Banir / kickar membro | Owner ou moderador (não pode banir outro moderador sem ser owner) |
+| Promover / rebaixar | Somente owner |
+| Editar comunidade | Owner ou moderador |
+| Soft delete | Somente owner |
+
+## Visibilidade e feeds
+
+- Posts criados como tópico de comunidade **não aparecem no feed global** — ficam restritos ao feed da comunidade.
+- Reactions e comentários em tópicos funcionam via endpoints existentes (`/posts/:id/reactions`, `/posts/:id/comments`), sem rotas extras.
+
+## Slug
+
+O slug é derivado do nome (`slugify`) na criação. Em caso de colisão, um sufixo numérico atômico é adicionado dentro de uma transação (`my-community` → `my-community-2` → `my-community-3`…). O endpoint de detalhes aceita tanto UUID quanto slug como `:id`.
+
+## Códigos de erro
+
+`CommunitiesError.code`:
+
+| HTTP | Código | Causa |
+|---|---|---|
+| 400 | `MISSING_FILES` | cover ou icon não enviados no multipart |
+| 403 | `NOT_MEMBER` | operação requer ser membro ativo |
+| 403 | `NOT_MODERATOR` | operação requer owner ou moderador |
+| 403 | `NOT_OWNER` | operação requer ser o owner |
+| 403 | `ALREADY_BANNED` | usuário está banido da comunidade |
+| 404 | `COMMUNITY_NOT_FOUND` | comunidade não encontrada |
+| 409 | `ALREADY_MEMBER` | usuário já é membro ativo |
+| 409 | `JOIN_REQUEST_PENDING` | já há pedido de entrada pendente |
+| 410 | `COMMUNITY_DELETED` | comunidade foi excluída |
+
+## Limitações conhecidas (alpha)
+
+- Sem chat próprio por comunidade — usuários se comunicam via DM ou tópicos
+- Posts cruzados (cross-post de tópico no feed pessoal) não implementados
+- Transferência de ownership (`community_transfers`) criada no schema mas endpoints ainda não expostos
+- Convites diretos (`community_invites`) no schema mas endpoints não expostos
+- Sem notificações de eventos da comunidade (novo tópico, pedido aprovado etc.)
+- Sem limite de comunidades por usuário
+- Sem busca full-text em tópicos

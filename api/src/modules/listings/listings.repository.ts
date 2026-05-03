@@ -1,7 +1,7 @@
 import { eq, and, sql, inArray } from 'drizzle-orm'
 import { asc } from 'drizzle-orm'
 import type { DatabaseClient } from '../../shared/infra/database/postgres.client.js'
-import { listings, items, collections, itemOffers, collectionFieldSchema, fieldDefinitions } from '../../shared/infra/database/schema.js'
+import { listings, items, collections, collectionTypes, itemOffers, collectionFieldSchema, fieldDefinitions } from '../../shared/infra/database/schema.js'
 import type {
   IListingsRepository, Listing, CreateListingData, UpdateListingData,
   ListingWithItem, MarketplaceListing, SearchMarketplaceParams, ListingStatus,
@@ -58,7 +58,7 @@ export class ListingsRepository implements IListingsRepository {
         itemRating: items.rating,
         itemComment: items.comment,
         itemCollectionId: items.collectionId,
-        collectionType: collections.type,
+        collectionTypeKey: collectionTypes.key,
         pendingOffersCount: sql<number>`(
           SELECT COUNT(*) FROM item_offers io
           WHERE io.listing_id = ${listings.id} AND io.status = 'pending'
@@ -67,6 +67,7 @@ export class ListingsRepository implements IListingsRepository {
       .from(listings)
       .innerJoin(items, eq(items.id, listings.itemId))
       .innerJoin(collections, eq(collections.id, items.collectionId))
+      .leftJoin(collectionTypes, eq(collectionTypes.id, collections.collectionTypeId))
       .where(cond)
       .orderBy(sql`${listings.createdAt} DESC`)
 
@@ -89,7 +90,7 @@ export class ListingsRepository implements IListingsRepository {
         rating: r.itemRating,
         comment: r.itemComment,
         collectionId: r.itemCollectionId,
-        collectionType: r.collectionType,
+        collectionType: r.collectionTypeKey,
       },
       pendingOffersCount: Number(r.pendingOffersCount),
     }))
@@ -116,7 +117,7 @@ export class ListingsRepository implements IListingsRepository {
       sql`${listings.ownerId} <> ${viewerId}`,
     ]
     if (type) conds.push(sql`${listings.availability} = ${type}`)
-    if (collectionType) conds.push(sql`${collections.type} = ${collectionType}`)
+    if (collectionType) conds.push(sql`${collectionTypes.key} = ${collectionType}`)
     if (minPrice != null) conds.push(sql`${listings.askingPrice} >= ${minPrice}`)
     if (maxPrice != null) conds.push(sql`${listings.askingPrice} <= ${maxPrice}`)
     conds.push(sql`(
@@ -130,7 +131,8 @@ export class ListingsRepository implements IListingsRepository {
     )`)
     conds.push(sql`NOT EXISTS (
       SELECT 1 FROM user_blocks ub
-      WHERE ub.blocker_id = ${listings.ownerId} AND ub.blocked_id = ${viewerId}
+      WHERE (ub.blocker_id = ${listings.ownerId} AND ub.blocked_id = ${viewerId})
+        OR (ub.blocker_id = ${viewerId} AND ub.blocked_id = ${listings.ownerId})
     )`)
 
     const rows = await this.db
@@ -151,13 +153,14 @@ export class ListingsRepository implements IListingsRepository {
         itemRating: items.rating,
         itemComment: items.comment,
         itemCollectionId: items.collectionId,
-        collectionType: collections.type,
+        collectionTypeKey: collectionTypes.key,
         ownerDisplayName: sql<string>`(SELECT display_name FROM users WHERE id = ${listings.ownerId})`,
         ownerAvatarUrl: sql<string | null>`(SELECT avatar_url FROM users WHERE id = ${listings.ownerId})`,
       })
       .from(listings)
       .innerJoin(items, eq(items.id, listings.itemId))
       .innerJoin(collections, eq(collections.id, items.collectionId))
+      .leftJoin(collectionTypes, eq(collectionTypes.id, collections.collectionTypeId))
       .where(and(...conds))
       .orderBy(sql`${listings.updatedAt} DESC`)
       .limit(limit)
@@ -205,7 +208,7 @@ export class ListingsRepository implements IListingsRepository {
         rating: r.itemRating,
         comment: r.itemComment,
         collectionId: r.itemCollectionId,
-        collectionType: r.collectionType,
+        collectionType: r.collectionTypeKey,
         fieldSchema: schemasByCollection[r.itemCollectionId] ?? [],
       },
       owner: {

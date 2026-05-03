@@ -18,6 +18,7 @@ export type Message = {
   content: string | null
   replyToId: string | null
   callMetadata: CallMetadata | null
+  isEncrypted: boolean
   isTemporary: boolean
   temporaryEvent: TemporaryEvent | null
   hiddenForUserIds: string[]
@@ -59,6 +60,7 @@ export interface IMessagesRepository {
     content?: string
     replyToId?: string
     callMetadata?: CallMetadata
+    isEncrypted?: boolean
     isTemporary?: boolean
     temporaryEvent?: TemporaryEvent
   }): Promise<Message>

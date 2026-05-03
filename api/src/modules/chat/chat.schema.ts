@@ -64,3 +64,38 @@ export const forwardMessageSchema = z.object({
 export const setTemporarySchema = z.object({
   enabled: z.boolean(),
 })
+
+// ──────── Socket.IO gateway payloads ────────
+// Validados em chat.gateway.ts. content pode ser ciphertext base64 quando isEncrypted=true,
+// por isso o limite é generoso (200 KB).
+
+export const gwMessageSendSchema = z.object({
+  conversationId: z.string().uuid(),
+  content: z.string().max(200_000).optional(),
+  attachmentIds: z.array(z.string().uuid()).max(20).optional(),
+  isEncrypted: z.boolean().optional(),
+})
+
+export const gwConversationIdSchema = z.object({
+  conversationId: z.string().uuid(),
+})
+
+export const gwCallInviteSchema = z.object({
+  conversationId: z.string().uuid(),
+  callId: z.string().uuid(),
+})
+
+export const gwCallIdSchema = z.object({
+  callId: z.string().uuid(),
+})
+
+export const gwCallEndSchema = z.object({
+  callId: z.string().uuid(),
+  durationSec: z.number().int().min(0).max(86_400).optional(),
+})
+
+export const gwCallSignalSchema = z.object({
+  callId: z.string().uuid(),
+  type: z.enum(['offer', 'answer', 'ice']),
+  payload: z.unknown(),
+})

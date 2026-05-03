@@ -116,15 +116,18 @@ export class ConversationsService {
     return this.repo.addMember(conversationId, targetUserId, 'member')
   }
 
-  async removeMember(conversationId: string, callerId: string, targetUserId: string): Promise<void> {
+  async removeMember(conversationId: string, callerId: string, targetUserId: string): Promise<string> {
     const conversation = await this.repo.findById(conversationId)
     if (!conversation) throw new ChatError('NOT_FOUND')
     const caller = await this.repo.findMember(conversationId, callerId)
     if (!caller || caller.role === 'member') throw new ChatError('FORBIDDEN')
     const target = await this.repo.findMember(conversationId, targetUserId)
     if (!target) throw new ChatError('NOT_FOUND')
+    if (target.role === 'owner') throw new ChatError('CANNOT_REMOVE_OWNER')
     if (caller.role === 'admin' && target.role !== 'member') throw new ChatError('FORBIDDEN')
     await this.repo.removeMember(conversationId, targetUserId)
+    const newSenderKeyId = await this.repo.rotateSenderKey(conversationId)
+    return newSenderKeyId
   }
 
   async updateMemberRole(conversationId: string, callerId: string, targetUserId: string, role: MemberRole): Promise<void> {
@@ -151,7 +154,7 @@ export class ConversationsService {
     await this.repo.updateMember(conversationId, targetUserId, { permissions })
   }
 
-  async leaveConversation(conversationId: string, userId: string): Promise<void> {
+  async leaveConversation(conversationId: string, userId: string): Promise<{ senderKeyId: string } | { deleted: true }> {
     const conversation = await this.repo.findById(conversationId)
     if (!conversation) throw new ChatError('NOT_FOUND')
     const member = await this.repo.findMember(conversationId, userId)
@@ -159,7 +162,8 @@ export class ConversationsService {
 
     if (member.role !== 'owner') {
       await this.repo.removeMember(conversationId, userId)
-      return
+      const senderKeyId = await this.repo.rotateSenderKey(conversationId)
+      return { senderKeyId }
     }
 
     const allMembers = await this.repo.findMembers(conversationId)
@@ -167,7 +171,7 @@ export class ConversationsService {
 
     if (remaining.length === 0) {
       await this.repo.delete(conversationId)
-      return
+      return { deleted: true }
     }
 
     const nextOwner =
@@ -176,6 +180,8 @@ export class ConversationsService {
 
     await this.repo.updateMember(conversationId, nextOwner.userId, { role: 'owner' })
     await this.repo.removeMember(conversationId, userId)
+    const senderKeyId = await this.repo.rotateSenderKey(conversationId)
+    return { senderKeyId }
   }
 
   async listConversations(userId: string, archived = false): Promise<ConversationWithMeta[]> {

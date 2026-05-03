@@ -209,7 +209,18 @@ export class EventsService {
   async listEvents(viewerId: string, query: ListEventsQuery) {
     const friendIds = await this.friendsRepo.findFriendIds(viewerId)
     const invitedEventIds = await this.invitesRepo.findEventIdsForUser(viewerId)
-    return this.repo.list(viewerId, friendIds, invitedEventIds, query)
+    const result = await this.repo.list(viewerId, friendIds, invitedEventIds, query)
+
+    // Filtra eventos de hosts bloqueados (bloqueio bidirecional)
+    const filtered = await Promise.all(
+      result.events.map(async (ev) => {
+        if (ev.hostUserId === viewerId) return ev
+        const isBlocked = await this.friendsRepo.isBlockedEitherDirection(viewerId, ev.hostUserId)
+        return isBlocked ? null : ev
+      }),
+    )
+
+    return { events: filtered.filter((e) => e !== null), nextCursor: result.nextCursor }
   }
 
   async listHosted(userId: string, query: MyEventsQuery) {
@@ -365,37 +376,37 @@ export class EventsService {
     }
 
     // Notificações pra inscritos sobre campos sensíveis + checagem de novo conflito
+    // Fix NA3-02: notificações paralelas com Promise.allSettled (fora da transação, fire-and-forget).
     const affectedParticipants: { userId: string; conflictEventId: string | null }[] = []
     if (sensitiveChanged.length > 0 && this.notificationsService) {
       const participants = await this.repo.findActiveParticipants(eventId)
-      for (const p of participants) {
-        await this.notificationsService
-          .notifySelf({
-            userId: p.userId,
-            type: 'event_updated',
-            entityId: eventId,
-          })
-          .catch(() => {})
-        let conflictEventId: string | null = null
-        if (sensitiveChanged.includes('startsAt') || sensitiveChanged.includes('durationMinutes')) {
-          const overlaps = await this.participantsRepo.findUserActiveEventsInRange(
-            p.userId,
-            newStartsAt,
-            newEndsAt,
-            eventId,
-          )
-          if (overlaps.length > 0) {
-            conflictEventId = overlaps[0].eventId
-            await this.notificationsService
-              .notifySelf({
-                userId: p.userId,
-                type: 'event_conflict_after_edit',
-                entityId: eventId,
-              })
-              .catch(() => {})
+      const notificationsService = this.notificationsService
+      const checkTimeConflict = sensitiveChanged.includes('startsAt') || sensitiveChanged.includes('durationMinutes')
+      const results = await Promise.allSettled(
+        participants.map(async (p) => {
+          await notificationsService
+            .notifySelf({ userId: p.userId, type: 'event_updated', entityId: eventId })
+            .catch(() => {})
+          let conflictEventId: string | null = null
+          if (checkTimeConflict) {
+            const overlaps = await this.participantsRepo.findUserActiveEventsInRange(
+              p.userId,
+              newStartsAt,
+              newEndsAt,
+              eventId,
+            )
+            if (overlaps.length > 0) {
+              conflictEventId = overlaps[0].eventId
+              await notificationsService
+                .notifySelf({ userId: p.userId, type: 'event_conflict_after_edit', entityId: eventId })
+                .catch(() => {})
+            }
           }
-        }
-        affectedParticipants.push({ userId: p.userId, conflictEventId })
+          return { userId: p.userId, conflictEventId }
+        }),
+      )
+      for (const r of results) {
+        if (r.status === 'fulfilled') affectedParticipants.push(r.value)
       }
     }
 

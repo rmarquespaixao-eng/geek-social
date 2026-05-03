@@ -33,7 +33,7 @@ import { connectSocket } from '@/shared/socket/socket'
 const route = useRoute()
 const router = useRouter()
 const store = useAuthStore()
-const { loadUser } = useAuth()
+const { loadUser, initCrypto } = useAuth()
 
 const state = ref<'loading' | 'error'>('loading')
 const errorMessage = ref('')
@@ -69,6 +69,9 @@ onMounted(async () => {
     try {
       await loadUser()
       connectSocket(token)
+      // OAuth has no password — initCrypto() will route fresh users to PIN setup
+      // and existing-account-on-new-device flows to the backup restore dialog.
+      await initCrypto(store.user!.id)
       router.replace('/feed')
     } catch {
       state.value = 'error'

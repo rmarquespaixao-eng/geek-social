@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import type { CreateCommunityPayload, CommunityCategory, CommunityVisibility, CommunitySummary } from '../types'
+import type { CreateCommunityPayload, UpdateCommunityPayload, CommunityCategory, CommunityVisibility, CommunitySummary } from '../types'
 
 const props = defineProps<{
   /** When provided the form works in edit mode with prefilled values. */
@@ -10,7 +10,7 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  submit: [payload: CreateCommunityPayload, cover: File | null, icon: File | null]
+  submit: [payload: CreateCommunityPayload & UpdateCommunityPayload, cover: File | null, icon: File | null]
   cancel: []
 }>()
 
@@ -34,14 +34,15 @@ const CATEGORIES: { value: CommunityCategory; label: string }[] = [
 
 const VISIBILITIES: { value: CommunityVisibility; label: string; description: string }[] = [
   { value: 'public', label: 'Pública', description: 'Qualquer pessoa pode ver e entrar.' },
-  { value: 'restricted', label: 'Restrita', description: 'Qualquer pessoa pode ver, mas precisa pedir entrada.' },
-  { value: 'private', label: 'Privada', description: 'Só membros podem ver. Acesso por convite.' },
+  { value: 'restricted', label: 'Restrita', description: 'Qualquer pessoa pode ver, mas precisa de aprovação para entrar.' },
 ]
 
 const name = ref(props.initial?.name ?? '')
 const description = ref(props.initial?.description ?? '')
 const category = ref<CommunityCategory>(props.initial?.category ?? 'boardgames')
 const visibility = ref<CommunityVisibility>(props.initial?.visibility ?? 'public')
+const rules = ref<string>(props.initial?.rules ?? '')
+const welcomeMessage = ref<string>(props.initial?.welcomeMessage ?? '')
 
 // Cover file
 const cover = ref<File | null>(null)
@@ -96,12 +97,14 @@ function onSubmit() {
     iconError.value = 'Ícone obrigatório.'
     return
   }
-  emit(
-    'submit',
-    { name: name.value, description: description.value, category: category.value, visibility: visibility.value },
-    cover.value ?? null,
-    icon.value ?? null,
-  )
+  const payload: CreateCommunityPayload & UpdateCommunityPayload = {
+    name: name.value,
+    description: description.value,
+    category: category.value,
+    visibility: visibility.value,
+    ...(isEditMode.value && { rules: rules.value || null, welcomeMessage: welcomeMessage.value || null }),
+  }
+  emit('submit', payload, cover.value ?? null, icon.value ?? null)
 }
 </script>
 
@@ -259,6 +262,38 @@ function onSubmit() {
           </div>
         </label>
       </div>
+    </div>
+
+    <!-- Rules (edit only) -->
+    <div v-if="isEditMode">
+      <label class="block text-xs font-semibold text-slate-400 mb-1.5">
+        Regras da comunidade
+      </label>
+      <textarea
+        v-model="rules"
+        maxlength="5000"
+        rows="5"
+        placeholder="Descreva as regras..."
+        data-testid="community-rules"
+        class="w-full bg-[#252640] text-slate-200 text-sm rounded-lg px-3 py-2 resize-none focus:outline-none focus:ring-1 focus:ring-amber-500/50 placeholder:text-slate-600"
+      />
+      <p class="mt-0.5 text-right text-[10px] text-slate-600">{{ rules.length }}/5000</p>
+    </div>
+
+    <!-- Welcome message (edit only) -->
+    <div v-if="isEditMode">
+      <label class="block text-xs font-semibold text-slate-400 mb-1.5">
+        Mensagem de boas-vindas
+      </label>
+      <textarea
+        v-model="welcomeMessage"
+        maxlength="1000"
+        rows="3"
+        placeholder="Mensagem exibida ao entrar..."
+        data-testid="community-welcome-message"
+        class="w-full bg-[#252640] text-slate-200 text-sm rounded-lg px-3 py-2 resize-none focus:outline-none focus:ring-1 focus:ring-amber-500/50 placeholder:text-slate-600"
+      />
+      <p class="mt-0.5 text-right text-[10px] text-slate-600">{{ welcomeMessage.length }}/1000</p>
     </div>
 
     <!-- Error -->

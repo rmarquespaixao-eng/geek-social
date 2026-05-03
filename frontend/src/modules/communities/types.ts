@@ -17,7 +17,7 @@ export type CommunityCategory =
   | 'mods'
   | 'community-events'
 
-export type CommunityVisibility = 'public' | 'private' | 'restricted'
+export type CommunityVisibility = 'public' | 'restricted'
 
 export type MemberRole = 'owner' | 'moderator' | 'member'
 
@@ -157,6 +157,8 @@ export interface UpdateCommunityPayload {
   description?: string
   category?: CommunityCategory
   visibility?: CommunityVisibility
+  rules?: string | null
+  welcomeMessage?: string | null
 }
 
 export interface CreateTopicPayload {

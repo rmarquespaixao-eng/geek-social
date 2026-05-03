@@ -155,6 +155,7 @@ curl http://localhost:3000/users/me -H "Authorization: Bearer $TOKEN"
 | `/notifications`   | inbox + push                                       |
 | `/offers`          | ofertas de troca                                   |
 | `/listings`        | anúncios (venda/troca)                             |
+| `/comunidades`     | comunidades, membros, tópicos, moderação           |
 | `/reports`         | denúncias                                          |
 
 ### 3. Acessar a Documentação

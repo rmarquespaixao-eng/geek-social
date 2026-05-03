@@ -4,7 +4,10 @@ import type { IPushRepository } from '../../shared/contracts/push.repository.con
 export type PushPayload = {
   title: string
   body: string
-  conversationId: string
+  data: {
+    conversationId: string
+    messageId: string
+  }
 }
 
 export class PushService {
@@ -18,8 +21,8 @@ export class PushService {
     return this.repo.create(userId, data)
   }
 
-  async removeSubscription(subscriptionId: string): Promise<void> {
-    return this.repo.delete(subscriptionId)
+  async removeSubscription(subscriptionId: string, userId: string): Promise<void> {
+    return this.repo.deleteForUser(subscriptionId, userId)
   }
 
   async notify(userId: string, payload: PushPayload): Promise<void> {

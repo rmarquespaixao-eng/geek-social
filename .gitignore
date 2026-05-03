@@ -168,3 +168,9 @@ Thumbs.db
 
 # Drizzle migrations geradas (manter migrations versionadas → comentar se for o caso)
 # api/src/shared/infra/database/migrations/meta/
+.dev-pipe/runs/
+
+# Artefatos de auditoria local
+audit-round2-status.json
+audit-round3-status.json
+custos.csv.migrated

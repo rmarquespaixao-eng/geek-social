@@ -48,6 +48,21 @@ export class MembersRepository {
     return row as MemberRow
   }
 
+  /** Insere membership ignorando conflito (idempotente — ON CONFLICT DO NOTHING). */
+  async insertMemberIfNotExists(data: InsertMemberData, tx?: DatabaseClient): Promise<void> {
+    const exec = tx ?? this.db
+    await exec
+      .insert(communityMembers)
+      .values({
+        communityId: data.communityId,
+        userId: data.userId,
+        role: data.role,
+        status: data.status,
+        banReason: data.banReason ?? null,
+      })
+      .onConflictDoNothing()
+  }
+
   async findByCommunityAndUser(
     communityId: string,
     userId: string,
@@ -234,7 +249,12 @@ export class MembersRepository {
     toUserId: string,
     tx: DatabaseClient,
   ): Promise<void> {
-    await tx
+    // Fix 5: FOR UPDATE nas duas rows antes de atualizar — evita dois swaps concorrentes
+    await tx.execute(
+      sql`SELECT id FROM community_members WHERE community_id = ${communityId} AND user_id IN (${fromUserId}, ${toUserId}) FOR UPDATE`,
+    )
+
+    const demoted = await tx
       .update(communityMembers)
       .set({ role: 'moderator' })
       .where(
@@ -244,7 +264,13 @@ export class MembersRepository {
           eq(communityMembers.role, 'owner'),
         ),
       )
-    await tx
+      .returning({ id: communityMembers.id })
+
+    if (demoted.length === 0) {
+      throw new Error('OWNER_NOT_FOUND')
+    }
+
+    const promoted = await tx
       .update(communityMembers)
       .set({ role: 'owner' })
       .where(
@@ -252,7 +278,13 @@ export class MembersRepository {
           eq(communityMembers.communityId, communityId),
           eq(communityMembers.userId, toUserId),
           inArray(communityMembers.role, ['moderator', 'member']),
+          eq(communityMembers.status, 'active'),
         ),
       )
+      .returning({ id: communityMembers.id })
+
+    if (promoted.length === 0) {
+      throw new Error('TARGET_MEMBER_NOT_FOUND')
+    }
   }
 }

@@ -43,6 +43,7 @@ export interface LastMessage {
   senderId: string
   createdAt: string
   type: MessageType
+  isEncrypted?: boolean
 }
 
 export interface Conversation {
@@ -53,6 +54,7 @@ export interface Conversation {
   avatarUrl: string | null
   coverUrl?: string | null
   createdBy?: string | null
+  senderKeyId: string
   participants: ConversationMember[]
   lastMessage: LastMessage | null
   unreadCount: number
@@ -89,6 +91,7 @@ export interface MessageReply {
   senderName: string
   content: string
   type?: MessageType
+  decryptError?: boolean
 }
 
 export interface MessageReaction {
@@ -203,6 +206,13 @@ export interface SocketMemberAdded {
 export interface SocketMemberRemoved {
   conversationId: string
   userId: string
+  senderKeyId: string
+}
+
+export interface SocketMemberLeft {
+  conversationId: string
+  userId: string
+  senderKeyId: string
 }
 
 export interface SocketConversationUpdated {

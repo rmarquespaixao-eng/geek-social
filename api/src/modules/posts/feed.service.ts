@@ -14,7 +14,7 @@ export class FeedService {
       this.friendsRepo.findFriendIds(viewerId),
       this.friendsRepo.findAllBlockRelationUserIds(viewerId),
     ])
-    const cursor = cursorToken ? decodeCursor(cursorToken) : undefined
+    const cursor = cursorToken ? safeDecodeCursor(cursorToken) : undefined
     const { posts, nextCursor } = await this.feedRepo.getFeed({ viewerId, friendIds, blockedIds, cursor, limit })
     return { posts, nextCursor: nextCursor ? encodeCursor(nextCursor) : null }
   }
@@ -30,7 +30,7 @@ export class FeedService {
       if (owner.privacy === 'friends_only' && !viewerIsFriend) return { posts: [], nextCursor: null }
     }
 
-    const cursor = cursorToken ? decodeCursor(cursorToken) : undefined
+    const cursor = cursorToken ? safeDecodeCursor(cursorToken) : undefined
     const { posts, nextCursor } = await this.feedRepo.getProfilePosts({ ownerId, viewerId, viewerIsFriend, cursor, limit })
     return { posts, nextCursor: nextCursor ? encodeCursor(nextCursor) : null }
   }
@@ -40,7 +40,12 @@ function encodeCursor(cursor: FeedCursor): string {
   return Buffer.from(JSON.stringify({ createdAt: cursor.createdAt.toISOString(), id: cursor.id })).toString('base64')
 }
 
-function decodeCursor(token: string): FeedCursor {
-  const { createdAt, id } = JSON.parse(Buffer.from(token, 'base64').toString('utf-8'))
-  return { createdAt: new Date(createdAt), id }
+function safeDecodeCursor(token: string): FeedCursor | undefined {
+  try {
+    const { createdAt, id } = JSON.parse(Buffer.from(token, 'base64').toString('utf-8'))
+    return { createdAt: new Date(createdAt), id }
+  } catch (err) {
+    console.error({ err }, 'feed: invalid cursor token')
+    return undefined
+  }
 }

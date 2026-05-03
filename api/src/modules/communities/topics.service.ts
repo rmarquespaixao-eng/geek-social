@@ -72,6 +72,7 @@ export class TopicsService {
 
     const community = await this.communitiesService.getForViewer(communityId, viewerId)
     await this.communitiesService.assertCanView(viewerId, community)
+    await this.communitiesService.assertNotBanned(viewerId, communityId)
 
     const isAuthor = topic.authorId === viewerId
     if (!isAuthor) {
@@ -82,8 +83,10 @@ export class TopicsService {
 
     await this.db.transaction(async (tx) => {
       const exec = tx as unknown as DatabaseClient
-      await this.postsRepo.softDelete(topicId, exec)
-      await this.communitiesService.decrementTopicCount(communityId, exec)
+      const deleted = await this.topicsRepo.softDeleteIfNotDeleted(topicId, exec)
+      if (deleted) {
+        await this.communitiesService.decrementTopicCount(communityId, exec)
+      }
     })
   }
 

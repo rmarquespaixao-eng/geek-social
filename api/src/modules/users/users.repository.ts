@@ -1,6 +1,6 @@
 import { eq, and, or, sql, ilike } from 'drizzle-orm'
 import type { DatabaseClient } from '../../shared/infra/database/postgres.client.js'
-import { users, collections, items, posts, friendships } from '../../shared/infra/database/schema.js'
+import { users, collections, items, posts, friendships, userBlocks } from '../../shared/infra/database/schema.js'
 import type { User, UpdateProfileData } from '../../shared/contracts/user.repository.contract.js'
 
 export type ProfileCounts = {
@@ -33,11 +33,39 @@ export class UsersRepository {
     }
   }
 
-  async searchUsers(query: string): Promise<{ id: string; displayName: string; avatarUrl: string | null }[]> {
+  async searchUsers(
+    query: string,
+    viewerId: string,
+  ): Promise<{ id: string; displayName: string; avatarUrl: string | null; privacy: string }[]> {
+    // Escapar wildcards do LIKE para evitar DoS por backtracking no PostgreSQL (NEW-01).
+    const safe = query.replace(/[\\%_]/g, '\\$&')
+
     return this.db
-      .select({ id: users.id, displayName: users.displayName, avatarUrl: users.avatarUrl })
+      .select({ id: users.id, displayName: users.displayName, avatarUrl: users.avatarUrl, privacy: users.privacy })
       .from(users)
-      .where(ilike(users.displayName, `%${query}%`))
+      .where(and(
+        ilike(users.displayName, `%${safe}%`),
+        // Filtro de privacy: retorna apenas perfis públicos OU amigos do viewer (NEW-03).
+        sql`(
+          ${users.privacy} = 'public'
+          OR EXISTS (
+            SELECT 1 FROM ${friendships} f
+            WHERE f.status = 'accepted'
+              AND (
+                (f.requester_id = ${viewerId} AND f.receiver_id = ${users.id})
+                OR (f.requester_id = ${users.id}  AND f.receiver_id = ${viewerId})
+              )
+          )
+        )`,
+        // Filtro de bloqueios bidirecionais: exclui quem bloqueou ou foi bloqueado (NEW-02).
+        sql`NOT EXISTS (
+          SELECT 1 FROM ${userBlocks} ub
+          WHERE (ub.blocker_id = ${viewerId} AND ub.blocked_id = ${users.id})
+             OR (ub.blocker_id = ${users.id}  AND ub.blocked_id = ${viewerId})
+        )`,
+        // Não retornar o próprio viewer.
+        sql`${users.id} != ${viewerId}`,
+      ))
       .limit(20)
   }
 
@@ -56,8 +84,25 @@ export class UsersRepository {
   }
 
   async updateProfile(id: string, data: UpdateProfileData): Promise<User> {
+    const allowedFields = {
+      ...(data.displayName !== undefined && { displayName: data.displayName }),
+      ...(data.bio !== undefined && { bio: data.bio }),
+      ...(data.avatarUrl !== undefined && { avatarUrl: data.avatarUrl }),
+      ...(data.coverUrl !== undefined && { coverUrl: data.coverUrl }),
+      ...(data.coverColor !== undefined && { coverColor: data.coverColor }),
+      ...(data.profileBackgroundUrl !== undefined && { profileBackgroundUrl: data.profileBackgroundUrl }),
+      ...(data.profileBackgroundColor !== undefined && { profileBackgroundColor: data.profileBackgroundColor }),
+      ...(data.privacy !== undefined && { privacy: data.privacy }),
+      ...(data.showPresence !== undefined && { showPresence: data.showPresence }),
+      ...(data.showReadReceipts !== undefined && { showReadReceipts: data.showReadReceipts }),
+      ...(data.birthday !== undefined && { birthday: data.birthday }),
+      ...(data.interests !== undefined && { interests: data.interests }),
+      ...(data.pronouns !== undefined && { pronouns: data.pronouns }),
+      ...(data.location !== undefined && { location: data.location }),
+      ...(data.website !== undefined && { website: data.website }),
+    }
     const result = await this.db.update(users)
-      .set({ ...data, updatedAt: new Date() })
+      .set({ ...allowedFields, updatedAt: new Date() })
       .where(eq(users.id, id))
       .returning()
     return result[0]
@@ -110,5 +155,11 @@ export class UsersRepository {
 
   async deleteUser(userId: string): Promise<void> {
     await this.db.delete(users).where(eq(users.id, userId))
+  }
+
+  async incrementTokenVersion(userId: string): Promise<void> {
+    await this.db.update(users)
+      .set({ tokenVersion: sql`${users.tokenVersion} + 1`, updatedAt: new Date() })
+      .where(eq(users.id, userId))
   }
 }

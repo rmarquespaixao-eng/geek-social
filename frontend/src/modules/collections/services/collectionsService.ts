@@ -1,6 +1,7 @@
 import { api } from '@/shared/http/api'
 import type {
   Collection,
+  CollectionType,
   CollectionSchemaEntry,
   CreateCollectionPayload,
   UpdateCollectionPayload,
@@ -8,24 +9,38 @@ import type {
   CreateFieldDefinitionPayload,
 } from '../types'
 
+const VALID_TYPES = new Set<CollectionType>(['games', 'books', 'cardgames', 'boardgames', 'custom'])
+
+function normalizeCollection(raw: Record<string, unknown>): Collection {
+  const key = (raw.collectionTypeKey ?? raw.type) as string | null
+  const type: CollectionType = (key && VALID_TYPES.has(key as CollectionType))
+    ? (key as CollectionType)
+    : 'custom'
+  return { ...raw, type } as unknown as Collection
+}
+
+function normalizeList(raw: Record<string, unknown>[]): Collection[] {
+  return raw.map(normalizeCollection)
+}
+
 export async function listCollections(): Promise<Collection[]> {
-  const { data } = await api.get<Collection[]>('/collections')
-  return data
+  const { data } = await api.get<Record<string, unknown>[]>('/collections')
+  return normalizeList(data)
 }
 
 export async function createCollection(payload: CreateCollectionPayload): Promise<Collection> {
-  const { data } = await api.post<Collection>('/collections', payload)
-  return data
+  const { data } = await api.post<Record<string, unknown>>('/collections', payload)
+  return normalizeCollection(data)
 }
 
 export async function getCollection(id: string): Promise<Collection> {
-  const { data } = await api.get<Collection>(`/collections/${id}`)
-  return data
+  const { data } = await api.get<Record<string, unknown>>(`/collections/${id}`)
+  return normalizeCollection(data)
 }
 
 export async function updateCollection(id: string, payload: UpdateCollectionPayload): Promise<Collection> {
-  const { data } = await api.put<Collection>(`/collections/${id}`, payload)
-  return data
+  const { data } = await api.put<Record<string, unknown>>(`/collections/${id}`, payload)
+  return normalizeCollection(data)
 }
 
 export async function deleteCollection(id: string): Promise<void> {
@@ -35,24 +50,24 @@ export async function deleteCollection(id: string): Promise<void> {
 export async function uploadCollectionIcon(id: string, file: File): Promise<Collection> {
   const formData = new FormData()
   formData.append('file', file)
-  const { data } = await api.post<Collection>(`/collections/${id}/icon`, formData, {
+  const { data } = await api.post<Record<string, unknown>>(`/collections/${id}/icon`, formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
   })
-  return data
+  return normalizeCollection(data)
 }
 
 export async function uploadCollectionCover(id: string, file: File): Promise<Collection> {
   const formData = new FormData()
   formData.append('file', file)
-  const { data } = await api.post<Collection>(`/collections/${id}/cover`, formData, {
+  const { data } = await api.post<Record<string, unknown>>(`/collections/${id}/cover`, formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
   })
-  return data
+  return normalizeCollection(data)
 }
 
 export async function listPublicCollections(userId: string): Promise<Collection[]> {
-  const { data } = await api.get<Collection[]>(`/users/${userId}/collections`)
-  return data
+  const { data } = await api.get<Record<string, unknown>[]>(`/users/${userId}/collections`)
+  return normalizeList(data)
 }
 
 // Field Definitions (biblioteca do usuário)

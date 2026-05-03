@@ -1,11 +1,14 @@
 // src/modules/collections/collections.service.ts
 import sharp from 'sharp'
+import { eq } from 'drizzle-orm'
+import type { DatabaseClient } from '../../shared/infra/database/postgres.client.js'
 import type { ICollectionRepository, Collection, CollectionWithSchema, CollectionSchemaEntry } from '../../shared/contracts/collection.repository.contract.js'
 import type { IFieldDefinitionRepository } from '../../shared/contracts/field-definition.repository.contract.js'
 import type { IStorageService } from '../../shared/contracts/storage.service.contract.js'
 import type { IFriendsRepository } from '../../shared/contracts/friends.repository.contract.js'
 import type { UsersRepository } from '../users/users.repository.js'
 import type { CreateCollectionInput, UpdateCollectionInput } from './collections.schema.js'
+import { collectionTypes } from '../../shared/infra/database/schema.js'
 
 export class CollectionsError extends Error {
   constructor(public readonly code: string) {
@@ -21,22 +24,36 @@ export class CollectionsService {
     private readonly storageService?: IStorageService,
     private readonly friendsRepo?: IFriendsRepository,
     private readonly usersRepo?: UsersRepository,
+    private readonly db?: DatabaseClient,
   ) {}
 
+  private async resolveCollectionTypeId(typeKey: string): Promise<string | null> {
+    if (!this.db) return null
+    const [row] = await this.db.select({ id: collectionTypes.id })
+      .from(collectionTypes)
+      .where(eq(collectionTypes.key, typeKey))
+      .limit(1)
+    return row?.id ?? null
+  }
+
   async create(userId: string, input: CreateCollectionInput): Promise<CollectionWithSchema> {
+    // Normaliza type (chave string) para collectionTypeId (UUID FK)
+    const collectionTypeId = await this.resolveCollectionTypeId(input.type)
+
     const collection = await this.collectionsRepo.create({
       userId,
       name: input.name,
       // O schema permite `null` (vindo do form), mas o repo só aceita undefined.
       // Normaliza aqui pra manter o domínio estável.
       description: input.description ?? undefined,
-      type: input.type,
+      collectionTypeId: collectionTypeId ?? undefined,
       visibility: input.visibility,
       autoShareToFeed: input.autoShareToFeed,
     })
 
-    if (input.type !== 'custom') {
-      const systemFields = await this.fieldDefRepo.findSystemByCollectionType(input.type)
+    const isBuiltIn = ['games', 'books', 'cardgames', 'boardgames'].includes(input.type)
+    if (input.type !== 'custom' && isBuiltIn && collectionTypeId) {
+      const systemFields = await this.fieldDefRepo.findSystemByCollectionTypeId(collectionTypeId)
       if (systemFields.length > 0) {
         await this.collectionsRepo.addFieldsToSchema(
           collection.id,

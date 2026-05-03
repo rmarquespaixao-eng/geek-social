@@ -124,6 +124,102 @@
         </div>
       </div>
 
+      <!-- Aba: Criptografia -->
+      <div v-if="activeTab === 'encryption'" class="bg-(--color-bg-card) rounded-2xl p-6 border border-(--color-bg-elevated) flex flex-col gap-6">
+        <div>
+          <h2 class="text-base font-semibold text-(--color-text-primary) mb-2">Criptografia ponta a ponta</h2>
+          <p class="text-sm text-(--color-text-muted)">Suas mensagens privadas e em grupo são protegidas com Signal Protocol. Apenas você e os destinatários conseguem lê-las.</p>
+        </div>
+
+        <div class="flex items-center gap-2">
+          <span class="text-sm text-(--color-text-secondary)">Status:</span>
+          <span
+            v-if="cryptoReady"
+            class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-(--color-status-online)/10 text-(--color-status-online)"
+          >
+            <ShieldCheck :size="12" /> Ativa
+          </span>
+          <span
+            v-else
+            class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-(--color-bg-elevated) text-(--color-text-muted)"
+          >
+            Não inicializada
+          </span>
+        </div>
+
+        <div v-if="identityFingerprint">
+          <p class="text-sm font-medium text-(--color-text-secondary) mb-1.5">Sua impressão digital</p>
+          <p class="text-xs text-(--color-text-muted) mb-2">Compare com seus contatos por um canal alternativo (chamada, presencial) para confirmar a identidade.</p>
+          <code class="block text-xs font-mono bg-(--color-bg-elevated) text-(--color-text-primary) rounded-lg px-3 py-2 break-all">{{ identityFingerprint }}</code>
+        </div>
+
+        <div>
+          <p class="text-sm font-medium text-(--color-text-secondary) mb-1.5">Backup com PIN</p>
+          <p class="text-xs text-(--color-text-muted) mb-3">Defina ou atualize o PIN que protege seu backup de identidade. Você precisará dele para restaurar a criptografia em outro dispositivo.</p>
+          <form @submit.prevent="saveBackup" class="flex flex-col gap-3">
+            <div class="flex flex-col gap-1.5">
+              <label class="text-xs font-medium text-(--color-text-secondary)">Novo PIN</label>
+              <input
+                v-model="backupForm.pin"
+                type="password"
+                autocomplete="new-password"
+                placeholder="Mínimo 6 caracteres"
+                class="w-full px-3 py-2.5 rounded-lg bg-(--color-bg-elevated) border border-transparent text-(--color-text-primary) placeholder-(--color-text-muted) text-sm focus:outline-none focus:ring-2 focus:border-(--color-accent-amber) focus:ring-(--color-accent-amber)/20 transition-colors"
+              />
+            </div>
+            <div class="flex flex-col gap-1.5">
+              <label class="text-xs font-medium text-(--color-text-secondary)">Confirmar PIN</label>
+              <input
+                v-model="backupForm.confirm"
+                type="password"
+                autocomplete="new-password"
+                placeholder="Repita o PIN"
+                class="w-full px-3 py-2.5 rounded-lg bg-(--color-bg-elevated) border border-transparent text-(--color-text-primary) placeholder-(--color-text-muted) text-sm focus:outline-none focus:ring-2 focus:border-(--color-accent-amber) focus:ring-(--color-accent-amber)/20 transition-colors"
+              />
+            </div>
+            <p v-if="backupSuccess" class="text-sm text-(--color-status-online) bg-(--color-status-online)/10 rounded-lg px-3 py-2">Backup atualizado com sucesso.</p>
+            <p v-if="backupError" class="text-sm text-(--color-danger) bg-(--color-danger)/10 rounded-lg px-3 py-2">{{ backupError }}</p>
+            <div class="flex justify-end">
+              <AppButton type="submit" variant="primary" :loading="savingBackup" :disabled="!cryptoReady">
+                Salvar backup
+              </AppButton>
+            </div>
+          </form>
+        </div>
+
+        <div v-if="dmConversations.length > 0">
+          <p class="text-sm font-medium text-(--color-text-secondary) mb-1.5">Reparar sessões</p>
+          <p class="text-xs text-(--color-text-muted) mb-3">Force a renegociação da sessão de uma conversa privada se as mensagens novas não estiverem sendo decifradas. Mensagens antigas não serão recuperadas.</p>
+          <ul class="flex flex-col gap-2">
+            <li
+              v-for="conv in dmConversations"
+              :key="conv.id"
+              class="flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-(--color-bg-elevated)"
+            >
+              <span class="text-sm text-(--color-text-primary) truncate">{{ conv.name || conv.id }}</span>
+              <div class="flex items-center gap-2 shrink-0">
+                <span
+                  v-if="repairResults[peerOf(conv.participants) ?? ''] === 'ok'"
+                  class="text-xs text-(--color-status-online)"
+                >Reparado</span>
+                <span
+                  v-else-if="repairResults[peerOf(conv.participants) ?? ''] === 'fail'"
+                  class="text-xs text-(--color-danger)"
+                >Falhou</span>
+                <AppButton
+                  variant="ghost"
+                  :loading="repairingPeer === peerOf(conv.participants)"
+                  :disabled="!cryptoReady || !peerOf(conv.participants)"
+                  @click="() => { const id = peerOf(conv.participants); if (id) handleRepair(id) }"
+                >
+                  Reparar
+                </AppButton>
+              </div>
+            </li>
+          </ul>
+        </div>
+      </div>
+
       <!-- Aba: Integrações -->
       <div v-if="activeTab === 'integrations'">
         <GoogleConnectCard />
@@ -173,10 +269,17 @@
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import {
-  Settings as SettingsIcon, Lock, Eye as EyeIcon, Plug, LogOut, Trash2,
+  Settings as SettingsIcon, Lock, Eye as EyeIcon, Plug, LogOut, Trash2, ShieldCheck,
 } from 'lucide-vue-next'
 import { useAuthStore } from '@/shared/auth/authStore'
 import { useAuth } from '@/shared/auth/useAuth'
+import { useChat } from '@/modules/chat/composables/useChat'
+import {
+  isReady as cryptoIsReady,
+  getMyIdentityFingerprint,
+  updateBackup,
+  repairDmSession,
+} from '@/modules/chat/services/chatCrypto'
 import SteamConnectCard from '@/modules/integrations/steam/components/SteamConnectCard.vue'
 import GoogleConnectCard from '../components/GoogleConnectCard.vue'
 import AppButton from '@/shared/ui/AppButton.vue'
@@ -184,11 +287,12 @@ import AppConfirmDialog from '@/shared/ui/AppConfirmDialog.vue'
 import AppPageHeader from '@/shared/ui/AppPageHeader.vue'
 import * as usersService from '../services/usersService'
 
-type TabId = 'security' | 'privacy' | 'integrations' | 'session' | 'account'
+type TabId = 'security' | 'privacy' | 'encryption' | 'integrations' | 'session' | 'account'
 
 const tabs: { id: TabId; label: string; icon: any }[] = [
   { id: 'security', label: 'Segurança', icon: Lock },
   { id: 'privacy', label: 'Privacidade', icon: EyeIcon },
+  { id: 'encryption', label: 'Criptografia', icon: ShieldCheck },
   { id: 'integrations', label: 'Integrações', icon: Plug },
   { id: 'session', label: 'Sessão', icon: LogOut },
   { id: 'account', label: 'Conta', icon: Trash2 },
@@ -281,6 +385,64 @@ async function savePassword() {
 
 async function handleLogout() {
   await logout()
+}
+
+// ── Encryption tab ───────────────────────────────────────────────────────────
+
+const chat = useChat()
+const cryptoReady = computed(() => cryptoIsReady())
+const identityFingerprint = computed(() => getMyIdentityFingerprint())
+const dmConversations = computed(() =>
+  chat.conversations.filter((c) => c.type === 'dm'),
+)
+
+const backupForm = reactive({ pin: '', confirm: '' })
+const savingBackup = ref(false)
+const backupSuccess = ref(false)
+const backupError = ref('')
+
+async function saveBackup() {
+  backupError.value = ''
+  backupSuccess.value = false
+  if (backupForm.pin.length < 6) {
+    backupError.value = 'O PIN deve ter pelo menos 6 caracteres.'
+    return
+  }
+  if (backupForm.pin !== backupForm.confirm) {
+    backupError.value = 'Os PINs não coincidem.'
+    return
+  }
+  savingBackup.value = true
+  try {
+    await updateBackup(backupForm.pin)
+    backupForm.pin = ''
+    backupForm.confirm = ''
+    backupSuccess.value = true
+    setTimeout(() => { backupSuccess.value = false }, 3000)
+  } catch (err: any) {
+    backupError.value = err?.response?.data?.error ?? 'Não foi possível atualizar o backup.'
+  } finally {
+    savingBackup.value = false
+  }
+}
+
+const repairingPeer = ref<string | null>(null)
+const repairResults = reactive<Record<string, 'ok' | 'fail'>>({})
+
+function peerOf(participants: { userId: string }[]): string | null {
+  const me = store.user?.id
+  return participants.find((p) => p.userId !== me)?.userId ?? null
+}
+
+async function handleRepair(peerUserId: string) {
+  repairingPeer.value = peerUserId
+  delete repairResults[peerUserId]
+  try {
+    const ok = await repairDmSession(peerUserId)
+    repairResults[peerUserId] = ok ? 'ok' : 'fail'
+  } finally {
+    repairingPeer.value = null
+  }
 }
 
 const showDeleteAccountModal = ref(false)

@@ -4,6 +4,10 @@ import { PostsError } from './posts.service.js'
 import type { CreatePostInput, UpdatePostInput } from './posts.schema.js'
 import type { AccessTokenClaims } from '../auth/auth.service.js'
 
+const IMAGE_MAX_BYTES = 5 * 1024 * 1024
+const ALLOWED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp'])
+const ALLOWED_VIDEO_TYPES = new Set(['video/mp4', 'video/webm', 'video/quicktime'])
+
 export class PostsController {
   constructor(private readonly service: PostsService) {}
 
@@ -54,11 +58,7 @@ export class PostsController {
   async addMedia(request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) {
     const { userId } = request.user as AccessTokenClaims
     try {
-      const ALLOWED_IMAGE = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp'])
-      const ALLOWED_VIDEO = new Set(['video/mp4', 'video/webm', 'video/quicktime'])
-      const IMAGE_MAX = 5 * 1024 * 1024
-
-      const parts = request.files({ limits: { fileSize: 50 * 1024 * 1024 } })
+      const parts = request.files({ limits: { fileSize: IMAGE_MAX_BYTES } })
       const files: Array<{ buffer: Buffer; mimeType: string; filename: string }> = []
       for await (const part of parts) {
         const chunks: Buffer[] = []
@@ -66,8 +66,8 @@ export class PostsController {
         const buffer = Buffer.concat(chunks)
 
         const declaredMimeType = part.mimetype
-        const isImage = ALLOWED_IMAGE.has(declaredMimeType)
-        const isVideo = ALLOWED_VIDEO.has(declaredMimeType)
+        const isImage = ALLOWED_IMAGE_TYPES.has(declaredMimeType)
+        const isVideo = ALLOWED_VIDEO_TYPES.has(declaredMimeType)
 
         if (!isImage && !isVideo) {
           return reply.status(400).send({ error: 'Tipo de mídia não suportado' })
@@ -78,7 +78,7 @@ export class PostsController {
           return reply.status(400).send({ error: 'Tipo de mídia não suportado' })
         }
 
-        if (isImage && buffer.length > IMAGE_MAX) {
+        if (isImage && buffer.length > IMAGE_MAX_BYTES) {
           return reply.status(400).send({ error: 'Imagem muito grande (máx 5MB)' })
         }
 

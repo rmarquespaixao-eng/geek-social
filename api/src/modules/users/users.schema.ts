@@ -1,6 +1,18 @@
 import { z } from 'zod'
 
-const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'use formato YYYY-MM-DD')
+const MIN_BIRTHDAY = new Date('1900-01-01')
+const MAX_BIRTHDAY = (() => {
+  const d = new Date()
+  d.setFullYear(d.getFullYear() - 13)
+  return d
+})()
+
+const isoDate = z.string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, 'use formato YYYY-MM-DD')
+  .refine(v => {
+    const d = new Date(v)
+    return d >= MIN_BIRTHDAY && d <= MAX_BIRTHDAY
+  }, 'data de nascimento inválida')
 const hexColor = z.string().regex(/^#[0-9a-fA-F]{6}$/, 'cor inválida — use #RRGGBB')
 
 export const setColorSchema = z.object({

@@ -24,5 +24,14 @@ export const updateListingSchema = z.object({
   }
 })
 
+export const listMarketplaceQuerySchema = z.object({
+  type: z.enum(['sale', 'trade', 'both']).optional(),
+  collection_type: z.string().optional(),
+  min_price: z.coerce.number().finite().optional(),
+  max_price: z.coerce.number().finite().optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(60).optional(),
+})
+
 export type CreateListingInput = z.infer<typeof createListingSchema>
 export type UpdateListingInput = z.infer<typeof updateListingSchema>
+export type ListMarketplaceQuery = z.infer<typeof listMarketplaceQuerySchema>

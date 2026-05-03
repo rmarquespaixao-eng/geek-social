@@ -1,6 +1,6 @@
-import { eq, desc, and } from 'drizzle-orm'
+import { eq, desc, and, lt, sql, count } from 'drizzle-orm'
 import type { DatabaseClient } from '../../shared/infra/database/postgres.client.js'
-import { notifications, users } from '../../shared/infra/database/schema.js'
+import { notifications, users, userBlocks } from '../../shared/infra/database/schema.js'
 
 export type NotificationType =
   | 'friend_request'
@@ -51,6 +51,23 @@ export type Notification = {
   createdAt: string
 }
 
+type NotificationCursor = { createdAt: Date; id: string }
+
+function encodeCursor(c: NotificationCursor): string {
+  return Buffer.from(JSON.stringify({ t: c.createdAt.toISOString(), i: c.id })).toString('base64url')
+}
+
+function decodeCursor(token: string | undefined): NotificationCursor | null {
+  if (!token) return null
+  try {
+    const raw = Buffer.from(token, 'base64url').toString('utf-8')
+    const parsed = JSON.parse(raw) as { t: string; i: string }
+    return { createdAt: new Date(parsed.t), id: parsed.i }
+  } catch {
+    return null
+  }
+}
+
 export class NotificationsRepository {
   constructor(private readonly db: DatabaseClient) {}
 
@@ -81,7 +98,26 @@ export class NotificationsRepository {
     }
   }
 
-  async findByRecipient(recipientId: string, limit = 30): Promise<Notification[]> {
+  async findByRecipient(
+    recipientId: string,
+    opts: { cursor?: string; limit?: number } = {},
+  ): Promise<{ notifications: Notification[]; nextCursor: string | null }> {
+    const limit = opts.limit ?? 30
+    const cursor = decodeCursor(opts.cursor)
+
+    const conditions = [eq(notifications.recipientId, recipientId)]
+    if (cursor) {
+      conditions.push(lt(notifications.createdAt, cursor.createdAt))
+    }
+    conditions.push(sql`NOT EXISTS (
+      SELECT 1 FROM ${userBlocks}
+      WHERE (
+        (${userBlocks.blockerId} = ${notifications.recipientId} AND ${userBlocks.blockedId} = ${notifications.actorId})
+        OR
+        (${userBlocks.blockerId} = ${notifications.actorId} AND ${userBlocks.blockedId} = ${notifications.recipientId})
+      )
+    )`)
+
     const rows = await this.db
       .select({
         id: notifications.id,
@@ -96,24 +132,32 @@ export class NotificationsRepository {
       })
       .from(notifications)
       .innerJoin(users, eq(notifications.actorId, users.id))
-      .where(eq(notifications.recipientId, recipientId))
+      .where(and(...conditions))
       .orderBy(desc(notifications.createdAt))
-      .limit(limit)
+      .limit(limit + 1)
 
-    return rows.map(r => ({
+    const hasMore = rows.length > limit
+    const results = hasMore ? rows.slice(0, limit) : rows
+    const nextCursor = hasMore && results.length > 0
+      ? encodeCursor({ createdAt: results[results.length - 1]!.createdAt, id: results[results.length - 1]!.id })
+      : null
+
+    const notifications_out = results.map(r => ({
       ...r,
       type: r.type as NotificationType,
       entityId: r.entityId ?? null,
       createdAt: r.createdAt.toISOString(),
     }))
+
+    return { notifications: notifications_out, nextCursor }
   }
 
   async countUnread(recipientId: string): Promise<number> {
-    const rows = await this.db
-      .select({ id: notifications.id })
+    const [result] = await this.db
+      .select({ total: count() })
       .from(notifications)
       .where(and(eq(notifications.recipientId, recipientId), eq(notifications.read, false)))
-    return rows.length
+    return Number(result?.total ?? 0)
   }
 
   async markAllRead(recipientId: string): Promise<void> {

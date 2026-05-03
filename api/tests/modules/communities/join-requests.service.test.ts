@@ -60,6 +60,7 @@ function mockJoinRequestsRepo(): JoinRequestsRepository {
     findByUserInCommunity: vi.fn().mockResolvedValue(null),
     listPending: vi.fn().mockResolvedValue([]),
     markDecided: vi.fn().mockResolvedValue(makeJoinRequest({ status: 'approved' })),
+    rejectAllPending: vi.fn().mockResolvedValue(undefined),
   } as unknown as JoinRequestsRepository
 }
 
@@ -120,6 +121,7 @@ describe('JoinRequestsService', () => {
 
   describe('requestJoin', () => {
     it('creates a new pending request', async () => {
+      vi.mocked(membersRepo.findByCommunityAndUser).mockResolvedValue(null)
       vi.mocked(joinReqRepo.findPending).mockResolvedValue(null)
 
       const result = await service.requestJoin('user-1', 'c1')
@@ -129,6 +131,7 @@ describe('JoinRequestsService', () => {
     })
 
     it('is idempotent: returns existing pending request if one exists', async () => {
+      vi.mocked(membersRepo.findByCommunityAndUser).mockResolvedValue(null)
       const existingRequest = makeJoinRequest()
       vi.mocked(joinReqRepo.findPending).mockResolvedValue(existingRequest)
 
@@ -175,7 +178,7 @@ describe('JoinRequestsService', () => {
   })
 
   describe('reject', () => {
-    it('rejects request and records audit', async () => {
+    it('rejects request and records audit within transaction', async () => {
       vi.mocked(membersRepo.findByCommunityAndUser).mockResolvedValue(
         makeMember({ role: 'moderator' }),
       )
@@ -183,7 +186,7 @@ describe('JoinRequestsService', () => {
 
       await service.reject('mod-1', 'c1', 'user-1')
 
-      expect(joinReqRepo.markDecided).toHaveBeenCalledWith('jr1', 'rejected', 'mod-1')
+      expect(joinReqRepo.markDecided).toHaveBeenCalledWith('jr1', 'rejected', 'mod-1', expect.anything())
       expect(auditLog.record).toHaveBeenCalledWith('member_join_rejected', 'c1', 'mod-1', expect.anything())
       expect(membersRepo.insertMember).not.toHaveBeenCalled()
     })

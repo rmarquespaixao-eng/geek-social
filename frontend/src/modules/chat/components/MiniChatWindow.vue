@@ -2,7 +2,7 @@
 <script setup lang="ts">
 import { computed, ref, watch, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { X, MoreVertical, Maximize2, Minus, Eye, Bell, BellOff, Hourglass, UserX, Flag } from 'lucide-vue-next'
+import { X, MoreVertical, Maximize2, Minus, Eye, Bell, BellOff, Hourglass, UserX, Flag, Shield } from 'lucide-vue-next'
 import ReportDialog from '@/modules/reports/components/ReportDialog.vue'
 import { useAuthStore } from '@/shared/auth/authStore'
 import { useChat } from '../composables/useChat'
@@ -10,6 +10,7 @@ import { useFriends } from '@/modules/friends/composables/useFriends'
 import { usePresence } from '../composables/usePresence'
 import { useFloatingChats } from '../composables/useFloatingChats'
 import MessageArea from './MessageArea.vue'
+import SafetyNumberDialog from './SafetyNumberDialog.vue'
 import AppConfirmDialog from '@/shared/ui/AppConfirmDialog.vue'
 import type { Conversation } from '../types'
 
@@ -66,6 +67,12 @@ const togglingTemporary = ref(false)
 const showBlockConfirm = ref(false)
 const blocking = ref(false)
 const showReportDialog = ref(false)
+const showSafetyDialog = ref(false)
+
+function openSafetyDialog() {
+  menuOpen.value = false
+  showSafetyDialog.value = true
+}
 
 function openReport() {
   menuOpen.value = false
@@ -203,6 +210,14 @@ function openInFullView() {
           <button
             type="button"
             class="flex w-full items-center gap-2 px-4 py-2 text-sm text-(--color-text-primary) hover:bg-(--color-bg-elevated) transition-colors"
+            @click="openSafetyDialog"
+          >
+            <Shield :size="14" />
+            Verificar identidade
+          </button>
+          <button
+            type="button"
+            class="flex w-full items-center gap-2 px-4 py-2 text-sm text-(--color-text-primary) hover:bg-(--color-bg-elevated) transition-colors"
             @click="openInFullView"
           >
             <Maximize2 :size="14" />
@@ -280,5 +295,11 @@ function openInFullView() {
     :deletable-conversation-id="conversation.id"
     @close="showReportDialog = false"
     @reported="showReportDialog = false"
+  />
+
+  <SafetyNumberDialog
+    v-if="showSafetyDialog"
+    :conversation="conversation"
+    @close="showSafetyDialog = false"
   />
 </template>

@@ -3,8 +3,14 @@ import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod'
 import type { UsersService } from './users.service.js'
 import { UsersController } from './users.controller.js'
 import { authenticate, optionalAuthenticate } from '../../shared/middleware/authenticate.js'
+import { createUserRateLimiter } from '../../shared/middleware/rate-limit.js'
 import { setColorSchema, updateProfileSchema, updateSettingsSchema } from './users.schema.js'
 import { errorResponseSchema } from '../auth/auth.schema.js'
+
+const searchRateLimiter = createUserRateLimiter(30, 60 * 1000)
+// deleteAccount é irreversível: rate-limit de 1/24h por userId. Para Google-only, JWT
+// vazado é o principal vetor — rate-limit mais restrito limita a janela de ataque (MEDIUM-11).
+const deleteAccountRateLimiter = createUserRateLimiter(1, 24 * 60 * 60 * 1000)
 
 const noContent = z.void()
 const idParam = z.object({ id: z.string().uuid() })
@@ -34,7 +40,7 @@ export const usersRoutes: FastifyPluginAsyncZod<{ usersService: UsersService }> 
       security: [{ accessToken: [] }],
       querystring: searchQuery,
     },
-    preHandler: [authenticate],
+    preHandler: [authenticate, searchRateLimiter],
     handler: controller.searchUsers.bind(controller),
   })
 
@@ -45,8 +51,9 @@ export const usersRoutes: FastifyPluginAsyncZod<{ usersService: UsersService }> 
       summary: 'Lista de amigos públicos de um usuário',
       description: 'Retorna amigos do usuário, respeitando privacy do dono e a relação com o requester.',
       params: idParam,
+      security: [{ accessToken: [] }],
     },
-    preHandler: [optionalAuthenticate],
+    preHandler: [authenticate],
     handler: controller.getPublicFriends.bind(controller),
   })
 
@@ -57,8 +64,9 @@ export const usersRoutes: FastifyPluginAsyncZod<{ usersService: UsersService }> 
       summary: 'Perfil público de um usuário',
       description: 'Retorna o perfil público (campos visíveis dependem de privacy + amizade). Usado em /perfil/:id.',
       params: idParam,
+      security: [{ accessToken: [] }],
     },
-    preHandler: [optionalAuthenticate],
+    preHandler: [authenticate],
     handler: controller.getProfile.bind(controller),
   })
 
@@ -194,11 +202,19 @@ export const usersRoutes: FastifyPluginAsyncZod<{ usersService: UsersService }> 
       operationId: 'users_delete_account',
       tags: ['Users'],
       summary: 'Excluir conta permanentemente',
-      description: 'Apaga avatar/cover/background do S3 e DELETE FROM users (cascade nas tabelas relacionadas). Ação irreversível.',
+      description: 'Requer confirmação de senha (contas com senha) ou pode omitir (contas Google-only — Google já atua como 2FA implícito). Apaga avatar/cover/background do S3 e DELETE FROM users (cascade nas tabelas relacionadas). Ação irreversível.',
       security: [{ accessToken: [] }],
-      response: { 204: noContent },
+      body: z.object({
+        // Obrigatório para contas com senha; opcional para contas Google-only (NEW-10).
+        password: z.string().optional(),
+      }),
+      response: {
+        204: noContent,
+        400: errorResponseSchema,
+        401: errorResponseSchema,
+      },
     },
-    preHandler: [authenticate],
+    preHandler: [authenticate, deleteAccountRateLimiter],
     handler: controller.deleteAccount.bind(controller),
   })
 }

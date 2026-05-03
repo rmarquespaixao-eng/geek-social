@@ -133,23 +133,36 @@ Arquivos no MinIO/S3 são **publicamente acessíveis via URL**. Implicação:
 
 ## Rate limiting
 
-**Estado atual:** sem rate limit no app. Apenas o que Nginx/Cloudflare pode prover na frente em prod.
-
-**Roadmap**: `@fastify/rate-limit` plugin com regras por endpoint:
+**Implementado** via middleware customizado em `api/src/shared/middleware/rate-limit.ts` com store Redis (auditoria #5, Pacote B).
 
 ```ts
-await app.register(import('@fastify/rate-limit'), {
-  max: 5,            // 5 reqs
-  timeWindow: '1m',  // por minuto
-  keyGenerator: req => req.ip,
-})
+// rate-limit.ts — INCR + PEXPIRE atômicos por janela fixa
+const key = `rl:ip:${ip}:${Math.floor(Date.now() / windowMs)}`
+const count = await redis.multi().incr(key).pexpire(key, windowMs).exec()
+if (count > maxRequests) throw 429
 ```
 
-Endpoints prioritários:
-- `/auth/login` — 5/min/IP (anti brute force)
-- `/auth/register` — 3/hora/IP (anti spam)
-- `/auth/forgot-password` — 3/hora/email (anti enumeration via spam de e-mails)
-- `/reports` — 10/dia/user (anti abuse)
+- **Sem fallback in-memory:** rate-limit é controle de segurança. Se o Redis cair, o middleware fail-closes com `503 RATE_LIMIT_UNAVAILABLE` (forçando o operador a tratar a indisponibilidade) em vez de silenciosamente liberar tudo.
+- **Distribuído:** funciona com N réplicas da API — o Redis é a fonte da verdade do contador.
+- **Algoritmo:** janela fixa (fixed window counter) — aceita até 2× limit no instante do rollover; suficiente pros endpoints atuais.
+
+Endpoints com limite hoje:
+
+| Endpoint | Limite | Escopo |
+|---|---|---|
+| `/auth/register` | 10/min | IP |
+| `/auth/login` | 5/min | IP |
+| `/auth/forgot-password` | 5/min | IP |
+| `/auth/reset-password` | 5/min | IP |
+| `/auth/resend-verification` | 5/min | IP |
+| `/auth/verify-email` | 20/min | IP |
+| `/auth/set-password` | 3/hora | userId |
+| `/auth/change-password` | 5/hora | userId |
+| `/auth/google/exchange` | 5/min | IP |
+| `/users/search` | 30/min | userId |
+| `DELETE /users/me` | 1/24h | userId |
+| `/notifications` (deleteAll) | 5/hora | userId |
+| `/notifications/:id` (delete) | 20/hora | userId |
 
 ## Secrets handling
 
@@ -187,22 +200,78 @@ Atacante que consegue XSS no nosso domínio passa por tudo. Defesa profundidade 
 
 ## Headers de segurança
 
-Não configurados hoje. Pra adicionar (sub-projeto E):
+**Implementado** via `@fastify/helmet` registrado em `app.ts` após o CORS (auditoria #4, Pacote B).
 
 ```ts
-await app.register(import('@fastify/helmet'), {
-  contentSecurityPolicy: { ... },
-  hsts: { maxAge: 31536000, includeSubDomains: true },
+await app.register(fastifyHelmet, {
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'none'"],
+      baseUri: ["'self'"],
+      frameAncestors: ["'none'"],
+      formAction: ["'self'"],
+      scriptSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      imgSrc: ["'self'", 'data:'],
+      connectSrc: ["'self'"],
+      fontSrc: ["'self'", 'data:'],
+      objectSrc: ["'none'"],
+    },
+  },
+  crossOriginResourcePolicy: { policy: 'cross-origin' },
+  hsts: env.NODE_ENV === 'production'
+    ? { maxAge: 31536000, includeSubDomains: true, preload: true }
+    : false,
 })
 ```
 
-| Header | Default Helmet |
+| Header | Valor |
 |---|---|
-| `Strict-Transport-Security` | HSTS |
-| `X-Content-Type-Options` | nosniff |
-| `X-Frame-Options` | DENY |
-| `Content-Security-Policy` | restrictive (precisa ajuste pra Scalar/Mermaid funcionarem) |
-| `Referrer-Policy` | no-referrer |
+| `Strict-Transport-Security` | 1 ano + includeSubDomains + preload (apenas em prod) |
+| `Content-Security-Policy` | `default-src 'none'` + sources mínimas |
+| `X-Content-Type-Options` | `nosniff` |
+| `X-Frame-Options` | `DENY` (via `frame-ancestors 'none'`) |
+| `Referrer-Policy` | `no-referrer` |
+| `Cross-Origin-Resource-Policy` | `cross-origin` (necessário pra frontend separado) |
+| `Cross-Origin-Embedder-Policy` | desabilitado (incompatível com mídia pública S3) |
+
+A API serve apenas JSON (e Swagger em dev), por isso o CSP pode ser bem restritivo. Pra docs/ferramentas que precisem de CSP relaxado, use o frontend ou um subdomínio dedicado.
+
+## Trust proxy
+
+`TRUST_PROXY` env var (auditoria #3, Pacote B) controla como o Fastify lê `request.ip` atrás de proxies/load balancers:
+
+| Valor | Uso |
+|---|---|
+| `false` (default dev) | `request.ip` = socket peer (correto sem proxy) |
+| `true` | confia no `X-Forwarded-For` da request (only-prod-com-proxy-confiavel) |
+| Número | nº de hops a confiar |
+| CIDR(s) | lista separada por vírgula (ex: `10.0.0.0/8,192.168.0.0/16`) |
+
+**Por que importa pro rate-limit:** sem `TRUST_PROXY` configurado, todas as requests atrás de um proxy reverso aparecem com o IP do proxy → rate-limit no `request.ip` viraria limit global por IP do load balancer. Com `TRUST_PROXY` correto, o IP real do cliente é extraído.
+
+## Criptografia end-to-end (chat)
+
+O chat (DMs e grupos) é **end-to-end encrypted** com Signal Protocol — o backend só vê ciphertext + material público de chave. Nenhuma instância do servidor (incluindo operadores com acesso ao DB) consegue ler conteúdo.
+
+| Componente | Algoritmo |
+|---|---|
+| Identidade long-term | Curve25519 (32B pub/priv) |
+| Pre-key signed (SPK) | Curve25519 + assinatura Ed25519, rotação ~7d |
+| Post-quantum prekey | Kyber1024 (PQXDH), rotação ~7d |
+| One-time prekey | Curve25519, lote 100, refill quando &lt;20 |
+| DM | X3DH/PQXDH + Double Ratchet (HKDF-SHA256 + AES-256-GCM) |
+| Grupos | Sender Keys distribuídas via Signal session 1-1 |
+| Backup de identidade | PBKDF2-SHA256(PIN, 600k iter) → AES-256-GCM, blob até 256 KB |
+
+Garantias:
+- **Forward secrecy:** comprometer uma message key não decifra outras mensagens.
+- **Post-quantum:** Kyber1024 na composição PQXDH protege contra "harvest now, decrypt later" mesmo se Curve25519 cair pra computação quântica.
+- **Group forward secrecy:** quando membro sai/é removido, `conversations.sender_key_id` rotaciona — ex-membro não decifra mensagens futuras.
+- **TOFU + safety numbers:** identidade do peer cacheada localmente, troca silenciosa dispara alerta + bloqueia até user acknowledgar.
+- **Push notifications metadata-only:** server VAPID nunca vê plaintext.
+
+Detalhes completos em [Criptografia E2EE](/docs/concepts/criptografia-e2ee).
 
 ## Logging vs privacidade
 
@@ -226,23 +295,32 @@ Pino sanitiza por default; mas hooks customizados podem vazar — auditar antes 
 | # | Categoria | Status |
 |---|---|---|
 | A01 | Broken Access Control | ✅ Validação por service em todos recursos |
-| A02 | Cryptographic Failures | ✅ bcrypt, sha256, HTTPS em prod |
+| A02 | Cryptographic Failures | ✅ bcrypt, sha256, HTTPS em prod, E2EE Signal Protocol no chat |
 | A03 | Injection (SQLi/CMD) | ✅ Drizzle parametriza; Zod valida |
-| A04 | Insecure Design | ⚠️ Storage público é decisão consciente; rate limit pendente |
-| A05 | Security Misconfiguration | ⚠️ Helmet ainda não configurado |
-| A06 | Vulnerable Components | ⚠️ `npm audit` periódico; sem Dependabot ainda |
-| A07 | Identification & Auth Failures | ✅ JWT + rotation, mas brute force depende de rate limit |
+| A04 | Insecure Design | ⚠️ Storage público é decisão consciente |
+| A05 | Security Misconfiguration | ✅ Helmet/CSP/HSTS configurados (Pacote B) |
+| A06 | Vulnerable Components | ⚠️ `npm audit` periódico; deps RCE corrigidas no Pacote A; sem Dependabot ainda |
+| A07 | Identification & Auth Failures | ✅ JWT + rotation + rate-limit Redis em endpoints sensíveis |
 | A08 | Software & Data Integrity | ⚠️ Sem signed builds / SBOM |
 | A09 | Security Logging & Monitoring | ❌ Audit log pendente; alerts pendente |
-| A10 | SSRF | ✅ Sem requests outbound a URLs controladas pelo user |
+| A10 | SSRF | ⚠️ Sem requests outbound a URLs controladas pelo user; Steam OpenID validado por allowlist (pendente — Pacote C) |
 
-Itens em ⚠️ ou ❌ são parte do roadmap.
+Itens em ⚠️ ou ❌ são parte do roadmap. O processo de auditoria interna está dividido em pacotes A–E (round 1 — 2026-04-30):
 
-## Pendências priorizadas
+| Pacote | Itens | Status |
+|---|---|---|
+| **A** | Bump deps com RCE (happy-dom, serialize-javascript) + bloqueio de secrets dev-only em prod | ✅ commit `579e206` |
+| **B** | trustProxy + helmet/CSP + rate-limit Redis distribuído | ✅ commit `0a4b498` |
+| **C** | SSRF, Steam OpenID allowlist, IDOR no chat, Google delete confirm + P2 auth | 🔜 |
+| **D** | scheme guard, IndexedDB encryption, OAuth fragment, EventEdit guard, logout cleanup | 🔜 |
+| **E** | CSP frontend, withCredentials, magic bytes, body limit + deps P2 (esbuild, vite, uuid) | 🔜 |
 
-1. **Rate limit em endpoints sensíveis** (login/register/forgot-password)
-2. **Helmet headers** em produção
-3. **Audit log** dedicado
-4. **Signed URLs** pra storage privado
-5. **Criptografia at-rest** de `steam_api_key` em DB
-6. **`npm audit` em CI** pra alertar de CVE em deps
+## Pendências priorizadas (pós-Pacote B)
+
+1. **Pacote C** — SSRF / OpenID allowlist / IDOR chat
+2. **Pacote D** — IDB encryption (cripto material no IndexedDB) + logout cleanup
+3. **Pacote E** — frontend CSP + magic bytes em uploads
+4. **Audit log** dedicado
+5. **Signed URLs** pra storage privado
+6. **Criptografia at-rest** de `steam_api_key` em DB
+7. **`npm audit` em CI** pra alertar de CVE em deps

@@ -1,6 +1,6 @@
 import { eq, and } from 'drizzle-orm'
 import type { DatabaseClient } from '../../shared/infra/database/postgres.client.js'
-import { reports, posts, collections, messages, users, conversations, conversationMembers } from '../../shared/infra/database/schema.js'
+import { reports, posts, collections, messages, users, conversations, conversationMembers, communityTopicMeta, postComments } from '../../shared/infra/database/schema.js'
 import type { ReportTargetType, ReportReason } from './reports.schema.js'
 
 export type Report = {
@@ -37,6 +37,19 @@ export class ReportsRepository {
     }
     if (targetType === 'message') {
       const [row] = await this.db.select({ userId: messages.userId }).from(messages).where(eq(messages.id, targetId)).limit(1)
+      return row?.userId ?? null
+    }
+    if (targetType === 'community_topic') {
+      const [row] = await this.db
+        .select({ userId: posts.userId })
+        .from(communityTopicMeta)
+        .innerJoin(posts, eq(posts.id, communityTopicMeta.postId))
+        .where(eq(communityTopicMeta.postId, targetId))
+        .limit(1)
+      return row?.userId ?? null
+    }
+    if (targetType === 'community_comment') {
+      const [row] = await this.db.select({ userId: postComments.userId }).from(postComments).where(eq(postComments.id, targetId)).limit(1)
       return row?.userId ?? null
     }
     return null

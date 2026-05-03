@@ -175,7 +175,7 @@ export class ConversationsRepository implements IConversationsRepository {
         })
 
       const [lastMsg] = await this.db.select({
-        id: messages.id, content: messages.content, userId: messages.userId, createdAt: messages.createdAt,
+        id: messages.id, content: messages.content, userId: messages.userId, createdAt: messages.createdAt, isEncrypted: messages.isEncrypted,
       }).from(messages)
         .where(and(eq(messages.conversationId, conv.id), sql`${messages.deletedAt} IS NULL`))
         .orderBy(sql`${messages.createdAt} DESC`)
@@ -208,7 +208,7 @@ export class ConversationsRepository implements IConversationsRepository {
       results.push({
         ...this.mapConv(conv),
         participants,
-        lastMessage: lastMsg ? { id: lastMsg.id, content: lastMsg.content, senderId: lastMsg.userId, createdAt: lastMsg.createdAt, type: lastMsgType } : null,
+        lastMessage: lastMsg ? { id: lastMsg.id, content: lastMsg.content, senderId: lastMsg.userId, createdAt: lastMsg.createdAt, type: lastMsgType, isEncrypted: lastMsg.isEncrypted ?? false } : null,
         unreadCount: Number(unreadCount),
         dmRequest: dmReq ? { id: dmReq.id, senderId: dmReq.senderId, receiverId: dmReq.receiverId, status: dmReq.status } : null,
         isBlockedByMe: false,
@@ -248,7 +248,7 @@ export class ConversationsRepository implements IConversationsRepository {
     })
 
     const [lastMsg] = await this.db.select({
-      id: messages.id, content: messages.content, userId: messages.userId, createdAt: messages.createdAt,
+      id: messages.id, content: messages.content, userId: messages.userId, createdAt: messages.createdAt, isEncrypted: messages.isEncrypted,
     }).from(messages)
       .where(and(eq(messages.conversationId, conv.id), sql`${messages.deletedAt} IS NULL`))
       .orderBy(sql`${messages.createdAt} DESC`)
@@ -275,7 +275,7 @@ export class ConversationsRepository implements IConversationsRepository {
     return {
       ...this.mapConv(conv),
       participants,
-      lastMessage: lastMsg ? { id: lastMsg.id, content: lastMsg.content, senderId: lastMsg.userId, createdAt: lastMsg.createdAt, type: lastMsgType } : null,
+      lastMessage: lastMsg ? { id: lastMsg.id, content: lastMsg.content, senderId: lastMsg.userId, createdAt: lastMsg.createdAt, type: lastMsgType, isEncrypted: lastMsg.isEncrypted ?? false } : null,
       unreadCount: Number(unreadCount),
       dmRequest: dmReq ? { id: dmReq.id, senderId: dmReq.senderId, receiverId: dmReq.receiverId, status: dmReq.status } : null,
       isBlockedByMe: false,
@@ -301,9 +301,19 @@ export class ConversationsRepository implements IConversationsRepository {
       coverUrl: row.coverUrl,
       createdBy: row.createdBy,
       isTemporary: row.isTemporary,
+      senderKeyId: row.senderKeyId,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     }
+  }
+
+  async rotateSenderKey(conversationId: string): Promise<string> {
+    const [row] = await this.db
+      .update(conversations)
+      .set({ senderKeyId: sql`gen_random_uuid()` })
+      .where(eq(conversations.id, conversationId))
+      .returning({ senderKeyId: conversations.senderKeyId })
+    return row.senderKeyId
   }
 
   private mapMember(row: typeof conversationMembers.$inferSelect): ConversationMember {

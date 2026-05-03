@@ -317,5 +317,3 @@ inclusive comercialmente, mas se você **rodar uma versão modificada como servi
 acessível por rede** (ex: SaaS, hospedagem própria com modificações), a licença
 te obriga a disponibilizar o código-fonte das modificações para os usuários
 daquele serviço.
-
-Isso fecha o "SaaS loophole" da GPL v3 — adequado pra uma rede social.

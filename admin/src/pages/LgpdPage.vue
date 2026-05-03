@@ -15,12 +15,13 @@ import CardDescription from '@/components/ui/CardDescription.vue'
 
 interface LgpdRequest {
   id: string
-  username: string
-  email: string
-  type: 'export' | 'delete'
+  userId: string
+  type: 'export' | 'delete' | 'rectify' | 'portability'
   status: 'pending' | 'processing' | 'completed' | 'rejected'
+  notes: string | null
   createdAt: string
-  completedAt?: string
+  completedAt: string | null
+  legalDeadlineAt: string
 }
 
 const requests = ref<LgpdRequest[]>([])
@@ -48,7 +49,7 @@ async function load() {
   loading.value = true
   try {
     const { data } = await api.get('/admin/lgpd-requests', {
-      params: { page: page.value, status: statusFilter.value },
+      params: { page: page.value, status: statusFilter.value || undefined },
     })
     requests.value = data.items
     total.value = data.total
@@ -95,7 +96,7 @@ onMounted(load)
             <thead>
               <tr class="border-b border-slate-200 bg-slate-50">
                 <th class="px-4 py-3 text-left font-medium text-slate-500">Usuário</th>
-                <th class="px-4 py-3 text-left font-medium text-slate-500">E-mail</th>
+                <th class="px-4 py-3 text-left font-medium text-slate-500">Prazo</th>
                 <th class="px-4 py-3 text-left font-medium text-slate-500">Tipo</th>
                 <th class="px-4 py-3 text-left font-medium text-slate-500">Status</th>
                 <th class="px-4 py-3 text-left font-medium text-slate-500">Solicitado em</th>
@@ -109,8 +110,8 @@ onMounted(load)
                 </td>
               </tr>
               <tr v-for="r in requests" :key="r.id" class="hover:bg-slate-50">
-                <td class="px-4 py-3 font-medium text-slate-900">{{ r.username }}</td>
-                <td class="px-4 py-3 text-slate-600">{{ r.email }}</td>
+                <td class="px-4 py-3 font-medium text-slate-900 font-mono text-xs truncate max-w-[140px]" :title="r.userId">{{ r.userId }}</td>
+                <td class="px-4 py-3 text-slate-600 text-xs">{{ formatDate(r.legalDeadlineAt) }}</td>
                 <td class="px-4 py-3">
                   <Badge :variant="r.type === 'export' ? 'default' : 'destructive'">
                     <component :is="r.type === 'export' ? Download : Trash2" class="h-3 w-3 mr-1" />

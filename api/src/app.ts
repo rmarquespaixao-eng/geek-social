@@ -208,8 +208,9 @@ export async function buildApp() {
     app.get('/docs/json', async () => app.swagger())
   }
 
+  const allowedOrigins = [env.FRONTEND_URL, ...(env.ADMIN_URL ? [env.ADMIN_URL] : [])]
   await app.register(fastifyCors, {
-    origin: env.FRONTEND_URL,
+    origin: allowedOrigins,
     credentials: true,
     methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   })

@@ -21,7 +21,18 @@ export class AdminReportsService {
   ) {}
 
   async list(_request: FastifyRequest, filters: ListReportsQuery) {
-    return this.repo.list(filters)
+    const { rows, total } = await this.repo.list(filters)
+    const items = rows.map(r => ({
+      id: r.id,
+      reporterId: r.reporterId,
+      targetType: r.targetType,
+      targetId: r.targetId,
+      reason: r.reason,
+      description: r.description,
+      status: r.status,
+      createdAt: r.createdAt,
+    }))
+    return { items, total, page: filters.page, pageSize: filters.pageSize }
   }
 
   async updateStatus(request: FastifyRequest, id: string, body: UpdateReportStatusBody): Promise<void> {

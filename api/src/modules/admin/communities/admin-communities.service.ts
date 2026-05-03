@@ -21,7 +21,20 @@ export class AdminCommunitiesService {
   ) {}
 
   async list(_request: FastifyRequest, filters: ListCommunitiesQuery) {
-    return this.repo.list(filters)
+    const { rows, total } = await this.repo.list(filters)
+    const items = rows.map(c => ({
+      id: c.id,
+      name: c.name,
+      slug: c.slug,
+      ownerId: c.ownerId,
+      memberCount: c.memberCount,
+      topicCount: c.topicCount,
+      category: c.category,
+      visibility: c.visibility,
+      status: c.deletedAt ? 'suspended' : 'active',
+      createdAt: c.createdAt,
+    }))
+    return { items, total, page: filters.page, pageSize: filters.pageSize }
   }
 
   async setStatus(request: FastifyRequest, id: string, body: UpdateCommunityStatusBody): Promise<void> {

@@ -366,10 +366,10 @@ export class OffersService {
       if (!offeredColl || offeredColl.userId !== offer.offererId) {
         throw new OffersError('OFFERED_ITEM_GONE')
       }
-      offered = { id: offeredItem.id, collectionId: offeredItem.collectionId, type: offeredColl.type ?? 'generic' }
+      offered = { id: offeredItem.id, collectionId: offeredItem.collectionId, type: offeredColl.collectionTypeKey ?? 'generic' }
     }
 
-    const offererDest = await this.ensureDestinationCollection(offer.offererId, itemCollection.type ?? 'generic')
+    const offererDest = await this.ensureDestinationCollection(offer.offererId, itemCollection.collectionTypeKey ?? 'generic')
     const ownerDest = offer.type === 'trade' && offered
       ? await this.ensureDestinationCollection(offer.ownerId, offered.type)
       : null

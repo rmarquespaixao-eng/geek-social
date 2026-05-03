@@ -46,18 +46,14 @@ export class CollectionsService {
       // O schema permite `null` (vindo do form), mas o repo só aceita undefined.
       // Normaliza aqui pra manter o domínio estável.
       description: input.description ?? undefined,
-      type: input.type as 'games' | 'books' | 'cardgames' | 'boardgames' | 'custom' | undefined,
       collectionTypeId: collectionTypeId ?? undefined,
       visibility: input.visibility,
       autoShareToFeed: input.autoShareToFeed,
     })
 
-    // Tenta buscar campos por collectionTypeId primeiro (pós-migração), depois por key (pré-migração)
     const isBuiltIn = ['games', 'books', 'cardgames', 'boardgames'].includes(input.type)
-    if (input.type !== 'custom' && isBuiltIn) {
-      const systemFields = collectionTypeId
-        ? await this.fieldDefRepo.findSystemByCollectionTypeId(collectionTypeId)
-        : await this.fieldDefRepo.findSystemByCollectionType(input.type as 'games' | 'books' | 'cardgames' | 'boardgames')
+    if (input.type !== 'custom' && isBuiltIn && collectionTypeId) {
+      const systemFields = await this.fieldDefRepo.findSystemByCollectionTypeId(collectionTypeId)
       if (systemFields.length > 0) {
         await this.collectionsRepo.addFieldsToSchema(
           collection.id,

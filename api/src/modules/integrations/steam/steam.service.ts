@@ -142,20 +142,21 @@ export class SteamService {
       const col = await this.collectionsRepo.findById(destination.collectionId)
       if (!col) throw new SteamError('IMPORT_COLLECTION_NOT_FOUND')
       if (col.userId !== userId) throw new SteamError('IMPORT_COLLECTION_NOT_OWNED')
-      if (col.type !== 'games') throw new SteamError('IMPORT_COLLECTION_NOT_GAMES_TYPE')
+      if (col.collectionTypeKey !== 'games') throw new SteamError('IMPORT_COLLECTION_NOT_GAMES_TYPE')
       collectionId = col.id
     } else {
       const name = destination.newCollectionName.trim()
       if (!name) throw new SteamError('IMPORT_INVALID_COLLECTION_NAME')
+      const gamesTypeId = await this.collectionsRepo.findCollectionTypeIdByKey('games')
       const created = await this.collectionsRepo.create({
         userId,
         name,
-        type: 'games',
+        collectionTypeId: gamesTypeId ?? undefined,
         visibility: 'private',
       })
       collectionId = created.id
       // Anexa schema padrão de games ao collection_field_schema
-      const sysFields = await this.fieldDefRepo.findSystemByCollectionType('games')
+      const sysFields = gamesTypeId ? await this.fieldDefRepo.findSystemByCollectionTypeId(gamesTypeId) : []
       await this.collectionsRepo.addFieldsToSchema(
         collectionId,
         sysFields.map((f, idx) => ({

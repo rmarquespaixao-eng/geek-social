@@ -10,6 +10,7 @@ export type Collection = {
   iconUrl: string | null
   coverUrl: string | null
   collectionTypeId: string | null
+  collectionTypeKey: string | null
   visibility: CollectionVisibility
   autoShareToFeed: boolean
   itemCount: number
@@ -55,6 +56,7 @@ export type SchemaEntryData = {
 export interface ICollectionRepository {
   create(data: CreateCollectionData): Promise<Collection>
   findById(id: string): Promise<CollectionWithSchema | null>
+  findCollectionTypeIdByKey(key: string): Promise<string | null>
   findByUserId(userId: string, query?: string): Promise<Collection[]>
   findPublicByUserId(userId: string, visibilities: CollectionVisibility[]): Promise<Collection[]>
   update(id: string, data: UpdateCollectionData): Promise<Collection>

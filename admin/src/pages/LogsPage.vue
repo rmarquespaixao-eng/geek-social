@@ -13,40 +13,48 @@ import CardContent from '@/components/ui/CardContent.vue'
 
 interface ActivityLog {
   id: string
-  username: string
+  actorId: string | null
+  actorRoleAtTime: string
   action: string
-  targetType: string
-  targetId: string
-  ip: string
-  location: string
-  userAgent: string
+  targetType: string | null
+  targetId: string | null
+  ip: string | null
+  metadata: Record<string, unknown>
   createdAt: string
 }
 
 const logs = ref<ActivityLog[]>([])
 const total = ref(0)
 const page = ref(1)
-const search = ref('')
+const actorIdFilter = ref('')
 const actionFilter = ref('')
 const loading = ref(false)
 
 const actionOptions = [
   { value: '', label: 'Todas as ações' },
-  { value: 'post.create', label: 'Criar post' },
-  { value: 'post.delete', label: 'Deletar post' },
-  { value: 'comment.create', label: 'Comentar' },
-  { value: 'user.login', label: 'Login' },
-  { value: 'user.logout', label: 'Logout' },
-  { value: 'collection.create', label: 'Criar coleção' },
-  { value: 'report.create', label: 'Denunciar' },
+  { value: 'user_role_change', label: 'Alterar perfil' },
+  { value: 'user_ban', label: 'Banir usuário' },
+  { value: 'user_unban', label: 'Desbanir usuário' },
+  { value: 'user_suspend', label: 'Suspender usuário' },
+  { value: 'user_anonymize', label: 'Anonimizar (LGPD)' },
+  { value: 'report_review', label: 'Revisar denúncia' },
+  { value: 'report_dismiss', label: 'Descartar denúncia' },
+  { value: 'community_suspend', label: 'Suspender comunidade' },
+  { value: 'community_unsuspend', label: 'Reativar comunidade' },
+  { value: 'feature_flag_create', label: 'Criar feature flag' },
+  { value: 'feature_flag_toggle', label: 'Ativar/desativar flag' },
+  { value: 'lgpd_approve', label: 'Aprovar LGPD' },
+  { value: 'lgpd_reject', label: 'Rejeitar LGPD' },
+  { value: 'lgpd_complete', label: 'Completar LGPD' },
 ]
 
 async function load() {
   loading.value = true
   try {
-    const { data } = await api.get('/admin/logs', {
-      params: { page: page.value, search: search.value, action: actionFilter.value },
-    })
+    const params: Record<string, unknown> = { page: page.value }
+    if (actorIdFilter.value) params.actorId = actorIdFilter.value
+    if (actionFilter.value) params.action = actionFilter.value
+    const { data } = await api.get('/admin/logs', { params })
     logs.value = data.items
     total.value = data.total
   } catch {
@@ -64,7 +72,7 @@ onMounted(load)
     <div class="flex flex-wrap gap-3">
       <div class="relative flex-1 min-w-48">
         <Search class="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-        <Input v-model="search" placeholder="Buscar por usuário ou IP..." class="pl-9" @keyup.enter="load" />
+        <Input v-model="actorIdFilter" placeholder="Filtrar por ID do ator (UUID)..." class="pl-9 font-mono" @keyup.enter="load" />
       </div>
       <Select v-model="actionFilter" :options="actionOptions" class="w-48" />
       <Button @click="load" size="sm" :disabled="loading">Filtrar</Button>
@@ -76,11 +84,11 @@ onMounted(load)
           <table class="w-full text-sm">
             <thead>
               <tr class="border-b border-slate-200 bg-slate-50">
-                <th class="px-4 py-3 text-left font-medium text-slate-500">Usuário</th>
+                <th class="px-4 py-3 text-left font-medium text-slate-500">Ator</th>
                 <th class="px-4 py-3 text-left font-medium text-slate-500">Ação</th>
                 <th class="px-4 py-3 text-left font-medium text-slate-500">Alvo</th>
                 <th class="px-4 py-3 text-left font-medium text-slate-500">IP</th>
-                <th class="px-4 py-3 text-left font-medium text-slate-500">Localização</th>
+                <th class="px-4 py-3 text-left font-medium text-slate-500">Perfil</th>
                 <th class="px-4 py-3 text-left font-medium text-slate-500">Data/Hora</th>
               </tr>
             </thead>
@@ -91,13 +99,13 @@ onMounted(load)
                 </td>
               </tr>
               <tr v-for="log in logs" :key="log.id" class="hover:bg-slate-50">
-                <td class="px-4 py-2.5 font-sans font-medium text-slate-900">{{ log.username }}</td>
+                <td class="px-4 py-2.5 font-medium text-slate-900 text-xs truncate max-w-[140px]" :title="log.actorId ?? '—'">{{ log.actorId ?? '—' }}</td>
                 <td class="px-4 py-2.5">
                   <Badge variant="secondary" class="font-mono text-xs">{{ log.action }}</Badge>
                 </td>
                 <td class="px-4 py-2.5 text-slate-500 text-xs">{{ log.targetType }}:{{ log.targetId }}</td>
                 <td class="px-4 py-2.5 text-slate-600 text-xs">{{ log.ip }}</td>
-                <td class="px-4 py-2.5 font-sans text-slate-500 text-xs">{{ log.location || '—' }}</td>
+                <td class="px-4 py-2.5 font-sans text-slate-500 text-xs">{{ log.actorRoleAtTime }}</td>
                 <td class="px-4 py-2.5 font-sans text-slate-500 text-xs">{{ formatDate(log.createdAt) }}</td>
               </tr>
             </tbody>

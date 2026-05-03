@@ -330,6 +330,55 @@
       "when": 1746490000000,
       "tag": "0046_conv_sender_key_id",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1777455000000,
+      "tag": "0047_admin_platform_role",
+      "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1777455100000,
+      "tag": "0048_admin_audit_log",
+      "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1777455200000,
+      "tag": "0049_admin_feature_flags",
+      "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1777455300000,
+      "tag": "0050_admin_lgpd_requests",
+      "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1777455400000,
+      "tag": "0051_admin_moderation_configs",
+      "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1777455500000,
+      "tag": "0052_collection_types_table",
+      "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1777455600000,
+      "tag": "0053_moderation_singleton_constraint",
+      "breakpoints": true
     }
   ]
 }

@@ -16,6 +16,7 @@ const envSchema = z.object({
   SES_FROM_EMAIL: z.string().email().default('noreply@localhost'),
   APP_URL: z.string().url(),
   FRONTEND_URL: z.string().url(),
+  ADMIN_URL: z.string().url().optional(),
   GOOGLE_OAUTH_ENABLED: z.enum(['true', 'false']).transform(v => v === 'true').default(false),
   GOOGLE_CLIENT_ID: z.string().optional(),
   GOOGLE_CLIENT_SECRET: z.string().optional(),

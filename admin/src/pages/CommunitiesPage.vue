@@ -13,11 +13,13 @@ import CardContent from '@/components/ui/CardContent.vue'
 interface Community {
   id: string
   name: string
+  slug: string
+  ownerId: string | null
   memberCount: number
-  postCount: number
+  topicCount: number
+  category: string
   status: 'active' | 'suspended'
   createdAt: string
-  owner: string
 }
 
 const communities = ref<Community[]>([])
@@ -32,7 +34,7 @@ async function load() {
     const { data } = await api.get('/admin/communities', {
       params: { page: page.value, search: search.value },
     })
-    communities.value = data.items
+    communities.value = data.items ?? []
     total.value = data.total
   } catch {
     toast.error('Erro ao carregar comunidades')
@@ -45,8 +47,7 @@ async function toggleStatus(id: string, current: string) {
   const next = current === 'active' ? 'suspended' : 'active'
   try {
     await api.patch(`/admin/communities/${id}/status`, { status: next })
-    const c = communities.value.find(c => c.id === id)
-    if (c) c.status = next as any
+    await load()
     toast.success(`Comunidade ${next === 'active' ? 'reativada' : 'suspensa'}`)
   } catch {
     toast.error('Erro ao atualizar status')
@@ -73,9 +74,9 @@ onMounted(load)
             <thead>
               <tr class="border-b border-slate-200 bg-slate-50">
                 <th class="px-4 py-3 text-left font-medium text-slate-500">Comunidade</th>
-                <th class="px-4 py-3 text-left font-medium text-slate-500">Dono</th>
+                <th class="px-4 py-3 text-left font-medium text-slate-500">Slug</th>
                 <th class="px-4 py-3 text-right font-medium text-slate-500">Membros</th>
-                <th class="px-4 py-3 text-right font-medium text-slate-500">Posts</th>
+                <th class="px-4 py-3 text-right font-medium text-slate-500">Tópicos</th>
                 <th class="px-4 py-3 text-left font-medium text-slate-500">Status</th>
                 <th class="px-4 py-3 text-left font-medium text-slate-500">Criada</th>
                 <th class="px-4 py-3 text-right font-medium text-slate-500">Ações</th>
@@ -89,9 +90,9 @@ onMounted(load)
               </tr>
               <tr v-for="c in communities" :key="c.id" class="hover:bg-slate-50">
                 <td class="px-4 py-3 font-medium text-slate-900">{{ c.name }}</td>
-                <td class="px-4 py-3 text-slate-600">{{ c.owner }}</td>
+                <td class="px-4 py-3 text-slate-500 font-mono text-xs">{{ c.slug }}</td>
                 <td class="px-4 py-3 text-right text-slate-600">{{ c.memberCount?.toLocaleString('pt-BR') }}</td>
-                <td class="px-4 py-3 text-right text-slate-600">{{ c.postCount?.toLocaleString('pt-BR') }}</td>
+                <td class="px-4 py-3 text-right text-slate-600">{{ c.topicCount?.toLocaleString('pt-BR') }}</td>
                 <td class="px-4 py-3">
                   <Badge :variant="c.status === 'active' ? 'success' : 'warning'">
                     {{ c.status === 'active' ? 'Ativa' : 'Suspensa' }}

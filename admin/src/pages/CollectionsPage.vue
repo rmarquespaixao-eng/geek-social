@@ -15,9 +15,11 @@ import CardTitle from '@/components/ui/CardTitle.vue'
 
 interface CollectionType {
   id: string
-  name: string
-  description: string
-  icon: string
+  key: string
+  name: string | null
+  description: string | null
+  icon: string | null
+  isSystem: boolean
   active: boolean
 }
 
@@ -31,7 +33,7 @@ async function load() {
   loading.value = true
   try {
     const { data } = await api.get('/admin/collection-types')
-    types.value = data
+    types.value = data.data ?? []
   } catch {
     toast.error('Erro ao carregar tipos de coleção')
   } finally {

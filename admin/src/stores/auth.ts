@@ -4,10 +4,10 @@ import { api } from '@/lib/api'
 
 interface AdminUser {
   id: string
-  username: string
+  displayName: string
   email: string
-  role: string
-  avatar?: string
+  platformRole: string
+  avatarUrl?: string
 }
 
 export const useAuthStore = defineStore('auth', () => {
@@ -15,11 +15,11 @@ export const useAuthStore = defineStore('auth', () => {
   const user = ref<AdminUser | null>(null)
 
   const isAuthenticated = computed(() => !!token.value)
-  const isAdmin = computed(() => user.value?.role === 'admin' || user.value?.role === 'moderator')
+  const isAdmin = computed(() => user.value?.platformRole === 'admin' || user.value?.platformRole === 'moderator')
 
   async function login(email: string, password: string) {
     const { data } = await api.post('/auth/login', { email, password })
-    if (!['admin', 'moderator'].includes(data.user?.role)) {
+    if (!['admin', 'moderator'].includes(data.user?.platformRole)) {
       throw new Error('Acesso negado: perfil sem permissão de administrador')
     }
     token.value = data.accessToken
@@ -31,7 +31,7 @@ export const useAuthStore = defineStore('auth', () => {
     if (!token.value) return
     try {
       const { data } = await api.get('/users/me')
-      if (!['admin', 'moderator'].includes(data.role)) {
+      if (!['admin', 'moderator'].includes(data.platformRole)) {
         logout()
         return
       }

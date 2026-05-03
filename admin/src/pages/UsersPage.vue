@@ -13,10 +13,11 @@ import CardContent from '@/components/ui/CardContent.vue'
 
 interface User {
   id: string
-  username: string
+  displayName: string
   email: string
-  role: string
-  status: 'active' | 'suspended' | 'banned'
+  platformRole: string
+  avatarUrl?: string
+  emailVerified: boolean
   createdAt: string
 }
 
@@ -24,33 +25,33 @@ const users = ref<User[]>([])
 const total = ref(0)
 const page = ref(1)
 const search = ref('')
-const statusFilter = ref('')
+const roleFilter = ref('')
 const loading = ref(false)
 const actionOpen = ref<string | null>(null)
 
-const statusOptions = [
-  { value: '', label: 'Todos os status' },
-  { value: 'active', label: 'Ativos' },
-  { value: 'suspended', label: 'Suspensos' },
-  { value: 'banned', label: 'Banidos' },
+const roleOptions = [
+  { value: '', label: 'Todos os perfis' },
+  { value: 'user', label: 'Usuário' },
+  { value: 'moderator', label: 'Moderador' },
+  { value: 'admin', label: 'Admin' },
 ]
 
-const statusVariant: Record<string, any> = {
-  active: 'success',
-  suspended: 'warning',
-  banned: 'destructive',
+const roleVariant: Record<string, string> = {
+  admin: 'destructive',
+  moderator: 'warning',
+  user: 'secondary',
 }
-const statusLabel: Record<string, string> = {
-  active: 'Ativo',
-  suspended: 'Suspenso',
-  banned: 'Banido',
+const roleLabel: Record<string, string> = {
+  admin: 'Admin',
+  moderator: 'Moderador',
+  user: 'Usuário',
 }
 
 async function load() {
   loading.value = true
   try {
     const { data } = await api.get('/admin/users', {
-      params: { page: page.value, search: search.value, status: statusFilter.value },
+      params: { page: page.value, search: search.value, role: roleFilter.value || undefined },
     })
     users.value = data.items
     total.value = data.total
@@ -64,9 +65,8 @@ async function load() {
 async function setStatus(userId: string, status: 'active' | 'suspended' | 'banned') {
   try {
     await api.patch(`/admin/users/${userId}/status`, { status })
-    const u = users.value.find(u => u.id === userId)
-    if (u) u.status = status
     toast.success('Status atualizado')
+    await load()
   } catch {
     toast.error('Erro ao atualizar status')
   } finally {
@@ -84,7 +84,7 @@ onMounted(load)
         <Search class="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
         <Input v-model="search" placeholder="Buscar por nome ou e-mail..." class="pl-9" @keyup.enter="load" />
       </div>
-      <Select v-model="statusFilter" :options="statusOptions" class="w-48" />
+      <Select v-model="roleFilter" :options="roleOptions" class="w-48" />
       <Button @click="load" :disabled="loading" size="sm">{{ loading ? 'Buscando...' : 'Buscar' }}</Button>
     </div>
 
@@ -97,7 +97,7 @@ onMounted(load)
                 <th class="px-4 py-3 text-left font-medium text-slate-500">Usuário</th>
                 <th class="px-4 py-3 text-left font-medium text-slate-500">E-mail</th>
                 <th class="px-4 py-3 text-left font-medium text-slate-500">Perfil</th>
-                <th class="px-4 py-3 text-left font-medium text-slate-500">Status</th>
+                <th class="px-4 py-3 text-left font-medium text-slate-500">E-mail</th>
                 <th class="px-4 py-3 text-left font-medium text-slate-500">Cadastro</th>
                 <th class="px-4 py-3 text-right font-medium text-slate-500">Ações</th>
               </tr>
@@ -112,42 +112,42 @@ onMounted(load)
                 <td class="px-4 py-3">
                   <div class="flex items-center gap-2">
                     <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-indigo-100 text-xs font-medium text-indigo-700 uppercase">
-                      {{ user.username[0] }}
+                      {{ (user.displayName || '?')[0] }}
                     </div>
-                    <span class="font-medium text-slate-900">{{ user.username }}</span>
+                    <span class="font-medium text-slate-900">{{ user.displayName }}</span>
                   </div>
                 </td>
                 <td class="px-4 py-3 text-slate-600">{{ user.email }}</td>
                 <td class="px-4 py-3">
-                  <Badge variant="secondary">{{ user.role }}</Badge>
+                  <Badge :variant="roleVariant[user.platformRole] || 'secondary'">{{ roleLabel[user.platformRole] || user.platformRole }}</Badge>
                 </td>
                 <td class="px-4 py-3">
-                  <Badge :variant="statusVariant[user.status]">{{ statusLabel[user.status] }}</Badge>
+                  <Badge :variant="user.emailVerified ? 'success' : 'warning'">{{ user.emailVerified ? 'Verificado' : 'Pendente' }}</Badge>
                 </td>
                 <td class="px-4 py-3 text-slate-500">{{ formatDateShort(user.createdAt) }}</td>
                 <td class="px-4 py-3">
                   <div class="flex items-center justify-end gap-1">
                     <Button
-                      v-if="user.status !== 'suspended'"
                       size="sm" variant="outline"
                       class="text-amber-600 border-amber-300 hover:bg-amber-50"
                       @click="setStatus(user.id, 'suspended')"
+                      title="Suspender"
                     >
                       <UserX class="h-3.5 w-3.5" />
                     </Button>
                     <Button
-                      v-if="user.status !== 'banned'"
                       size="sm" variant="outline"
                       class="text-red-600 border-red-300 hover:bg-red-50"
                       @click="setStatus(user.id, 'banned')"
+                      title="Banir"
                     >
                       <Ban class="h-3.5 w-3.5" />
                     </Button>
                     <Button
-                      v-if="user.status !== 'active'"
                       size="sm" variant="outline"
                       class="text-green-600 border-green-300 hover:bg-green-50"
                       @click="setStatus(user.id, 'active')"
+                      title="Reativar"
                     >
                       <RotateCcw class="h-3.5 w-3.5" />
                     </Button>

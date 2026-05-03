@@ -1,4 +1,4 @@
-import { eq, and, or, ilike, asc, inArray, count, sql } from 'drizzle-orm'
+import { eq, and, or, ilike, asc, desc, inArray, count, sql } from 'drizzle-orm'
 import type { DatabaseClient } from '../../shared/infra/database/postgres.client.js'
 import { collections, collectionFieldSchema, collectionTypes, fieldDefinitions, items } from '../../shared/infra/database/schema.js'
 import type {
@@ -15,7 +15,7 @@ import type {
 export type CollectionStats = {
   totalCollections: number
   itemsByType: { typeKey: string; typeName: string; typeIcon: string; count: number }[]
-  statusByType: { typeKey: string; typeName: string; typeIcon: string; status: string | null; count: number }[]
+  fieldBreakdownByType: { typeKey: string; typeName: string; typeIcon: string; fieldKey: string; fieldName: string; fieldValue: string; count: number }[]
   itemsByRating: { rating: number | null; count: number }[]
   gamesByCompletionYear: { year: number; count: number }[]
 }
@@ -219,48 +219,54 @@ export class CollectionsRepository implements ICollectionRepository {
   }
 
   async getStats(userId: string): Promise<CollectionStats> {
-    const [totalResult, itemsByTypeRows, statusByTypeRows, itemsByRatingRows, gamesByYearRows] = await Promise.all([
+    const [totalResult, itemsByTypeRows, fieldBreakdownRows, itemsByRatingRows, gamesByYearRows] = await Promise.all([
 
       this.db.select({ total: count() })
         .from(collections)
         .where(eq(collections.userId, userId)),
 
-      // leftJoin para incluir coleções sem tipo (collectionTypeId = null)
+      // innerJoin simples — sem COALESCE no SQL (evita bug de GROUP BY no Drizzle)
       this.db.select({
-          typeKey: sql<string>`COALESCE(${collectionTypes.key}, 'other')`,
-          typeName: sql<string>`COALESCE(${collectionTypes.name}, 'Sem categoria')`,
-          typeIcon: sql<string>`COALESCE(${collectionTypes.icon}, '')`,
+          typeKey: collectionTypes.key,
+          typeName: collectionTypes.name,
+          typeIcon: collectionTypes.icon,
           count: count(items.id),
         })
         .from(collections)
-        .leftJoin(collectionTypes, eq(collections.collectionTypeId, collectionTypes.id))
+        .innerJoin(collectionTypes, eq(collections.collectionTypeId, collectionTypes.id))
         .innerJoin(items, eq(items.collectionId, collections.id))
         .where(eq(collections.userId, userId))
         .groupBy(collectionTypes.id, collectionTypes.key, collectionTypes.name, collectionTypes.icon),
 
-      // status por tipo de coleção (genérico — todos os tipos do usuário)
+      // breakdown dinâmico: todos os campos select de todos os tipos do usuário
       this.db.select({
-          typeKey: sql<string>`COALESCE(${collectionTypes.key}, 'other')`,
-          typeName: sql<string>`COALESCE(${collectionTypes.name}, 'Sem categoria')`,
-          typeIcon: sql<string>`COALESCE(${collectionTypes.icon}, '')`,
-          status: sql<string | null>`${items.fields}->>'status'`,
+          typeKey: collectionTypes.key,
+          typeName: collectionTypes.name,
+          typeIcon: collectionTypes.icon,
+          fieldKey: fieldDefinitions.fieldKey,
+          fieldName: fieldDefinitions.name,
+          fieldValue: sql<string>`${items.fields} ->> ${fieldDefinitions.fieldKey}`,
           count: count(),
         })
         .from(items)
         .innerJoin(collections, eq(items.collectionId, collections.id))
-        .leftJoin(collectionTypes, eq(collections.collectionTypeId, collectionTypes.id))
+        .innerJoin(collectionTypes, eq(collections.collectionTypeId, collectionTypes.id))
+        .innerJoin(fieldDefinitions, and(
+          eq(fieldDefinitions.collectionTypeId, collectionTypes.id),
+          eq(fieldDefinitions.fieldType, 'select'),
+          eq(fieldDefinitions.isHidden, false),
+        ))
         .where(and(
           eq(collections.userId, userId),
-          sql`(${items.fields}->>'status') IS NOT NULL`,
-          sql`(${items.fields}->>'status') <> ''`,
+          sql`${items.fields} ->> ${fieldDefinitions.fieldKey} IS NOT NULL`,
+          sql`${items.fields} ->> ${fieldDefinitions.fieldKey} <> ''`,
         ))
         .groupBy(
-          collectionTypes.id,
-          collectionTypes.key,
-          collectionTypes.name,
-          collectionTypes.icon,
-          sql`${items.fields}->>'status'`,
-        ),
+          collectionTypes.id, collectionTypes.key, collectionTypes.name, collectionTypes.icon,
+          fieldDefinitions.id, fieldDefinitions.fieldKey, fieldDefinitions.name,
+          sql`${items.fields} ->> ${fieldDefinitions.fieldKey}`,
+        )
+        .orderBy(collectionTypes.key, fieldDefinitions.fieldKey, desc(count())),
 
       this.db.select({ rating: items.rating, count: count() })
         .from(items)
@@ -268,7 +274,7 @@ export class CollectionsRepository implements ICollectionRepository {
         .where(eq(collections.userId, userId))
         .groupBy(items.rating),
 
-      // Jogos zerados/platinados por ano de conclusão
+      // jogos zerados/platinados por ano de conclusão
       this.db.select({
           year: sql<number>`EXTRACT(YEAR FROM (${items.fields}->>'completion_date')::date)::int`,
           count: count(),
@@ -292,8 +298,21 @@ export class CollectionsRepository implements ICollectionRepository {
 
     return {
       totalCollections: Number(totalResult[0]?.total ?? 0),
-      itemsByType: itemsByTypeRows.map(r => ({ typeKey: r.typeKey, typeName: r.typeName, typeIcon: r.typeIcon, count: Number(r.count) })),
-      statusByType: statusByTypeRows.map(r => ({ typeKey: r.typeKey, typeName: r.typeName, typeIcon: r.typeIcon, status: r.status ?? null, count: Number(r.count) })),
+      itemsByType: itemsByTypeRows.map(r => ({
+        typeKey: r.typeKey ?? 'other',
+        typeName: r.typeName ?? 'Sem categoria',
+        typeIcon: r.typeIcon ?? '',
+        count: Number(r.count),
+      })),
+      fieldBreakdownByType: fieldBreakdownRows.map(r => ({
+        typeKey: r.typeKey ?? 'other',
+        typeName: r.typeName ?? 'Sem categoria',
+        typeIcon: r.typeIcon ?? '',
+        fieldKey: r.fieldKey,
+        fieldName: r.fieldName,
+        fieldValue: r.fieldValue,
+        count: Number(r.count),
+      })),
       itemsByRating: itemsByRatingRows.map(r => ({ rating: r.rating ?? null, count: Number(r.count) })),
       gamesByCompletionYear: gamesByYearRows.map(r => ({ year: Number(r.year), count: Number(r.count) })),
     }

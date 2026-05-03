@@ -111,6 +111,7 @@ import { SteamService } from './modules/integrations/steam/steam.service.js'
 import { SteamController, steamRoutes } from './modules/integrations/steam/steam.controller.js'
 import { ImportBatchFinalizationRepository } from './modules/integrations/steam/import-batch-finalization.repository.js'
 import { createSteamImportGameWorker } from './shared/infra/jobs/workers/steam-import-game.worker.js'
+import { adminRoutes } from './modules/admin/admin.routes.js'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 
@@ -181,6 +182,7 @@ export async function buildApp() {
       ],
       tags: [
         { name: 'Auth', description: 'Autenticação, registro, OAuth, recuperação de senha' },
+        { name: 'Admin', description: 'Painel de administração — acesso restrito a admins e moderadores' },
       ],
       components: {
         securitySchemes: {
@@ -260,7 +262,7 @@ export async function buildApp() {
   await migrate(db, { migrationsFolder: join(__dirname, 'shared/infra/database/migrations') })
 
   const fieldDefinitionRepository = new FieldDefinitionRepository(db)
-  await seedFieldDefinitions(fieldDefinitionRepository)
+  await seedFieldDefinitions(fieldDefinitionRepository, db)
   const fieldDefinitionsService = new FieldDefinitionsService(fieldDefinitionRepository)
 
   const userRepository = new UserRepository(db)
@@ -302,6 +304,7 @@ export async function buildApp() {
     storageService,
     friendsRepository,
     usersRepository,
+    db,
   )
 
   const postsRepository = new PostsRepository(db)
@@ -670,6 +673,9 @@ export async function buildApp() {
 
     app.addHook('onClose', async () => { await jobsQueue.stop() })
   }
+
+  // Admin panel
+  await app.register(adminRoutes, { prefix: '/admin', db })
 
   if (env.GOOGLE_OAUTH_ENABLED && env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET) {
     const { registerGoogleRoutes } = await import('./modules/auth/google.strategy.js')

@@ -27,7 +27,10 @@ export const lgpdUserRoutes: FastifyPluginAsyncZod<{ repo: LgpdRepository }> = a
       summary: 'Submeter solicitação LGPD (Art. 18)',
       security: [{ accessToken: [] }],
       body: submitBody,
-      response: { 201: responseSchema },
+      response: {
+        201: responseSchema,
+        409: z.object({ error: z.string(), message: z.string() }),
+      },
     },
     handler: async (request, reply) => {
       const { userId } = request.user as AccessTokenClaims
@@ -36,7 +39,7 @@ export const lgpdUserRoutes: FastifyPluginAsyncZod<{ repo: LgpdRepository }> = a
         return reply.status(409).send({
           error: 'LGPD_REQUEST_PENDING',
           message: 'Você já tem uma solicitação em andamento',
-        } as any)
+        })
       }
       const row = await opts.repo.create(userId, request.body.type)
       return reply.status(201).send(row)

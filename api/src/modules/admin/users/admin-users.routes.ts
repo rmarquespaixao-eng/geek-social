@@ -18,6 +18,7 @@ const listUsersResponseSchema = z.object({
     email: z.string(),
     avatarUrl: z.string().nullable(),
     platformRole: z.enum(['user', 'moderator', 'admin']),
+    status: z.enum(['active', 'suspended', 'banned']),
     emailVerified: z.boolean(),
     createdAt: z.date(),
   })),

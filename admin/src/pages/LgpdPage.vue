@@ -62,7 +62,7 @@ async function load() {
 
 async function process(id: string, action: 'approve' | 'reject' | 'complete') {
   try {
-    await api.post(`/admin/lgpd-requests/${id}/${action}`)
+    await api.post(`/admin/lgpd-requests/${id}/${action}`, {})
     await load()
     const msgs = { approve: 'Solicitação aprovada', reject: 'Solicitação rejeitada', complete: 'Solicitação concluída' }
     toast.success(msgs[action])

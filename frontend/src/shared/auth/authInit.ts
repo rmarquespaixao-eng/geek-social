@@ -17,7 +17,9 @@ export async function initializeAuth(): Promise<void> {
     const { data: userData } = await api.get<User>('/users/me')
     store.setUser(userData)
     connectSocket(refreshData.accessToken)
-    await initCrypto(userData.id)
+    initCrypto(userData.id).catch((err: unknown) => {
+      console.warn('[auth] crypto init failed (non-fatal):', err)
+    })
     const notificationsStore = useNotifications()
     const presenceStore = usePresence()
     const chatStore = useChat()

@@ -401,6 +401,10 @@ export async function buildApp() {
     (token: string) => app.jwt.verify(token) as { userId: string; tokenVersion?: number },
   )
 
+  const cryptoRepository = new CryptoRepository(db)
+  const cryptoService = new CryptoService(cryptoRepository, conversationsRepository)
+  await app.register(cryptoRoutes, { prefix: '/crypto', cryptoService })
+
   await app.register(async (s) => {
     s.addHook('preHandler', requireFlag(db, 'module_chat'))
     await s.register(chatRoutes, {
@@ -413,9 +417,6 @@ export async function buildApp() {
       usersRepository,
       friendsService,
     })
-    const cryptoRepository = new CryptoRepository(db)
-    const cryptoService = new CryptoService(cryptoRepository, conversationsRepository)
-    await s.register(cryptoRoutes, { prefix: '/crypto', cryptoService })
   })
 
   const reportsRepository = new ReportsRepository(db)

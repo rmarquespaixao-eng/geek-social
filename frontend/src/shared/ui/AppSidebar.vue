@@ -65,11 +65,11 @@
               :src="user?.avatarUrl"
               :name="user?.displayName ?? 'User'"
               :size="32"
-              :show-status="true"
+              :show-status="featureFlagsStore.isEnabled('module_chat')"
             />
             <div v-if="ui.sidebarMode === 'expanded'" class="overflow-hidden">
               <p class="text-sm font-medium text-(--color-text-primary) truncate">{{ user?.displayName }}</p>
-              <p class="text-xs text-(--color-status-online)">Online</p>
+              <p v-if="featureFlagsStore.isEnabled('module_chat')" class="text-xs text-(--color-status-online)">Online</p>
             </div>
           </div>
         </component>

@@ -15,7 +15,7 @@
     <IncomingCallModal />
     <CallScreen />
     <SteamImportBanner v-if="store.isAuthenticated && featureFlagsStore.isEnabled('steam_integration')" />
-    <FloatingChatBar v-if="store.isAuthenticated" />
+    <FloatingChatBar v-if="store.isAuthenticated && featureFlagsStore.isEnabled('module_chat')" />
 
   </div>
 </template>

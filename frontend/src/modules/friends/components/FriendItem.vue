@@ -1,11 +1,12 @@
 <!-- src/modules/friends/components/FriendItem.vue -->
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { MessageCircle, MoreHorizontal, UserMinus, UserX, Eye } from 'lucide-vue-next'
 import { useFriends } from '../composables/useFriends'
 import { useChat } from '@/modules/chat/composables/useChat'
 import { useFloatingChats } from '@/modules/chat/composables/useFloatingChats'
+import { useFeatureFlagsStore } from '@/shared/featureFlags/featureFlagsStore'
 import type { Friend } from '../types'
 
 const props = defineProps<{ friend: Friend }>()
@@ -15,6 +16,8 @@ const router = useRouter()
 const store = useFriends()
 const chat = useChat()
 const floating = useFloatingChats()
+const featureFlagsStore = useFeatureFlagsStore()
+const chatEnabled = computed(() => featureFlagsStore.isEnabled('module_chat'))
 const menuOpen = ref(false)
 const openingDm = ref(false)
 
@@ -80,6 +83,7 @@ async function handleBlock() {
         {{ friend.displayName.charAt(0).toUpperCase() }}
       </div>
       <span
+        v-if="chatEnabled"
         :class="[
           'absolute bottom-0 right-0 h-3.5 w-3.5 rounded-full border-[2.5px] border-[#1e2038] transition-all',
           friend.isOnline
@@ -92,7 +96,7 @@ async function handleBlock() {
     <!-- Nome + status -->
     <div class="min-w-0 flex-1">
       <p class="truncate text-[14px] font-semibold text-[#e2e8f0] leading-tight">{{ friend.displayName }}</p>
-      <p class="mt-0.5 text-[11px] flex items-center gap-1">
+      <p v-if="chatEnabled" class="mt-0.5 text-[11px] flex items-center gap-1">
         <span v-if="friend.isOnline" class="h-1.5 w-1.5 rounded-full bg-[#22c55e]" />
         <span :class="friend.isOnline ? 'text-[#22c55e] font-medium' : 'text-[#94a3b8]'">
           {{ friend.isOnline ? 'online agora' : `visto ${formatLastSeen(friend.lastSeenAt)}` }}
@@ -104,6 +108,7 @@ async function handleBlock() {
     <div class="flex items-center gap-1.5" @click.stop>
       <!-- Botão chat (abre DM com este amigo) -->
       <button
+        v-if="chatEnabled"
         :disabled="openingDm"
         class="flex h-9 w-9 items-center justify-center rounded-lg bg-[#252640] text-[#94a3b8] hover:bg-[#f59e0b] hover:text-black transition-all disabled:opacity-50"
         title="Enviar mensagem"

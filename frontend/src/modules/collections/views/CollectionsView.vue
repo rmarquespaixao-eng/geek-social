@@ -1,15 +1,16 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import {
   Library, Plus, Package, BarChart2,
-  LayoutGrid, List, Search, ChevronDown, Star,
+  LayoutGrid, List, Search, ChevronDown,
 } from 'lucide-vue-next'
 import { useCollectionsStore } from '../composables/useCollections'
 import { useAllItemsStore } from '../composables/useAllItems'
 import { useSteam } from '@/modules/integrations/steam/composables/useSteam'
 import CollectionCard from '../components/CollectionCard.vue'
 import CollectionForm from '../components/CollectionForm.vue'
+import ItemCard from '../components/ItemCard.vue'
 import ItemCreateModal from '../components/ItemCreateModal.vue'
 import AppModal from '@/shared/ui/AppModal.vue'
 import AppConfirmDialog from '@/shared/ui/AppConfirmDialog.vue'
@@ -17,11 +18,14 @@ import AppPageHeader from '@/shared/ui/AppPageHeader.vue'
 import type { ItemSort } from '../types'
 
 const router = useRouter()
+const route = useRoute()
 const store = useCollectionsStore()
 const allItems = useAllItemsStore()
 const steam = useSteam()
 
-const activeView = ref<'collections' | 'items'>('collections')
+const activeView = ref<'collections' | 'items'>(
+  route.query.tab === 'items' ? 'items' : 'collections',
+)
 
 const showCreateCollectionModal = ref(false)
 const showItemCreateModal = ref(false)
@@ -43,6 +47,9 @@ const SORT_OPTIONS: { value: ItemSort; label: string }[] = [
 
 onMounted(() => {
   store.fetchCollections()
+  if (activeView.value === 'items' && !allItems.initialized) {
+    void allItems.fetchPage({ sort: listSort.value })
+  }
 })
 
 async function switchToItems() {
@@ -50,6 +57,10 @@ async function switchToItems() {
   if (!allItems.initialized) {
     await allItems.fetchPage({ sort: listSort.value })
   }
+}
+
+function goToItem(collectionId: string, itemId: string) {
+  router.push(`/collections/${collectionId}/items/${itemId}?from=items`)
 }
 
 watch(listSort, async (sort) => {
@@ -181,6 +192,38 @@ const isEmpty = computed(() => !store.loading && store.collections.length === 0)
       </div>
     </div>
 
+    <!-- ── HEADER DA ABA ITENS (só aparece nessa aba) ── -->
+    <div v-if="activeView === 'items'" class="px-4 md:px-6 pt-4 flex gap-2 items-center">
+      <div class="relative flex-1 max-w-sm">
+        <Search :size="14" class="absolute left-3 top-1/2 -translate-y-1/2 text-[#475569]" />
+        <input
+          v-model="listSearch"
+          type="text"
+          placeholder="Buscar itens..."
+          class="w-full bg-[#1e2038] border border-[#252640] rounded-lg pl-8 pr-3 py-2 text-[13px] text-[#e2e8f0] placeholder-[#475569] focus:outline-none focus:border-[#f59e0b] transition-colors"
+          @input="onSearchInput"
+        />
+      </div>
+      <div class="relative">
+        <select
+          v-model="listSort"
+          class="appearance-none bg-[#1e2038] border border-[#252640] rounded-lg pl-3 pr-8 py-2 text-[13px] text-[#e2e8f0] focus:outline-none focus:border-[#f59e0b] transition-colors cursor-pointer"
+        >
+          <option v-for="opt in SORT_OPTIONS" :key="opt.value" :value="opt.value">
+            {{ opt.label }}
+          </option>
+        </select>
+        <ChevronDown :size="13" class="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#475569] pointer-events-none" />
+      </div>
+      <button
+        class="flex items-center gap-1.5 bg-[#f59e0b] hover:bg-[#d97706] active:scale-95 text-black text-[13px] font-semibold px-3.5 py-2 rounded-lg transition-all shadow-md shadow-[#f59e0b]/20 shrink-0"
+        @click="showItemCreateModal = true"
+      >
+        <Plus :size="15" :stroke-width="2.5" />
+        <span class="hidden sm:inline">Novo item</span>
+      </button>
+    </div>
+
     <!-- ── VISÃO: COLEÇÕES ── -->
     <div v-if="activeView === 'collections'" class="px-4 md:px-6 py-6">
       <!-- Loading skeleton -->
@@ -247,41 +290,14 @@ const isEmpty = computed(() => !store.loading && store.collections.length === 0)
 
     <!-- ── VISÃO: ITENS ── -->
     <div v-else class="px-4 md:px-6 py-4 space-y-4">
-      <!-- Controles -->
-      <div class="flex gap-2 items-center">
-        <div class="relative flex-1 max-w-sm">
-          <Search :size="14" class="absolute left-3 top-1/2 -translate-y-1/2 text-[#475569]" />
-          <input
-            v-model="listSearch"
-            type="text"
-            placeholder="Buscar itens..."
-            class="w-full bg-[#1e2038] border border-[#252640] rounded-lg pl-8 pr-3 py-2 text-[13px] text-[#e2e8f0] placeholder-[#475569] focus:outline-none focus:border-[#f59e0b] transition-colors"
-            @input="onSearchInput"
-          />
-        </div>
-        <div class="relative">
-          <select
-            v-model="listSort"
-            class="appearance-none bg-[#1e2038] border border-[#252640] rounded-lg pl-3 pr-8 py-2 text-[13px] text-[#e2e8f0] focus:outline-none focus:border-[#f59e0b] transition-colors cursor-pointer"
-          >
-            <option v-for="opt in SORT_OPTIONS" :key="opt.value" :value="opt.value">
-              {{ opt.label }}
-            </option>
-          </select>
-          <ChevronDown :size="13" class="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#475569] pointer-events-none" />
-        </div>
-        <button
-          class="flex items-center gap-1.5 bg-[#f59e0b] hover:bg-[#d97706] active:scale-95 text-black text-[13px] font-semibold px-3.5 py-2 rounded-lg transition-all shadow-md shadow-[#f59e0b]/20 shrink-0"
-          @click="showItemCreateModal = true"
-        >
-          <Plus :size="15" :stroke-width="2.5" />
-          <span class="hidden sm:inline">Novo item</span>
-        </button>
-      </div>
-
-      <!-- Loading inicial -->
-      <div v-if="allItems.loading" class="space-y-2">
-        <div v-for="n in 10" :key="n" class="bg-[#1e2038] rounded-xl border border-[#252640] h-16 animate-pulse" />
+      <!-- Loading inicial: skeletons de card -->
+      <div v-if="allItems.loading" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
+        <div
+          v-for="n in 12"
+          :key="n"
+          class="bg-[#1e2038] rounded-xl border border-[#252640] overflow-hidden animate-pulse"
+          style="aspect-ratio: 2/3"
+        />
       </div>
 
       <!-- Erro -->
@@ -301,39 +317,15 @@ const isEmpty = computed(() => !store.loading && store.collections.length === 0)
         </button>
       </div>
 
-      <!-- Itens -->
-      <div v-else class="space-y-2">
-        <div
+      <!-- Grid de cards -->
+      <div v-else class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
+        <ItemCard
           v-for="item in allItems.items"
           :key="item.id"
-          class="flex items-center gap-3 bg-[#1e2038] border border-[#252640] rounded-xl px-3 py-2.5 hover:border-[#f59e0b]/40 transition-colors cursor-pointer"
-          @click="router.push(`/collections/${item.collectionId}/items/${item.id}`)"
-        >
-          <!-- Capa -->
-          <div class="w-10 h-10 rounded-lg overflow-hidden shrink-0 bg-[#252640] flex items-center justify-center">
-            <img
-              v-if="item.coverUrl"
-              :src="item.coverUrl"
-              :alt="item.name"
-              class="w-full h-full object-cover"
-            />
-            <span v-else class="text-lg leading-none">{{ item.collectionTypeIcon ?? '📦' }}</span>
-          </div>
-
-          <!-- Info -->
-          <div class="flex-1 min-w-0">
-            <p class="text-[#e2e8f0] text-[13px] font-semibold truncate">{{ item.name }}</p>
-            <p class="text-[#475569] text-[11px] truncate">
-              {{ item.collectionTypeIcon }} {{ item.collectionName }}
-            </p>
-          </div>
-
-          <!-- Rating -->
-          <div v-if="item.rating" class="flex items-center gap-0.5 shrink-0">
-            <Star :size="11" class="text-[#f59e0b] fill-[#f59e0b]" />
-            <span class="text-[#f59e0b] text-[12px] font-bold">{{ item.rating }}</span>
-          </div>
-        </div>
+          :item="item"
+          :collection-type="item.collectionTypeKey"
+          @click="goToItem(item.collectionId, item.id)"
+        />
       </div>
 
       <!-- Carregar mais -->

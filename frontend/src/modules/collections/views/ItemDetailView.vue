@@ -17,10 +17,20 @@ const auth = useAuthStore()
 
 const collectionId = computed(() => route.params.id as string)
 const itemId = computed(() => route.params.itemId as string)
+const fromItems = computed(() => route.query.from === 'items')
+
+function backTarget() {
+  return fromItems.value ? '/collections?tab=items' : `/collections/${collectionId.value}`
+}
+
+function goBack() {
+  router.push(backTarget())
+}
 
 function goToEdit() {
   if (!item.value) return
-  router.push(`/collections/${collectionId.value}/items/${item.value.id}/edit`)
+  const query = fromItems.value ? '?from=items' : ''
+  router.push(`/collections/${collectionId.value}/items/${item.value.id}/edit${query}`)
 }
 
 const showDeleteModal = ref(false)
@@ -42,7 +52,7 @@ async function handleDelete() {
   deleting.value = true
   try {
     const ok = await itemsStore.deleteItem(collectionId.value, item.value.id)
-    if (ok) router.push(`/collections/${collectionId.value}`)
+    if (ok) router.push(backTarget())
   } finally {
     deleting.value = false
     showDeleteModal.value = false
@@ -70,10 +80,12 @@ async function handleDelete() {
         <div class="max-w-4xl mx-auto h-16 px-4 md:px-8 flex items-center justify-between gap-4">
           <button
             class="flex items-center gap-2 text-[13px] font-medium text-[#94a3b8] hover:text-[#e2e8f0] transition-colors group"
-            @click="router.push(`/collections/${collectionId}`)"
+            @click="goBack"
           >
             <ArrowLeft :size="16" class="group-hover:-translate-x-0.5 transition-transform" />
-            <span class="truncate max-w-[180px] md:max-w-xs">{{ collection?.name ?? 'Coleção' }}</span>
+            <span class="truncate max-w-[180px] md:max-w-xs">
+              {{ fromItems ? 'Todos os itens' : (collection?.name ?? 'Coleção') }}
+            </span>
           </button>
         </div>
       </div>

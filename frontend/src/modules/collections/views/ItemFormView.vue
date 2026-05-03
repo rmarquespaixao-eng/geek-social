@@ -18,6 +18,7 @@ const collectionsStore = useCollectionsStore()
 const collectionId = computed(() => route.params.id as string)
 const itemId = computed(() => route.params.itemId as string | undefined)
 const isEditMode = computed(() => !!itemId.value)
+const fromItems = computed(() => route.query.from === 'items')
 
 const collection = computed(() => collectionsStore.current)
 const item = computed(() => itemsStore.current)
@@ -161,7 +162,8 @@ async function submit() {
         await itemsStore.uploadItemCover(collectionId.value, editingId, selectedFile.value)
       }
       if (!itemsStore.error) {
-        router.replace(`/collections/${collectionId.value}/items/${editingId}`)
+        const q = fromItems.value ? '?from=items' : ''
+        router.replace(`/collections/${collectionId.value}/items/${editingId}${q}`)
       }
     } else {
       const created = await itemsStore.createItem(collectionId.value, {
@@ -174,7 +176,8 @@ async function submit() {
         await itemsStore.uploadItemCover(collectionId.value, created.id, selectedFile.value)
       }
       if (created && !itemsStore.error) {
-        router.replace(`/collections/${collectionId.value}/items/${created.id}`)
+        const q = fromItems.value ? '?from=items' : ''
+        router.replace(`/collections/${collectionId.value}/items/${created.id}${q}`)
       }
     }
   } finally {
@@ -184,7 +187,10 @@ async function submit() {
 
 function cancel() {
   if (isEditMode.value && sourceItem.value) {
-    router.replace(`/collections/${collectionId.value}/items/${sourceItem.value.id}`)
+    const q = fromItems.value ? '?from=items' : ''
+    router.replace(`/collections/${collectionId.value}/items/${sourceItem.value.id}${q}`)
+  } else if (fromItems.value) {
+    router.replace('/collections?tab=items')
   } else {
     router.replace(`/collections/${collectionId.value}`)
   }

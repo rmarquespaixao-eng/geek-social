@@ -52,6 +52,9 @@ const maxByRating = computed(() =>
   Math.max(1, ...orderedRatings.value.map(r => r.count)),
 )
 
+const completionYears = computed(() => stats.value?.gamesByCompletionYear ?? [])
+const maxByYear = computed(() => Math.max(1, ...completionYears.value.map(r => r.count)))
+
 onMounted(async () => {
   loading.value = true
   try {
@@ -86,7 +89,7 @@ onMounted(async () => {
       <div class="grid grid-cols-2 gap-4">
         <div v-for="n in 2" :key="n" class="bg-[#1e2038] rounded-xl border border-[#252640] p-4 h-24 animate-pulse" />
       </div>
-      <div v-for="n in 3" :key="n" class="bg-[#1e2038] rounded-xl border border-[#252640] p-5 h-36 animate-pulse" />
+      <div v-for="n in 4" :key="n" class="bg-[#1e2038] rounded-xl border border-[#252640] p-5 h-36 animate-pulse" />
     </div>
 
     <!-- Error -->
@@ -129,6 +132,31 @@ onMounted(async () => {
                 :style="{ width: `${(row.count / maxByType) * 100}%` }"
               />
             </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Jogos zerados por ano (barra vertical) -->
+      <div v-if="completionYears.length > 0" class="bg-[#1e2038] rounded-xl border border-[#252640] p-4 md:p-5">
+        <h2 class="text-[#e2e8f0] font-semibold text-[14px] mb-5">Jogos zerados por ano</h2>
+        <div class="flex items-end gap-2 overflow-x-auto pb-2" style="min-height: 140px;">
+          <div
+            v-for="row in completionYears"
+            :key="row.year"
+            class="flex flex-col items-center gap-1.5 flex-shrink-0"
+            style="min-width: 44px;"
+          >
+            <!-- Quantidade acima da barra -->
+            <span class="text-[11px] font-bold text-[#f59e0b]">{{ row.count }}</span>
+            <!-- Barra vertical -->
+            <div class="w-8 rounded-t-md bg-[#f59e0b]/20 relative" style="height: 100px;">
+              <div
+                class="absolute bottom-0 left-0 right-0 rounded-t-md bg-[#f59e0b] transition-all duration-700"
+                :style="{ height: `${Math.max(4, (row.count / maxByYear) * 100)}%` }"
+              />
+            </div>
+            <!-- Ano -->
+            <span class="text-[11px] text-[#64748b] font-medium">{{ row.year }}</span>
           </div>
         </div>
       </div>

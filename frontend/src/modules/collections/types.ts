@@ -147,4 +147,5 @@ export interface CollectionStats {
   itemsByType: { typeKey: string; typeName: string; typeIcon: string; count: number }[]
   gamesByStatus: { status: string | null; count: number }[]
   itemsByRating: { rating: number | null; count: number }[]
+  gamesByCompletionYear: { year: number; count: number }[]
 }

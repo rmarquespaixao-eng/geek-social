@@ -1,4 +1,4 @@
-import { eq, and, ilike, asc, inArray, count, sql } from 'drizzle-orm'
+import { eq, and, or, ilike, asc, inArray, count, sql } from 'drizzle-orm'
 import type { DatabaseClient } from '../../shared/infra/database/postgres.client.js'
 import { collections, collectionFieldSchema, collectionTypes, fieldDefinitions, items } from '../../shared/infra/database/schema.js'
 import type {
@@ -17,6 +17,7 @@ export type CollectionStats = {
   itemsByType: { typeKey: string; typeName: string; typeIcon: string; count: number }[]
   gamesByStatus: { status: string | null; count: number }[]
   itemsByRating: { rating: number | null; count: number }[]
+  gamesByCompletionYear: { year: number; count: number }[]
 }
 
 export class CollectionsRepository implements ICollectionRepository {
@@ -218,20 +219,21 @@ export class CollectionsRepository implements ICollectionRepository {
   }
 
   async getStats(userId: string): Promise<CollectionStats> {
-    const [totalResult, itemsByTypeRows, gamesByStatusRows, itemsByRatingRows] = await Promise.all([
+    const [totalResult, itemsByTypeRows, gamesByStatusRows, itemsByRatingRows, gamesByYearRows] = await Promise.all([
 
       this.db.select({ total: count() })
         .from(collections)
         .where(eq(collections.userId, userId)),
 
+      // leftJoin para incluir coleções sem tipo (collectionTypeId = null)
       this.db.select({
-          typeKey: collectionTypes.key,
-          typeName: collectionTypes.name,
-          typeIcon: collectionTypes.icon,
+          typeKey: sql<string>`COALESCE(${collectionTypes.key}, 'other')`,
+          typeName: sql<string>`COALESCE(${collectionTypes.name}, 'Sem categoria')`,
+          typeIcon: sql<string>`COALESCE(${collectionTypes.icon}, '')`,
           count: count(items.id),
         })
         .from(collections)
-        .innerJoin(collectionTypes, eq(collections.collectionTypeId, collectionTypes.id))
+        .leftJoin(collectionTypes, eq(collections.collectionTypeId, collectionTypes.id))
         .innerJoin(items, eq(items.collectionId, collections.id))
         .where(eq(collections.userId, userId))
         .groupBy(collectionTypes.id, collectionTypes.key, collectionTypes.name, collectionTypes.icon),
@@ -251,13 +253,35 @@ export class CollectionsRepository implements ICollectionRepository {
         .innerJoin(collections, eq(items.collectionId, collections.id))
         .where(eq(collections.userId, userId))
         .groupBy(items.rating),
+
+      // Jogos zerados/platinados por ano de conclusão
+      this.db.select({
+          year: sql<number>`EXTRACT(YEAR FROM (${items.fields}->>'completion_date')::date)::int`,
+          count: count(),
+        })
+        .from(items)
+        .innerJoin(collections, eq(items.collectionId, collections.id))
+        .innerJoin(collectionTypes, eq(collections.collectionTypeId, collectionTypes.id))
+        .where(and(
+          eq(collections.userId, userId),
+          eq(collectionTypes.key, 'games'),
+          or(
+            eq(sql<string>`${items.fields}->>'status'`, 'Zerado'),
+            eq(sql<string>`${items.fields}->>'status'`, 'Platinado'),
+          ),
+          sql`(${items.fields}->>'completion_date') IS NOT NULL`,
+          sql`(${items.fields}->>'completion_date') <> ''`,
+        ))
+        .groupBy(sql`EXTRACT(YEAR FROM (${items.fields}->>'completion_date')::date)`)
+        .orderBy(sql`EXTRACT(YEAR FROM (${items.fields}->>'completion_date')::date)`),
     ])
 
     return {
       totalCollections: Number(totalResult[0]?.total ?? 0),
-      itemsByType: itemsByTypeRows.map(r => ({ typeKey: r.typeKey, typeName: r.typeName ?? r.typeKey, typeIcon: r.typeIcon ?? '', count: Number(r.count) })),
+      itemsByType: itemsByTypeRows.map(r => ({ typeKey: r.typeKey, typeName: r.typeName, typeIcon: r.typeIcon, count: Number(r.count) })),
       gamesByStatus: gamesByStatusRows.map(r => ({ status: r.status ?? null, count: Number(r.count) })),
       itemsByRating: itemsByRatingRows.map(r => ({ rating: r.rating ?? null, count: Number(r.count) })),
+      gamesByCompletionYear: gamesByYearRows.map(r => ({ year: Number(r.year), count: Number(r.count) })),
     }
   }
 

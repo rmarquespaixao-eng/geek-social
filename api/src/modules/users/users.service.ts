@@ -45,6 +45,7 @@ type PublicProfile = {
   pronouns?: string | null
   location?: string | null
   website?: string | null
+  platformRole?: 'user' | 'moderator' | 'admin'
 }
 
 export class UsersService {
@@ -124,6 +125,7 @@ export class UsersService {
         googleLinked: Boolean(user.googleId),
         googleLinkedAt: user.googleLinkedAt ? user.googleLinkedAt.toISOString() : null,
         hasPassword: Boolean(user.passwordHash),
+        platformRole: user.platformRole,
       } : {}),
       ...(isOnline !== undefined ? { isOnline, lastSeenAt: lastSeenAt ?? null } : {}),
     }

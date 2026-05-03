@@ -1,4 +1,4 @@
-import { eq, and, count } from 'drizzle-orm'
+import { eq, and, count, isNotNull } from 'drizzle-orm'
 import type { DatabaseClient } from '../../shared/infra/database/postgres.client.js'
 import { fieldDefinitions, collectionFieldSchema } from '../../shared/infra/database/schema.js'
 import type {
@@ -41,6 +41,14 @@ export class FieldDefinitionRepository implements IFieldDefinitionRepository {
       )) as Promise<FieldDefinition[]>
   }
 
+  async findSystemByCollectionTypeId(collectionTypeId: string): Promise<FieldDefinition[]> {
+    return this.db.select().from(fieldDefinitions)
+      .where(and(
+        eq(fieldDefinitions.isSystem, true),
+        eq(fieldDefinitions.collectionTypeId, collectionTypeId),
+      )) as Promise<FieldDefinition[]>
+  }
+
   async isFieldKeyTaken(userId: string, fieldKey: string): Promise<boolean> {
     const result = await this.db.select({ count: count() }).from(fieldDefinitions)
       .where(and(eq(fieldDefinitions.userId, userId), eq(fieldDefinitions.fieldKey, fieldKey)))
@@ -57,15 +65,23 @@ export class FieldDefinitionRepository implements IFieldDefinitionRepository {
     await this.db.delete(fieldDefinitions).where(eq(fieldDefinitions.id, id))
   }
 
-  async upsertSystem(data: Omit<FieldDefinition, 'id' | 'createdAt'>): Promise<void> {
+  async upsertSystem(data: Omit<FieldDefinition, 'id' | 'createdAt' | 'isHidden'> & { isHidden?: boolean }): Promise<void> {
+    // Busca por collectionTypeId (pós-migração) ou por collectionType (pré-migração)
+    const conditions = [
+      eq(fieldDefinitions.isSystem, true),
+      eq(fieldDefinitions.fieldKey, data.fieldKey),
+    ]
+    if (data.collectionTypeId) {
+      conditions.push(eq(fieldDefinitions.collectionTypeId, data.collectionTypeId))
+    } else if (data.collectionType) {
+      conditions.push(eq(fieldDefinitions.collectionType, data.collectionType))
+    }
+
     const existing = await this.db.select({ id: fieldDefinitions.id })
       .from(fieldDefinitions)
-      .where(and(
-        eq(fieldDefinitions.isSystem, true),
-        eq(fieldDefinitions.fieldKey, data.fieldKey),
-        eq(fieldDefinitions.collectionType, data.collectionType!),
-      ))
+      .where(and(...conditions))
       .limit(1)
+
     if (existing.length > 0) {
       // Atualiza nome/tipo/opções/hidden caso tenham mudado no seed
       await this.db.update(fieldDefinitions)
@@ -74,6 +90,7 @@ export class FieldDefinitionRepository implements IFieldDefinitionRepository {
           fieldType: data.fieldType,
           selectOptions: data.selectOptions ?? null,
           isHidden: data.isHidden ?? false,
+          ...(data.collectionTypeId ? { collectionTypeId: data.collectionTypeId } : {}),
         })
         .where(eq(fieldDefinitions.id, existing[0].id))
       return
@@ -83,7 +100,8 @@ export class FieldDefinitionRepository implements IFieldDefinitionRepository {
       name: data.name,
       fieldKey: data.fieldKey,
       fieldType: data.fieldType,
-      collectionType: data.collectionType,
+      collectionType: data.collectionType ?? null,
+      collectionTypeId: data.collectionTypeId ?? null,
       selectOptions: data.selectOptions ?? null,
       isSystem: true,
       isHidden: data.isHidden ?? false,

@@ -14,6 +14,7 @@ declare module 'fastify' {
  * setInitialPassword) — mesmo que o token ainda esteja dentro do TTL de 15 min.
  *
  * Custo: 1 SELECT por PK (~1ms). Aceitável para uma checagem de segurança crítica.
+ * Popula também `platformRole` no request.user para uso por requireRole guard.
  */
 export async function authenticate(request: FastifyRequest, reply: FastifyReply) {
   try {
@@ -47,6 +48,10 @@ export async function authenticate(request: FastifyRequest, reply: FastifyReply)
     reply.status(401).send({ error: 'Não autorizado' })
     return
   }
+
+  // Injeta platformRole no request.user para o requireRole guard poder ler sem
+  // nova query ao DB — reutiliza o objeto já buscado acima.
+  ;(request.user as Record<string, unknown>).platformRole = user.platformRole
 }
 
 /**
@@ -76,5 +81,8 @@ export async function optionalAuthenticate(request: FastifyRequest, _reply: Fast
   if (!user || typeof claims.tokenVersion !== 'number' || user.tokenVersion !== claims.tokenVersion) {
     // Token inválido por versão — trata como anônimo (não falha a request).
     request.user = undefined as unknown as typeof request.user
+    return
   }
+
+  ;(request.user as Record<string, unknown>).platformRole = user.platformRole
 }

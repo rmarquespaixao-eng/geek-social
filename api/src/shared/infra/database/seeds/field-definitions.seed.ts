@@ -1,4 +1,7 @@
+import { eq } from 'drizzle-orm'
 import type { IFieldDefinitionRepository } from '../../../contracts/field-definition.repository.contract.js'
+import type { DatabaseClient } from '../../database/postgres.client.js'
+import { collectionTypes } from '../../database/schema.js'
 
 const SYSTEM_FIELDS = [
   // games
@@ -115,8 +118,21 @@ const SYSTEM_FIELDS = [
   { name: 'Status', fieldKey: 'status', fieldType: 'select' as const, collectionType: 'boardgames' as const, selectOptions: ['Tenho', 'Quero', 'Emprestado'], isSystem: true, userId: null },
 ]
 
-export async function seedFieldDefinitions(repo: IFieldDefinitionRepository): Promise<void> {
+export async function seedFieldDefinitions(repo: IFieldDefinitionRepository, db?: DatabaseClient): Promise<void> {
+  // Tenta resolver collectionTypeId via tabela collection_types (pós-migration 0052).
+  // Se a tabela não existir ainda ou estiver vazia, usa apenas collectionType (enum legado).
+  let typeIdByKey: Record<string, string> = {}
+  if (db) {
+    try {
+      const rows = await db.select({ id: collectionTypes.id, key: collectionTypes.key }).from(collectionTypes)
+      typeIdByKey = Object.fromEntries(rows.map(r => [r.key, r.id]))
+    } catch {
+      // Tabela ainda não existe (pré-migration) — segue com collectionType enum
+    }
+  }
+
   for (const field of SYSTEM_FIELDS) {
-    await repo.upsertSystem(field)
+    const collectionTypeId = typeIdByKey[field.collectionType] ?? undefined
+    await repo.upsertSystem({ ...field, collectionTypeId })
   }
 }

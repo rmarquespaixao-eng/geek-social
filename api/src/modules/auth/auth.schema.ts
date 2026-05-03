@@ -44,6 +44,7 @@ export const userPublicSchema = z.object({
   id: z.string().uuid(),
   email: z.string().email(),
   displayName: z.string(),
+  platformRole: z.enum(['user', 'moderator', 'admin']).default('user'),
 })
 
 export const tokenResponseSchema = z.object({

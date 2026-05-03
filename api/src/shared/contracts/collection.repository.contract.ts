@@ -9,7 +9,9 @@ export type Collection = {
   description: string | null
   iconUrl: string | null
   coverUrl: string | null
-  type: CollectionType
+  /** @deprecated Use collectionTypeId — mantido para compatibilidade durante migração */
+  type?: CollectionType | null
+  collectionTypeId: string | null
   visibility: CollectionVisibility
   autoShareToFeed: boolean
   itemCount: number
@@ -32,7 +34,8 @@ export type CreateCollectionData = {
   userId: string
   name: string
   description?: string
-  type: CollectionType
+  type?: CollectionType
+  collectionTypeId?: string
   visibility?: CollectionVisibility
   autoShareToFeed?: boolean
 }

@@ -7,7 +7,9 @@ export type FieldDefinition = {
   name: string
   fieldKey: string
   fieldType: FieldType
-  collectionType: CollectionType | null
+  /** @deprecated Use collectionTypeId — mantido para compatibilidade durante migração */
+  collectionType?: CollectionType | null
+  collectionTypeId?: string | null
   selectOptions: string[] | null
   isSystem: boolean
   isHidden: boolean
@@ -27,6 +29,7 @@ export interface IFieldDefinitionRepository {
   findById(id: string): Promise<FieldDefinition | null>
   findByUserId(userId: string): Promise<FieldDefinition[]>
   findSystemByCollectionType(type: CollectionType): Promise<FieldDefinition[]>
+  findSystemByCollectionTypeId(collectionTypeId: string): Promise<FieldDefinition[]>
   isFieldKeyTaken(userId: string, fieldKey: string): Promise<boolean>
   isInUse(id: string): Promise<boolean>
   delete(id: string): Promise<void>

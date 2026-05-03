@@ -20,10 +20,11 @@ export type AccessTokenClaims = {
   userId: string
   email: string
   tokenVersion: number
+  platformRole: 'user' | 'moderator' | 'admin'
 }
 
 export type AuthResult = {
-  user: { id: string; email: string; displayName: string }
+  user: { id: string; email: string; displayName: string; platformRole: 'user' | 'moderator' | 'admin' }
   accessTokenClaims: AccessTokenClaims
   refreshToken: string
   refreshTokenExpiresAt: Date
@@ -143,7 +144,7 @@ export class AuthService {
     await this.userRepository.createRefreshToken(user.id, newTokenHash, expiresAt, stored.familyId)
 
     return {
-      accessTokenClaims: { userId: user.id, email: user.email, tokenVersion: user.tokenVersion },
+      accessTokenClaims: { userId: user.id, email: user.email, tokenVersion: user.tokenVersion, platformRole: user.platformRole },
       newRefreshToken: newToken,
       expiresAt,
     }
@@ -266,7 +267,7 @@ export class AuthService {
     await this.userRepository.unlinkGoogle(userId)
   }
 
-  private async buildAuthResult(user: { id: string; email: string; displayName: string; tokenVersion: number }): Promise<AuthResult> {
+  private async buildAuthResult(user: { id: string; email: string; displayName: string; tokenVersion: number; platformRole: 'user' | 'moderator' | 'admin' }): Promise<AuthResult> {
     const refreshToken = crypto.randomBytes(32).toString('hex')
     const refreshTokenHash = crypto.createHash('sha256').update(refreshToken).digest('hex')
     const refreshTokenExpiresAt = this.buildRefreshTokenExpiry()
@@ -274,8 +275,8 @@ export class AuthService {
     await this.userRepository.createRefreshToken(user.id, refreshTokenHash, refreshTokenExpiresAt)
 
     return {
-      user: { id: user.id, email: user.email, displayName: user.displayName },
-      accessTokenClaims: { userId: user.id, email: user.email, tokenVersion: user.tokenVersion },
+      user: { id: user.id, email: user.email, displayName: user.displayName, platformRole: user.platformRole },
+      accessTokenClaims: { userId: user.id, email: user.email, tokenVersion: user.tokenVersion, platformRole: user.platformRole },
       refreshToken,
       refreshTokenExpiresAt,
     }

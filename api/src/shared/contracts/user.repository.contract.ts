@@ -24,6 +24,7 @@ export type User = {
   location: string | null
   website: string | null
   tokenVersion: number
+  platformRole: 'user' | 'moderator' | 'admin'
   createdAt: Date
   updatedAt: Date
 }

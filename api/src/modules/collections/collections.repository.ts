@@ -38,7 +38,8 @@ export class CollectionsRepository implements ICollectionRepository {
       userId: data.userId,
       name: data.name,
       description: data.description,
-      type: data.type,
+      type: data.type ?? null,
+      collectionTypeId: data.collectionTypeId ?? null,
       visibility: data.visibility ?? 'public',
       autoShareToFeed: data.autoShareToFeed ?? false,
     }).returning()

@@ -16,7 +16,7 @@ interface Report {
   targetId: string
   reason: string
   description: string | null
-  status: 'pending' | 'reviewed' | 'dismissed'
+  status: 'pending' | 'reviewing' | 'resolved' | 'dismissed'
   createdAt: string
 }
 
@@ -104,7 +104,7 @@ onMounted(load)
                 <td class="px-4 py-3 text-slate-500">{{ formatDate(r.createdAt) }}</td>
                 <td class="px-4 py-3 text-right">
                   <div class="flex justify-end gap-1">
-                    <Button v-if="r.status === 'pending'" size="sm" @click="updateStatus(r.id, 'reviewed')">Revisar</Button>
+                    <Button v-if="r.status === 'pending'" size="sm" @click="updateStatus(r.id, 'reviewing')">Revisar</Button>
                     <Button v-if="r.status === 'pending'" size="sm" variant="ghost" @click="updateStatus(r.id, 'dismissed')">Descartar</Button>
                   </div>
                 </td>

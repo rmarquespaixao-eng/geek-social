@@ -16,41 +16,30 @@ declare module 'fastify' {
  * Custo: 1 SELECT por PK (~1ms). Aceitável para uma checagem de segurança crítica.
  * Popula também `platformRole` no request.user para uso por requireRole guard.
  */
-export async function authenticate(request: FastifyRequest, reply: FastifyReply) {
+function unauthorized(): Error & { statusCode: number } {
+  return Object.assign(new Error('Não autorizado'), { statusCode: 401 })
+}
+
+export async function authenticate(request: FastifyRequest, _reply: FastifyReply) {
   try {
     await request.jwtVerify()
   } catch {
-    reply.status(401).send({ error: 'Não autorizado' })
-    return
+    throw unauthorized()
   }
 
   const claims = request.user as { userId?: string; tokenVersion?: number } | undefined
-  if (!claims || typeof claims.userId !== 'string') {
-    reply.status(401).send({ error: 'Não autorizado' })
-    return
-  }
+  if (!claims || typeof claims.userId !== 'string') throw unauthorized()
 
   const repo = request.server.userRepository
-  if (!repo) {
-    // Defensivo: se o app não decorou (cenário de teste), falha fechado.
-    reply.status(401).send({ error: 'Não autorizado' })
-    return
-  }
+  if (!repo) throw unauthorized()
 
   const user = await repo.findById(claims.userId)
-  if (!user) {
-    reply.status(401).send({ error: 'Não autorizado' })
-    return
-  }
+  if (!user) throw unauthorized()
 
-  // tokenVersion ausente = JWT antigo (pré-fix); rejeita para forçar reautenticação.
   if (typeof claims.tokenVersion !== 'number' || user.tokenVersion !== claims.tokenVersion) {
-    reply.status(401).send({ error: 'Não autorizado' })
-    return
+    throw unauthorized()
   }
 
-  // Injeta platformRole no request.user para o requireRole guard poder ler sem
-  // nova query ao DB — reutiliza o objeto já buscado acima.
   ;(request.user as Record<string, unknown>).platformRole = user.platformRole
 }
 

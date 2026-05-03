@@ -17,19 +17,17 @@ const ROLE_HIERARCHY: Record<PlatformRole, number> = {
 export function requireRole(allowed: PlatformRole | PlatformRole[]) {
   const allowedRoles = Array.isArray(allowed) ? allowed : [allowed]
 
-  return async function requireRoleHandler(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+  return async function requireRoleHandler(request: FastifyRequest, _reply: FastifyReply): Promise<void> {
     const claims = request.user as (AccessTokenClaims & { platformRole?: PlatformRole }) | undefined
 
     if (!claims) {
-      reply.status(401).send({ error: 'Não autenticado' })
-      return
+      throw Object.assign(new Error('Não autenticado'), { statusCode: 401 })
     }
 
     const role: PlatformRole = claims.platformRole ?? 'user'
 
     if (!allowedRoles.includes(role)) {
-      reply.status(403).send({ error: 'Acesso negado' })
-      return
+      throw Object.assign(new Error('Acesso negado'), { statusCode: 403 })
     }
   }
 }

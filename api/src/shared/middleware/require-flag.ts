@@ -45,11 +45,11 @@ async function resolveFlag(db: DatabaseClient, key: string, userId?: string): Pr
 }
 
 export function requireFlag(db: DatabaseClient, key: string) {
-  return async (request: FastifyRequest, reply: FastifyReply) => {
+  return async (request: FastifyRequest, _reply: FastifyReply) => {
     const userId = (request.user as { userId?: string } | undefined)?.userId
     const enabled = await resolveFlag(db, key, userId)
     if (!enabled) {
-      return reply.status(403).send({ error: 'FEATURE_DISABLED', message: `Feature '${key}' está desabilitada` })
+      throw Object.assign(new Error(`Feature '${key}' está desabilitada`), { statusCode: 403, code: 'FEATURE_DISABLED' })
     }
   }
 }

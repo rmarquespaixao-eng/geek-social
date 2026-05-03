@@ -9,6 +9,7 @@ import ItemRow from './ItemRow.vue'
 import ItemFiltersPanel from './ItemFiltersPanel.vue'
 import ItemDetailModal from './ItemDetailModal.vue'
 import type { Collection, Item, ItemSort, FieldFilterValue } from '../types'
+import { useFeatureFlagsStore } from '@/shared/featureFlags/featureFlagsStore'
 
 const props = defineProps<{
   collectionId: string
@@ -68,6 +69,13 @@ const visibilityLabel = computed(() => {
     default: return ''
   }
 })
+
+const featureFlags = useFeatureFlagsStore()
+const hasSocialFeatures = computed(() =>
+  featureFlags.isEnabled('module_feed') ||
+  featureFlags.isEnabled('module_friends') ||
+  featureFlags.isEnabled('module_communities'),
+)
 
 let searchDebounce: ReturnType<typeof setTimeout> | null = null
 function onSearchInput(value: string) {
@@ -213,6 +221,7 @@ const showReportDialog = ref(false)
           <span>{{ collection.itemCount === 1 ? 'item' : 'itens' }}</span>
         </span>
         <span
+          v-if="hasSocialFeatures"
           class="hidden sm:inline-flex items-center px-2 py-0.5 rounded-full text-xs border"
           :class="collection.visibility === 'public'
             ? 'bg-[#22c55e]/15 text-[#86efac] border-[#22c55e]/30'

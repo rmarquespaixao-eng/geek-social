@@ -27,6 +27,8 @@ const envSchema = z.object({
   // Auditoria #3: confiança em proxies upstream (load balancer, ingress, CDN).
   // Aceita boolean ('true'/'false'), número (hops) ou CIDR/lista (ex: '10.0.0.0/8,192.168.0.0/16').
   // Em prod com proxy reverso, configure como o número de hops ou o CIDR exato.
+  IGDB_CLIENT_ID: z.string().optional(),
+  IGDB_CLIENT_SECRET: z.string().optional(),
   TRUST_PROXY: z.string().default('false'),
   // Auditoria #5: store distribuído pra rate-limit. Sem fallback in-memory:
   // rate-limit é controle de segurança, exige a infraestrutura definida.

@@ -8,6 +8,8 @@ import { useItemsStore } from '../composables/useItems'
 import { useCollectionsStore } from '../composables/useCollections'
 import { findCurrency } from '../utils/money'
 import type { CollectionSchemaEntry } from '../types'
+import IgdbGameSearch from '../components/IgdbGameSearch.vue'
+import type { IgdbGame } from '../services/igdbService'
 
 const route = useRoute()
 const router = useRouter()
@@ -215,6 +217,32 @@ const loading = computed(() => {
 
 const pageTitle = computed(() => isEditMode.value ? 'Editar item' : 'Novo item')
 const collectionName = computed(() => collection.value?.name ?? 'Coleção')
+
+const isGamesCollection = computed(() => collection.value?.type === 'games')
+
+async function applyIgdbGame(game: IgdbGame) {
+  name.value = game.name
+  if (game.coverUrl) {
+    coverPreviewUrl.value = game.coverUrl
+    try {
+      const res = await fetch(game.coverUrl)
+      const blob = await res.blob()
+      const fileName = game.coverUrl.split('/').pop() ?? 'cover.jpg'
+      selectedFile.value = new File([blob], fileName, { type: blob.type || 'image/jpeg' })
+      coverPreviewUrl.value = URL.createObjectURL(selectedFile.value)
+    } catch {
+      selectedFile.value = null
+    }
+  }
+  for (const entry of fieldSchema.value) {
+    const key = entry.fieldDefinition.fieldKey
+    if (key === 'genre' && game.genre) fieldValues.value[key] = game.genre
+    else if (key === 'platform' && game.platform) fieldValues.value[key] = game.platform
+    else if (key === 'developer' && game.developer) fieldValues.value[key] = game.developer
+    else if (key === 'release_year' && game.releaseYear) fieldValues.value[key] = game.releaseYear
+    else if (key === 'igdb_id' && game.id) fieldValues.value[key] = game.id
+  }
+}
 </script>
 
 <template>
@@ -309,6 +337,13 @@ const collectionName = computed(() => collection.value?.name ?? 'Coleção')
       <!-- Básico -->
       <section class="rounded-xl bg-[#1a1b2e] border border-[#252640] p-4 space-y-4">
         <p class="text-[10px] font-bold text-[#94a3b8] uppercase tracking-wider">Informações básicas</p>
+
+        <!-- IGDB game search (games only) -->
+        <div v-if="isGamesCollection && !isEditMode">
+          <label class="block text-[11px] font-medium text-[#cbd5e1] mb-1.5">Buscar na IGDB</label>
+          <IgdbGameSearch @select="applyIgdbGame" />
+          <p class="text-[11px] text-[#475569] mt-1">Preenche automaticamente nome, capa e detalhes.</p>
+        </div>
 
         <!-- Name -->
         <div>

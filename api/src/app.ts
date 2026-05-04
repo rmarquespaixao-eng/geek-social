@@ -740,6 +740,15 @@ export async function buildApp() {
     },
   })
 
+  if (env.IGDB_CLIENT_ID && env.IGDB_CLIENT_SECRET) {
+    const { igdbRoutes } = await import('./modules/integrations/igdb/igdb.routes.js')
+    await app.register(igdbRoutes, {
+      prefix: '/integrations/igdb',
+      clientId: env.IGDB_CLIENT_ID,
+      clientSecret: env.IGDB_CLIENT_SECRET,
+    })
+  }
+
   if (env.GOOGLE_OAUTH_ENABLED && env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET) {
     const { registerGoogleRoutes } = await import('./modules/auth/google.strategy.js')
     await registerGoogleRoutes(app, authService, {

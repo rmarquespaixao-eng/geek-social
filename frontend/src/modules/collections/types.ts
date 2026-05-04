@@ -124,6 +124,7 @@ export interface ItemListQuery {
   ratingMin?: number | null
   hasCover?: boolean | null
   fieldFilters?: Record<string, FieldFilterValue>
+  collectionId?: string | null
 }
 
 export interface ItemsPage {

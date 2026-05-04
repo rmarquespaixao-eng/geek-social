@@ -168,6 +168,10 @@ export class ItemsRepository implements IItemRepository {
   async searchAllByUser(params: SearchAllUserItemsParams): Promise<AllItemsPage> {
     const conditions: SQL[] = [eq(collections.userId, params.userId)]
 
+    if (params.collectionId) {
+      conditions.push(eq(items.collectionId, params.collectionId))
+    }
+
     if (params.q) {
       const like = `%${params.q}%`
       conditions.push(or(

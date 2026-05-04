@@ -35,6 +35,7 @@ const deleting = ref(false)
 
 const listSort = ref<ItemSort>('recent')
 const listSearch = ref('')
+const listCollectionId = ref<string | null>(null)
 let searchDebounce: ReturnType<typeof setTimeout> | null = null
 
 const SORT_OPTIONS: { value: ItemSort; label: string }[] = [
@@ -69,24 +70,32 @@ function goToItem(collectionId: string, itemId: string) {
   router.push(`/collections/${collectionId}/items/${itemId}?from=items`)
 }
 
-watch(listSort, async (sort) => {
-  if (activeView.value === 'items') {
-    await allItems.fetchPage({ q: listSearch.value || undefined, sort })
+function currentQuery() {
+  return {
+    q: listSearch.value || undefined,
+    sort: listSort.value,
+    collectionId: listCollectionId.value || undefined,
   }
+}
+
+watch(listSort, async () => {
+  if (activeView.value === 'items') await allItems.fetchPage(currentQuery())
+})
+
+watch(listCollectionId, async () => {
+  if (activeView.value === 'items') await allItems.fetchPage(currentQuery())
 })
 
 function onSearchInput() {
   if (searchDebounce) clearTimeout(searchDebounce)
   searchDebounce = setTimeout(async () => {
-    if (activeView.value === 'items') {
-      await allItems.fetchPage({ q: listSearch.value || undefined, sort: listSort.value })
-    }
+    if (activeView.value === 'items') await allItems.fetchPage(currentQuery())
   }, 350)
 }
 
 async function onItemCreated() {
   showItemCreateModal.value = false
-  await allItems.fetchPage({ q: listSearch.value || undefined, sort: listSort.value })
+  await allItems.fetchPage(currentQuery())
 }
 
 // Refresh ao import Steam — atualiza a lista de itens se estiver ativa
@@ -199,35 +208,60 @@ const isEmpty = computed(() => !store.loading && store.collections.length === 0)
     </div>
 
     <!-- ── HEADER DA ABA ITENS (só aparece nessa aba) ── -->
-    <div v-if="activeView === 'items'" class="px-4 md:px-6 pt-4 flex gap-2 items-center">
-      <div class="relative flex-1 max-w-sm">
-        <Search :size="14" class="absolute left-3 top-1/2 -translate-y-1/2 text-[#475569]" />
-        <input
-          v-model="listSearch"
-          type="text"
-          placeholder="Buscar itens..."
-          class="w-full bg-[#1e2038] border border-[#252640] rounded-lg pl-8 pr-3 py-2 text-[13px] text-[#e2e8f0] placeholder-[#475569] focus:outline-none focus:border-[#f59e0b] transition-colors"
-          @input="onSearchInput"
-        />
-      </div>
-      <div class="relative">
-        <select
-          v-model="listSort"
-          class="appearance-none bg-[#1e2038] border border-[#252640] rounded-lg pl-3 pr-8 py-2 text-[13px] text-[#e2e8f0] focus:outline-none focus:border-[#f59e0b] transition-colors cursor-pointer"
+    <div v-if="activeView === 'items'" class="px-4 md:px-6 pt-4 space-y-2">
+      <div class="flex gap-2 items-center">
+        <div class="relative flex-1 max-w-sm">
+          <Search :size="14" class="absolute left-3 top-1/2 -translate-y-1/2 text-[#475569]" />
+          <input
+            v-model="listSearch"
+            type="text"
+            placeholder="Buscar itens..."
+            class="w-full bg-[#1e2038] border border-[#252640] rounded-lg pl-8 pr-3 py-2 text-[13px] text-[#e2e8f0] placeholder-[#475569] focus:outline-none focus:border-[#f59e0b] transition-colors"
+            @input="onSearchInput"
+          />
+        </div>
+        <div class="relative">
+          <select
+            v-model="listSort"
+            class="appearance-none bg-[#1e2038] border border-[#252640] rounded-lg pl-3 pr-8 py-2 text-[13px] text-[#e2e8f0] focus:outline-none focus:border-[#f59e0b] transition-colors cursor-pointer"
+          >
+            <option v-for="opt in SORT_OPTIONS" :key="opt.value" :value="opt.value">
+              {{ opt.label }}
+            </option>
+          </select>
+          <ChevronDown :size="13" class="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#475569] pointer-events-none" />
+        </div>
+        <button
+          class="flex items-center gap-1.5 bg-[#f59e0b] hover:bg-[#d97706] active:scale-95 text-black text-[13px] font-semibold px-3.5 py-2 rounded-lg transition-all shadow-md shadow-[#f59e0b]/20 shrink-0"
+          @click="showItemCreateModal = true"
         >
-          <option v-for="opt in SORT_OPTIONS" :key="opt.value" :value="opt.value">
-            {{ opt.label }}
-          </option>
-        </select>
-        <ChevronDown :size="13" class="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#475569] pointer-events-none" />
+          <Plus :size="15" :stroke-width="2.5" />
+          <span class="hidden sm:inline">Novo item</span>
+        </button>
       </div>
-      <button
-        class="flex items-center gap-1.5 bg-[#f59e0b] hover:bg-[#d97706] active:scale-95 text-black text-[13px] font-semibold px-3.5 py-2 rounded-lg transition-all shadow-md shadow-[#f59e0b]/20 shrink-0"
-        @click="showItemCreateModal = true"
-      >
-        <Plus :size="15" :stroke-width="2.5" />
-        <span class="hidden sm:inline">Novo item</span>
-      </button>
+      <!-- Filtro por coleção -->
+      <div v-if="store.collections.length > 1" class="flex gap-2 overflow-x-auto pb-0.5">
+        <button
+          class="shrink-0 px-3 py-1.5 rounded-lg text-[12px] font-semibold transition-all"
+          :class="listCollectionId === null
+            ? 'bg-[#f59e0b] text-[#0f0f1a]'
+            : 'bg-[#1e2038] border border-[#252640] text-[#94a3b8] hover:text-[#e2e8f0]'"
+          @click="listCollectionId = null"
+        >
+          Todas
+        </button>
+        <button
+          v-for="col in store.collections"
+          :key="col.id"
+          class="shrink-0 px-3 py-1.5 rounded-lg text-[12px] font-semibold transition-all"
+          :class="listCollectionId === col.id
+            ? 'bg-[#f59e0b] text-[#0f0f1a]'
+            : 'bg-[#1e2038] border border-[#252640] text-[#94a3b8] hover:text-[#e2e8f0]'"
+          @click="listCollectionId = col.id"
+        >
+          {{ col.name }}
+        </button>
+      </div>
     </div>
 
     <!-- ── VISÃO: COLEÇÕES ── -->

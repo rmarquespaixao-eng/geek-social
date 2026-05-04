@@ -81,6 +81,7 @@ export type SearchAllUserItemsParams = {
   cursor?: string
   ratingMin?: number
   hasCover?: boolean
+  collectionId?: string
 }
 
 export type AllItemsPage = {

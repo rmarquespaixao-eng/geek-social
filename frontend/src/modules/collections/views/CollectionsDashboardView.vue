@@ -216,14 +216,14 @@ onMounted(async () => {
 
       <!-- Totais -->
       <div class="grid grid-cols-2 gap-4">
-        <div class="bg-[#1e2038] rounded-xl border border-[#252640] p-4 flex flex-col gap-2">
-          <Library :size="18" class="text-[#f59e0b]" />
-          <p class="text-3xl font-bold text-[#e2e8f0]">{{ stats.totalCollections }}</p>
+        <div class="bg-[#1e2038] rounded-xl border border-[#252640] p-5 flex flex-col gap-3">
+          <Library :size="20" class="text-[#f59e0b]" />
+          <p class="text-4xl font-bold text-[#e2e8f0]">{{ stats.totalCollections }}</p>
           <p class="text-[#94a3b8] text-[13px]">{{ stats.totalCollections === 1 ? 'coleção' : 'coleções' }}</p>
         </div>
-        <div class="bg-[#1e2038] rounded-xl border border-[#252640] p-4 flex flex-col gap-2">
-          <Package :size="18" class="text-[#f59e0b]" />
-          <p class="text-3xl font-bold text-[#e2e8f0]">{{ totalItems }}</p>
+        <div class="bg-[#1e2038] rounded-xl border border-[#252640] p-5 flex flex-col gap-3">
+          <Package :size="20" class="text-[#f59e0b]" />
+          <p class="text-4xl font-bold text-[#e2e8f0]">{{ totalItems }}</p>
           <p class="text-[#94a3b8] text-[13px]">{{ totalItems === 1 ? 'item' : 'itens' }}</p>
         </div>
       </div>

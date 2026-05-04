@@ -16,6 +16,7 @@ function buildListParams(query: ItemListQuery): Record<string, string> {
   if (query.hasCover !== undefined && query.hasCover !== null) {
     params.has_cover = query.hasCover ? 'true' : 'false'
   }
+  if (query.collectionId) params.collection_id = query.collectionId
   for (const [key, f] of Object.entries(query.fieldFilters ?? {})) {
     if (!f) continue
     if (f.contains) params[`field_${key}`] = f.contains

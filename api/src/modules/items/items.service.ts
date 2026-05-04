@@ -15,6 +15,7 @@ export type ListItemsQuery = {
   sort: ItemSort
   ratingMin?: number
   hasCover?: boolean
+  collectionId?: string
   rawFieldParams?: Record<string, string>
 }
 
@@ -144,6 +145,7 @@ export class ItemsService {
       sort: query.sort,
       ratingMin: query.ratingMin,
       hasCover: query.hasCover,
+      collectionId: query.collectionId,
     })
   }
 

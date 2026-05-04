@@ -37,6 +37,7 @@ export const listItemsQuerySchema = z.object({
   sort: itemSortSchema.default('recent'),
   rating_min: z.coerce.number().int().min(1).max(5).optional(),
   has_cover: z.enum(['true', 'false']).optional(),
+  collection_id: z.string().uuid().optional(),
 }).passthrough()
 
 export type CreateItemInput = z.infer<typeof createItemSchema>

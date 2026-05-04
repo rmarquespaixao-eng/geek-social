@@ -1,9 +1,24 @@
 # geek-social
 
-Rede social para amantes de games e board games — perfis, coleções, posts,
-chat em tempo real, ofertas/trocas e push notifications.
+**geek-social** é uma plataforma para quem quer montar sua própria comunidade em torno de gostos compartilhados — games, board games, livros, card games ou qualquer outra coleção de nicho.
+
+A ideia é simples: cada usuário cria suas **coleções** (jogos que tem, livros lidos, board games na prateleira), compartilha no **feed**, troca itens com outros colecionadores pela **vitrine**, bate papo em **DMs criptografadas** e encontra pessoas com os mesmos interesses em **comunidades temáticas** — tudo em uma plataforma auto-hospedada e 100% open source.
+
+**O que tem hoje:**
+- Coleções tipadas com schema dinâmico + integração IGDB (busca de jogos automática)
+- Feed social com posts, reactions e comentários
+- Chat em tempo real com E2E (Signal Protocol) para DMs + chamadas de vídeo/áudio
+- Comunidades estilo Orkut — tópicos, membros, moderação, audit log
+- Vitrine de troca/venda com counter-propostas e avaliações
+- Eventos presenciais e online com lista de espera e lembretes automáticos
+- Integração Steam (importação de biblioteca em batch)
+- Painel de administração + feature flags + audit log de moderação
+
+---
 
 > **Status**: alpha pública. Quebra de API e schema esperada entre versões.
+
+**📖 Documentação completa:** [geeksocial.doc.rafaelmarquesdev.com](https://geeksocial.doc.rafaelmarquesdev.com)
 
 ## Sumário
 
@@ -140,34 +155,39 @@ curl http://localhost:3000/users/me -H "Authorization: Bearer $TOKEN"
 
 **Principais grupos de endpoints** (todos documentados na seção 3):
 
-| Prefixo            | O quê                                              |
-| ------------------ | -------------------------------------------------- |
-| `/auth`            | register, login, refresh, logout, password reset   |
-| `/users`           | perfis, avatar, busca, profile posts               |
-| `/collections`     | coleções de jogos/board games                      |
-| `/items`           | itens dentro de uma coleção                        |
-| `/posts`           | posts no feed (texto + mídia)                      |
-| `/comments`        | comentários em posts                               |
-| `/reactions`       | likes/reactions                                    |
-| `/feed`            | timeline                                           |
-| `/friends`         | amigos, pedidos, blocks                            |
-| `/chat`            | DMs em tempo real (Socket.io em `/socket.io`)      |
-| `/notifications`   | inbox + push                                       |
-| `/offers`          | ofertas de troca                                   |
-| `/listings`        | anúncios (venda/troca)                             |
-| `/comunidades`     | comunidades, membros, tópicos, moderação           |
-| `/reports`         | denúncias                                          |
+| Prefixo                    | O quê                                              |
+| -------------------------- | -------------------------------------------------- |
+| `/auth`                    | register, login, refresh, logout, password reset   |
+| `/users`                   | perfis, avatar, busca, profile posts               |
+| `/collections`             | coleções tipadas + dashboard de stats              |
+| `/collections/:id/items`   | itens com schema dinâmico, filtros e cursor page   |
+| `/collections/items`       | listagem global cross-coleção                      |
+| `/integrations/igdb`       | busca de jogos via IGDB com preenchimento auto     |
+| `/integrations/steam`      | vinculação + importação de biblioteca Steam        |
+| `/posts`                   | posts no feed (texto + mídia)                      |
+| `/feed`                    | timeline cronológica                               |
+| `/friends`                 | amigos, pedidos, bloqueios                         |
+| `/chat`                    | DMs E2E + grupos (Socket.IO em `/socket.io`)       |
+| `/notifications`           | inbox + Web Push (VAPID)                           |
+| `/listings`                | anúncios (venda/troca)                             |
+| `/offers`                  | ofertas + counter-propostas + confirmação dual     |
+| `/communities`             | comunidades, membros, tópicos, moderação           |
+| `/events`                  | eventos presenciais/online + lista de espera       |
+| `/reports`                 | denúncias em 5 superfícies                         |
+| `/admin`                   | painel de moderação (role admin)                   |
 
 ### 3. Acessar a Documentação
 
-Abra **http://localhost:3030** no navegador.
+**Portal público (produção):** [geeksocial.doc.rafaelmarquesdev.com](https://geeksocial.doc.rafaelmarquesdev.com)
+
+**Ambiente local:** http://localhost:3030
 
 O site usa **Fumadocs** + **Scalar API Reference**. Você encontra:
 
-- **Visão geral** do projeto
-- **Referência da API** (renderização interativa do OpenAPI exportado pela API — dá pra testar endpoints direto da página)
-- **Schema do banco** (DBML gerado pelo Drizzle)
-- **Guias** de fluxos comuns (auth, upload, chat)
+- **Visão geral** do projeto e roadmap
+- **Referência da API** (renderização interativa do OpenAPI — dá pra testar endpoints direto da página)
+- **Schema do banco** (28 tabelas com ER diagrams Mermaid)
+- **Guias** de fluxos comuns (auth, upload, chat, coleções)
 
 A documentação é gerada a partir do código da API. Pra atualizar quando você mexer em rotas/schema:
 

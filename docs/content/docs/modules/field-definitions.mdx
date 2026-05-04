@@ -41,12 +41,12 @@ Cada definition tem **type** (`text`, `number`, `date`, `boolean`, `select`, `mo
   participant DB as PostgreSQL
 
   U->>FE: Settings → "Criar campo customizado"
-  U->>FE: Nome="Local de compra", type="select", options=["Loja", "Online", "Presente"]
-  FE->>API: POST /field-definitions {<br/>name, fieldType, selectOptions<br/>}
-  API->>API: Valida via createFieldDefinitionSchema:<br/>- select exige ≥1 selectOptions<br/>- money exige selectOptions[0] = código ISO 4217
+  U->>FE: Nome=Local de compra, type=select, options=Loja/Online/Presente
+  FE->>API: POST /field-definitions com name, fieldType e selectOptions
+  API->>API: Valida: select exige ao menos 1 selectOptions; money exige código ISO 4217
   API->>API: Gera field_key = slug(name)
-  API->>DB: INSERT field_definitions<br/>(user_id, is_system=false, ...)
-  API-->>FE: 201 { fieldDefinition }`} />
+  API->>DB: INSERT field_definitions com user_id, is_system=false
+  API-->>FE: 201 com fieldDefinition`} />
 
 ### Tipos especiais: select e money
 
@@ -55,8 +55,8 @@ Cada definition tem **type** (`text`, `number`, `date`, `boolean`, `select`, `mo
   T --> Number
   T --> Date
   T --> Boolean
-  T --> Select[Select<br/>selectOptions: array de opções]
-  T --> Money[Money<br/>selectOptions: 1 código ISO 4217<br/>BRL, USD, EUR...]`} />
+  T --> Select[Select - selectOptions array]
+  T --> Money[Money - selectOptions com código ISO 4217]`} />
 
 **Select**: o frontend renderiza dropdown com as `selectOptions`. Validação no save: valor enviado precisa estar nas options.
 

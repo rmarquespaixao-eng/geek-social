@@ -47,14 +47,14 @@ Posts têm comentários (planos, sem aninhamento), reactions temáticas (gamer-t
   participant DB as PostgreSQL
 
   U->>FE: Composer → escreve texto + adiciona 3 fotos
-  FE->>API: POST /posts (multipart) {<br/>content, visibility, files: [...]<br/>}
+  FE->>API: POST /posts multipart: content, visibility, files
   API->>API: Valida content (≤5000 chars)
   API->>S3: Upload cada foto + thumbnail (sharp)
   API->>DB: BEGIN
   API->>DB: INSERT posts (type=manual)
   API->>DB: INSERT post_media (1 row por foto, com display_order)
   API->>DB: COMMIT
-  API-->>FE: 201 { post com media embebida }
+  API-->>FE: 201 com post e media embebida
   FE->>FE: Adiciona ao topo do feed local`} />
 
 ### Item_share automático
@@ -71,9 +71,9 @@ Posts têm comentários (planos, sem aninhamento), reactions temáticas (gamer-t
   ItemsService->>DB: SELECT collection.auto_share_to_feed
   alt auto_share_to_feed=true OR shareToFeed=true no input
     ItemsService->>DB: INSERT posts (type='item_share', item_id, collection_id)
-    Note over DB: Frontend renderiza card especial:<br/>"Joe adicionou Hollow Knight em Jogos PC"
+    Note over DB: Frontend renderiza card especial de item_share
   end
-  ItemsService-->>U: { item }`} />
+  ItemsService-->>U: item criado`} />
 
 ### Feed com privacy + blocks
 
@@ -82,14 +82,14 @@ Posts têm comentários (planos, sem aninhamento), reactions temáticas (gamer-t
   participant API as Backend
   participant DB as PostgreSQL
 
-  FE->>API: GET /feed?cursor=...&limit=20
-  API->>DB: SELECT posts.*, ...<br/>FROM posts<br/>LEFT JOIN friendships ON ...<br/>WHERE NOT EXISTS (block entre poster e me)<br/>AND (visibility = 'public'<br/>     OR visibility='friends_only' AND friendship='accepted'<br/>     OR user_id = $me)<br/>ORDER BY created_at DESC<br/>LIMIT 20
+  FE->>API: GET /feed com cursor e limit=20
+  API->>DB: SELECT posts com JOIN friendships filtrando bloqueios e visibility, ORDER BY created_at DESC LIMIT 20
   DB-->>API: posts
   API->>DB: SELECT post_media para esses posts
   API->>DB: SELECT reaction_counts agregado
   API->>DB: SELECT comments_count
   API->>DB: SELECT my_reaction (single)
-  API-->>FE: { items, nextCursor }`} />
+  API-->>FE: items e nextCursor`} />
 
 ### Reagir / trocar reação
 
@@ -102,14 +102,14 @@ Posts têm comentários (planos, sem aninhamento), reactions temáticas (gamer-t
   participant N as NotificationsService
 
   U->>FE: Clica 💎 no post
-  FE->>API: POST /posts/:id/reactions { type:'loot' }
-  API->>DB: INSERT post_reactions (post_id, user_id, type='loot')<br/>ON CONFLICT (post_id, user_id) DO UPDATE
+  FE->>API: POST /posts/:id/reactions com type=loot
+  API->>DB: INSERT post_reactions com type=loot ON CONFLICT DO UPDATE
   alt Trocar tipo
     Note over DB: UPDATE type='loot' (era 'epic' antes, por exemplo)
   else Primeira vez
-    API->>N: notify({ recipient: postOwner, type:'post_reaction' })
+    API->>N: notify recipient=postOwner type=post_reaction
   end
-  API-->>FE: { counts: { loot:5, epic:3, ... }, mine:'loot' }`} />
+  API-->>FE: counts por tipo e mine=loot`} />
 
 ### Comentar (sem threads)
 
@@ -120,13 +120,13 @@ Posts têm comentários (planos, sem aninhamento), reactions temáticas (gamer-t
   participant DB as PostgreSQL
   participant N as NotificationsService
 
-  U->>API: POST /posts/:id/comments { content }
+  U->>API: POST /posts/:id/comments com content
   API->>API: Valida content (1-2000 chars)
   API->>DB: INSERT post_comments
   alt autor != dono do post
-    API->>N: notify({ recipient: postOwner, type:'post_comment' })
+    API->>N: notify recipient=postOwner type=post_comment
   end
-  API-->>U: { comment com author embebido }`} />
+  API-->>U: comment com author embebido`} />
 
 ## Eventos de socket
 

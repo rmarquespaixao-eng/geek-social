@@ -47,18 +47,18 @@ Tempo é definido como **início + duração** (dropdown fechado: 60, 120, 180, 
   participant DB as PostgreSQL
   participant Q as pg-boss
 
-  U->>FE: /roles/novo → preenche form, escolhe capa (jpg/png/webp ≤5MB)
-  FE->>API: POST /events (multipart) {<br/>name, startsAt, durationMinutes,<br/>type=presencial, address, capacity?, cover}
-  API->>API: Valida Zod (duration ∈ {60,120,...,600};<br/>endereço completo se presencial)
-  API->>S3: Upload da capa → events/{uuid}/cover-{rand}.webp
+  U->>FE: /roles/novo — preenche form, escolhe capa jpg/png/webp ate 5MB
+  FE->>API: POST /events multipart: name, startsAt, durationMinutes, type, address, capacity, cover
+  API->>API: Valida Zod: duration em 60|120|180|240|360|600 e endereço completo se presencial
+  API->>S3: Upload da capa → events/uuid/cover-rand.webp
   API->>DB: BEGIN
   API->>DB: INSERT events
   API->>DB: INSERT event_addresses
   API->>DB: COMMIT
-  API->>Q: enqueue 'event.reminder_48h' (startAfter = startsAt - 48h)
-  API->>Q: enqueue 'event.reminder_2h'  (startAfter = startsAt - 2h)
-  API-->>FE: 201 { event }
-  FE->>FE: Redirect → /roles/{id}`} />
+  API->>Q: enqueue event.reminder_48h startAfter=startsAt-48h
+  API->>Q: enqueue event.reminder_2h startAfter=startsAt-2h
+  API-->>FE: 201 com event
+  FE->>FE: Redirect → /roles/id`} />
 
 ### Inscrever-se com waitlist e auto-promoção
 
@@ -68,10 +68,10 @@ Tempo é definido como **início + duração** (dropdown fechado: 60, 120, 180, 
   participant API as Backend
   participant DB as PostgreSQL
 
-  U->>API: POST /events/{id}/participants
+  U->>API: POST /events/id/participants
   API->>DB: BEGIN
-  API->>DB: SELECT visibility (public? friends? invite?) — ACL
-  API->>DB: SELECT 1 WHERE tstzrange(starts_at, ends_at, '[)')<br/>&& tstzrange(:newStart, :newEnd, '[)') — conflito
+  API->>DB: SELECT visibility public/friends/invite — ACL
+  API->>DB: SELECT 1 WHERE intervalo starts_at/ends_at sobrepõe newStart/newEnd — conflito
   alt Vagas livres
     API->>DB: INSERT participants (status=subscribed)
   else Cheio
@@ -79,7 +79,7 @@ Tempo é definido como **início + duração** (dropdown fechado: 60, 120, 180, 
     API->>DB: INSERT participants (status=waitlist, waitlist_position=N+1)
   end
   API->>DB: COMMIT
-  API-->>U: 201 { status, position? }`} />
+  API-->>U: 201 com status e position opcional`} />
 
 Quando alguém **sai** de um Rolê com capacidade cheia:
 
@@ -91,18 +91,18 @@ Quando alguém **sai** de um Rolê com capacidade cheia:
   participant N as NotificationsService
   participant WS as Socket.io
 
-  U->>API: DELETE /events/{id}/participants/me
+  U->>API: DELETE /events/id/participants/me
   API->>DB: BEGIN
   API->>DB: UPDATE participants SET status=left, left_at=now()
   API->>DB: SELECT primeiro waitlist FOR UPDATE SKIP LOCKED
   alt Tem alguém na fila
     API->>DB: UPDATE promovido SET status=subscribed, waitlist_position=null
     API->>DB: UPDATE demais SET waitlist_position = waitlist_position - 1
-    API->>N: notify(promovido, type=event_promoted_from_waitlist)
-    Note over API: Se startsAt < 48h, enviar reminder_48h imediato
+    API->>N: notify promovido type=event_promoted_from_waitlist
+    Note over API: Se startsAt menos de 48h, enviar reminder_48h imediato
   end
   API->>DB: COMMIT
-  N->>WS: emit pro promovido<br/>("Sua vaga foi confirmada!")`} />
+  N->>WS: emit pro promovido: Sua vaga foi confirmada`} />
 
 ### Confirmação T-48h
 

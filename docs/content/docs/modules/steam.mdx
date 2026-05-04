@@ -50,21 +50,21 @@ Importação roda assíncrona via **pg-boss** (queue persistida em PG). Frontend
 
   U->>FE: Settings → "Conectar Steam"
   FE->>API: POST /integrations/steam/login
-  API->>API: Sign state JWT { userId, type:'steam-link' } TTL 5min
+  API->>API: Sign state JWT com userId e type=steam-link, TTL 5min
   API->>API: openId.buildAuthUrl(returnTo, realm)
-  API-->>FE: { url: 'https://steamcommunity.com/openid/login?...' }
+  API-->>FE: url de redirect para steamcommunity.com/openid/login
   FE->>FE: window.location.href = url
   U->>Steam: Autoriza no Steam
-  Steam-->>API: Redirect /integrations/steam/callback?<br/>openid.* params
+  Steam-->>API: Redirect /integrations/steam/callback com openid params
   API->>API: Verify state JWT
-  API->>Steam: Verify openid.* params (mode=check_authentication)
+  API->>Steam: Verify openid params com mode=check_authentication
   Steam-->>API: ok + steam_id
   API->>API: linkAccount(userId, steamId)
   alt Steam ID já vinculado a outra conta
-    API-->>U: Redirect FE?steam=error&code=STEAM_ALREADY_LINKED_TO_OTHER_USER
+    API-->>U: Redirect FE com steam=error e code=STEAM_ALREADY_LINKED_TO_OTHER_USER
   else
     API->>API: UPDATE users.steam_id, steam_linked_at
-    API-->>U: Redirect FE?steam=connected
+    API-->>U: Redirect FE com steam=connected
   end`} />
 
 ### Setar API key (necessária pra import)
@@ -78,10 +78,10 @@ Importação roda assíncrona via **pg-boss** (queue persistida em PG). Frontend
   U->>FE: Settings → tab Steam
   FE->>FE: Mostra link "Pegue sua key em steamcommunity.com/dev/apikey"
   U->>FE: Cola key (32 chars hex)
-  FE->>API: PUT /integrations/steam/api-key { apiKey }
+  FE->>API: PUT /integrations/steam/api-key com apiKey
   API->>API: Valida formato (32 chars)
   API->>API: Setar users.steam_api_key
-  Note over API: Não há check da validade da key online —<br/>se inválida, falha em /games com STEAM_AUTH_FAILED`} />
+  Note over API: Key não validada online — se inválida falha em /games com STEAM_AUTH_FAILED`} />
 
 ### Listar e importar jogos
 
@@ -97,16 +97,16 @@ Importação roda assíncrona via **pg-boss** (queue persistida em PG). Frontend
   U->>FE: "Importar jogos do Steam"
   FE->>API: GET /integrations/steam/games
   API->>Steam: GetOwnedGames(steamId, apiKey, includeAppinfo=true)
-  Steam-->>API: { games: [{ appId, name, playtimeForever, iconUrl }, ...] }
+  Steam-->>API: lista de games com appId, name, playtimeForever, iconUrl
   API-->>FE: lista
   U->>FE: Seleciona N jogos + escolhe coleção destino (existente OU nova)
-  FE->>API: POST /integrations/steam/import {<br/>collectionId | newCollectionName,<br/>appIds: [...],<br/>gamesSnapshot: [...]<br/>}
+  FE->>API: POST /integrations/steam/import com collectionId ou newCollectionName, appIds e gamesSnapshot
   API->>API: Gera batch_id
   API->>DB: Cria coleção (se newCollectionName)
   loop Para cada appId
-    API->>Q: enqueue 'steam.import-game' { appId, batchId, collectionId, userId }
+    API->>Q: enqueue steam.import-game com appId, batchId, collectionId, userId
   end
-  API-->>FE: { batchId }
+  API-->>FE: batchId
   FE->>FE: Mostra progress bar (polling + socket)`} />
 
 ### Workers e finalização atomica
@@ -126,7 +126,7 @@ Importação roda assíncrona via **pg-boss** (queue persistida em PG). Frontend
     Q->>W1: dispatch
     W1->>DB: Find or create item by appId
     W1->>DB: UPDATE/INSERT item com playtime
-    W1->>Q: enqueue steam.enrich-game { itemId, appId }
+    W1->>Q: enqueue steam.enrich-game com itemId e appId
     W1->>CG: emit import:progress (counter incremental)
   end
 
@@ -158,7 +158,7 @@ Importação roda assíncrona via **pg-boss** (queue persistida em PG). Frontend
 
   U->>API: DELETE /integrations/steam/link
   API->>DB: UPDATE users SET steam_id = NULL, steam_linked_at = NULL, steam_api_key = NULL
-  Note over API: Itens já importados ficam preservados nas coleções —<br/>desvínculo não é "rollback de import"`} />
+  Note over API: Itens importados ficam preservados nas coleções — desvínculo não é rollback`} />
 
 ## Eventos de socket
 

@@ -118,16 +118,16 @@ Tópicos reutilizam o sistema de `posts`: reactions (power_up, epic, critical, l
   participant DB as PostgreSQL
 
   U->>FE: /comunidades/nova → preenche form, envia cover + icon
-  FE->>API: POST /comunidades (multipart) {name, description, category, visibility, cover, icon}
+  FE->>API: POST /comunidades multipart: name, description, category, visibility, cover, icon
   API->>API: Valida Zod (name ≤80, desc ≤2000, category ∈ enum)
-  API->>S3: Upload cover → communities/{uuid}/cover-{rand}.webp
-  API->>S3: Upload icon  → communities/{uuid}/icon-{rand}.webp
+  API->>S3: Upload cover → communities/uuid/cover-rand.webp
+  API->>S3: Upload icon  → communities/uuid/icon-rand.webp
   API->>DB: BEGIN
   API->>DB: INSERT communities (slug=slugify(name), auto-suffix se colisão)
   API->>DB: INSERT community_members (userId=current, role=owner, status=active)
   API->>DB: COMMIT
-  API-->>FE: 201 { community }
-  FE->>FE: Redirect → /comunidades/{slug}`} />
+  API-->>FE: 201 com community
+  FE->>FE: Redirect → /comunidades/slug`} />
 
 ### Entrar em comunidade restrita
 
@@ -141,10 +141,10 @@ Tópicos reutilizam o sistema de `posts`: reactions (power_up, epic, critical, l
   API->>DB: SELECT community (visibilidade, join_policy)
   alt Comunidade pública
     API->>DB: INSERT community_members (status=active, role=member)
-    API-->>U: 201 { member, status: "active" }
+    API-->>U: 201 com member e status active
   else Comunidade restrita
     API->>DB: INSERT community_join_requests (status=pending)
-    API-->>U: 202 { joinRequest, status: "pending" }
+    API-->>U: 202 com joinRequest e status pending
   end`} />
 
 ### Aprovar pedido de entrada
@@ -161,7 +161,7 @@ Tópicos reutilizam o sistema de `posts`: reactions (power_up, epic, critical, l
   API->>DB: UPDATE join_requests SET status=approved, decidedBy, decidedAt
   API->>DB: INSERT community_members (status=active, approvedAt=now())
   API->>DB: COMMIT
-  API-->>M: 200 { member }`} />
+  API-->>M: 200 com member`} />
 
 ### Moderação de membro
 

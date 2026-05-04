@@ -55,18 +55,18 @@ Ver [API Reference — Auth](/docs/api/auth/login). 12 endpoints no total:
   participant SES as Email service
 
   U->>FE: Preenche formulário
-  FE->>API: POST /auth/register {email, password, displayName}
-  API->>DB: SELECT * FROM users WHERE email = ?
+  FE->>API: POST /auth/register com email, password, displayName
+  API->>DB: SELECT users WHERE email
   alt Já existe
     API-->>FE: 409 EMAIL_ALREADY_EXISTS
   else Não existe
-    API->>API: bcrypt.hash(password, 12)
-    API->>DB: INSERT INTO users (...)
-    API->>DB: INSERT INTO refresh_tokens (hash, expiresAt)
-    API->>SES: sendEmailVerification(token)
-    API-->>FE: 201 {accessToken, user} + Set-Cookie refreshToken
+    API->>API: bcrypt.hash password cost=12
+    API->>DB: INSERT INTO users
+    API->>DB: INSERT INTO refresh_tokens hash e expiresAt
+    API->>SES: sendEmailVerification token
+    API-->>FE: 201 accessToken e user + Set-Cookie refreshToken
     FE->>FE: store accessToken in memory
-    FE-->>U: Logado, com aviso "verifique seu e-mail"
+    FE-->>U: Logado, com aviso de verificar e-mail
   end`} />
 
 ### 2. Login com e-mail/senha
@@ -79,17 +79,17 @@ Ver [API Reference — Auth](/docs/api/auth/login). 12 endpoints no total:
   participant DB as PostgreSQL
 
   U->>FE: Preenche e-mail + senha
-  FE->>API: POST /auth/login {email, password}
-  API->>DB: SELECT * FROM users WHERE email = ?
+  FE->>API: POST /auth/login com email e password
+  API->>DB: SELECT users WHERE email
   alt User não existe ou sem passwordHash
     API-->>FE: 401 INVALID_CREDENTIALS
   else Existe
-    API->>API: bcrypt.compare(password, user.passwordHash)
+    API->>API: bcrypt.compare password com hash
     alt Inválido
       API-->>FE: 401 INVALID_CREDENTIALS
     else OK
-      API->>DB: INSERT INTO refresh_tokens (...)
-      API-->>FE: 200 {accessToken, user} + Set-Cookie refreshToken
+      API->>DB: INSERT INTO refresh_tokens
+      API-->>FE: 200 accessToken e user + Set-Cookie refreshToken
     end
   end`} />
 
@@ -105,30 +105,30 @@ Ver [API Reference — Auth](/docs/api/auth/login). 12 endpoints no total:
 
   U->>FE: Clica "Entrar com Google"
   FE->>API: redireciona pra GET /auth/google
-  API->>API: jwt.sign({mode:'login'}) (state)
-  API-->>U: 302 Redirect → accounts.google.com (state)
+  API->>API: jwt.sign state com mode=login
+  API-->>U: 302 Redirect para accounts.google.com com state
   U->>G: Autoriza
-  G-->>API: 302 Redirect /auth/google/callback?code&state
-  API->>API: jwt.verify(state)
-  API->>G: authorizationCodeGrant(code)
+  G-->>API: 302 Redirect /auth/google/callback com code e state
+  API->>API: jwt.verify state
+  API->>G: authorizationCodeGrant code
   G-->>API: tokens + claims
-  API->>G: fetchUserInfo(access_token)
-  G-->>API: {sub, email, name, picture}
-  API->>DB: SELECT * FROM users WHERE google_id = ?
+  API->>G: fetchUserInfo com access_token
+  G-->>API: sub, email, name, picture
+  API->>DB: SELECT users WHERE google_id
   alt Achou pelo google_id
     Note over API: Já vinculado, login direto
   else Não achou
-    API->>DB: SELECT * FROM users WHERE email = ?
+    API->>DB: SELECT users WHERE email
     alt Achou pelo email
       Note over API: Vincula Google ao user existente
-      API->>DB: UPDATE users SET google_id = ?
+      API->>DB: UPDATE users SET google_id
     else Não achou nem pelo email
-      Note over API: Cria conta nova com email_verified = true
-      API->>DB: INSERT INTO users (...)
+      Note over API: Cria conta nova com email_verified=true
+      API->>DB: INSERT INTO users
     end
   end
   API->>DB: INSERT INTO refresh_tokens
-  API-->>FE: 302 Redirect /auth/callback?status=...&token=jwt + Set-Cookie refreshToken
+  API-->>FE: 302 Redirect /auth/callback com status e token + Set-Cookie refreshToken
   FE->>FE: extrai token da URL, salva
   FE-->>U: Dashboard`} />
 
@@ -140,18 +140,18 @@ Ver [API Reference — Auth](/docs/api/auth/login). 12 endpoints no total:
   participant API as Backend
   participant DB as PostgreSQL
 
-  Note over FE: Access token expirou (15min)
-  FE->>API: POST /auth/refresh (cookie refreshToken)
-  API->>API: sha256(rawToken)
-  API->>DB: SELECT * FROM refresh_tokens WHERE token_hash = ?
+  Note over FE: Access token expirou 15min
+  FE->>API: POST /auth/refresh via cookie refreshToken
+  API->>API: sha256 rawToken
+  API->>DB: SELECT refresh_tokens WHERE token_hash
   alt Não encontrado ou expirado
-    API-->>FE: 401 (sessão expirada)
+    API-->>FE: 401 sessão expirada
     FE->>FE: limpa accessToken, redireciona /login
   else Válido
-    API->>DB: DELETE FROM refresh_tokens WHERE token_hash = ?
-    API->>DB: SELECT * FROM users WHERE id = ?
-    API->>DB: INSERT INTO refresh_tokens (newHash, ...)
-    API-->>FE: 200 {accessToken} + Set-Cookie refreshToken (rotacionado)
+    API->>DB: DELETE refresh_tokens WHERE token_hash
+    API->>DB: SELECT users WHERE id
+    API->>DB: INSERT INTO refresh_tokens newHash
+    API-->>FE: 200 accessToken + Set-Cookie refreshToken rotacionado
     FE->>FE: atualiza accessToken
   end`} />
 
@@ -165,32 +165,32 @@ Ver [API Reference — Auth](/docs/api/auth/login). 12 endpoints no total:
   participant DB as PostgreSQL
   participant SES as Email
 
-  U->>FE: "Esqueci minha senha", informa e-mail
-  FE->>API: POST /auth/forgot-password {email}
-  API->>DB: SELECT * FROM users WHERE email = ?
+  U->>FE: Esqueci minha senha, informa e-mail
+  FE->>API: POST /auth/forgot-password com email
+  API->>DB: SELECT users WHERE email
   alt Existe
-    API->>API: gera token aleatório, sha256
-    API->>DB: INSERT INTO password_reset_tokens (hash, expiresAt: +1h)
-    API->>SES: sendPasswordResetEmail(rawToken)
+    API->>API: gera token aleatório e sha256
+    API->>DB: INSERT INTO password_reset_tokens hash e expiresAt=+1h
+    API->>SES: sendPasswordResetEmail rawToken
   else Não existe
-    Note over API: NÃO revela; sempre 200
+    Note over API: Nao revela — sempre 200
   end
-  API-->>FE: 200 {message: "Se o e-mail existir..."}
+  API-->>FE: 200 com mensagem generica
   U->>U: Recebe e-mail, clica no link
-  U->>FE: Vai pra /auth/reset-password?token=...
+  U->>FE: Vai pra /auth/reset-password com token
   U->>FE: Digita nova senha
-  FE->>API: POST /auth/reset-password {token, newPassword}
-  API->>API: sha256(token)
-  API->>DB: SELECT * FROM password_reset_tokens WHERE token_hash = ?
-  alt Inválido / expirado / já usado
+  FE->>API: POST /auth/reset-password com token e newPassword
+  API->>API: sha256 token
+  API->>DB: SELECT password_reset_tokens WHERE token_hash
+  alt Inválido ou expirado ou já usado
     API-->>FE: 400 INVALID_RESET_TOKEN
   else OK
-    API->>API: bcrypt.hash(newPassword)
-    API->>DB: UPDATE users SET password_hash = ?
-    API->>DB: UPDATE password_reset_tokens SET used_at = now()
-    API->>DB: DELETE FROM refresh_tokens WHERE user_id = ?
-    Note over API: Revoga TODAS as sessões ativas — força re-login
-    API-->>FE: 200 {message}
+    API->>API: bcrypt.hash newPassword
+    API->>DB: UPDATE users SET password_hash
+    API->>DB: UPDATE password_reset_tokens SET used_at=now
+    API->>DB: DELETE refresh_tokens WHERE user_id
+    Note over API: Revoga todas as sessões ativas — força re-login
+    API-->>FE: 200 com message
   end`} />
 
 ## Eventos de socket

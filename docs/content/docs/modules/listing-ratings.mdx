@@ -42,17 +42,16 @@ Janela de avaliação: **30 dias** após confirmação da transação. Após iss
   participant DB as PostgreSQL
   participant N as NotificationsService
 
-  U->>FE: Pós-transação → modal "Como foi?"
+  U->>FE: Pos-transacao — modal de avaliacao
   U->>FE: Clica 👍 (score 2) ou 👎 (score 1)
-  FE->>API: POST /ratings { offerId, score }
-  API->>API: Verifica:
-  Note over API: 1. offer.status === 'completed'<br/>2. user é offerer ou owner<br/>3. dentro da janela de 30 dias<br/>4. ainda não avaliou (unique offer×rater)
+  FE->>API: POST /ratings com offerId e score
+  API->>API: Verifica offer completed, user é parte, janela 30 dias e sem rating duplicada
   alt Falhas
-    API-->>FE: 4xx<br/>OFFER_NOT_COMPLETED / NOT_PARTICIPANT /<br/>RATING_WINDOW_CLOSED / DUPLICATE_RATING
+    API-->>FE: 4xx OFFER_NOT_COMPLETED ou NOT_PARTICIPANT ou RATING_WINDOW_CLOSED ou DUPLICATE_RATING
   else OK
-    API->>DB: INSERT listing_ratings<br/>(offer_id, rater_id, ratee_id, score)
-    API->>N: notify({ recipient: rateee, type:'rating_received' })
-    API-->>FE: 201 { rating }
+    API->>DB: INSERT listing_ratings com offer_id, rater_id, ratee_id, score
+    API->>N: notify recipient=ratee type=rating_received
+    API-->>FE: 201 com rating
   end`} />
 
 ### Reputação visual
@@ -63,13 +62,13 @@ Janela de avaliação: **30 dias** após confirmação da transação. Após iss
   participant DB as PostgreSQL
 
   FE->>API: GET /ratings/users/:userId
-  API->>DB: SELECT count(*), avg(score)<br/>FROM listing_ratings<br/>WHERE ratee_id=?
-  alt count < 3 (MIN_RATINGS)
-    API-->>FE: { count, avgScore, visible: false }
-    FE->>FE: Render "Sem reputação ainda"
-  else count >= 3
-    API-->>FE: { count, avgScore, visible: true }
-    FE->>FE: Render <ReputationBadge> com count + avg
+  API->>DB: SELECT count e avg score FROM listing_ratings WHERE ratee_id informado
+  alt count menor que 3 MIN_RATINGS
+    API-->>FE: count, avgScore, visible=false
+    FE->>FE: Render sem reputação ainda
+  else count maior ou igual a 3
+    API-->>FE: count, avgScore, visible=true
+    FE->>FE: Render ReputationBadge com count e avg
   end`} />
 
 ### Otimização N+1

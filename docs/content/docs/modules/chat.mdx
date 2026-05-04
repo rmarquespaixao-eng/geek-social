@@ -53,19 +53,19 @@ Ver [API Reference — Chat](/docs/api/chat/chat-list-conversations).
   participant DB as PostgreSQL
   participant CG as ChatGateway
 
-  U->>API: POST /chat/dm { friendId }
+  U->>API: POST /chat/dm com friendId
   API->>API: Verifica amizade aceita
   alt Não amigo
     API-->>U: 403 NOT_FRIEND
   else Amigo
     API->>DB: SELECT conversation existente DM A↔B
     alt Já existe
-      API-->>U: { conversation existente }
+      API-->>U: conversation existente
     else Não existe
       API->>DB: INSERT conversations (type=dm)
       API->>DB: INSERT conversation_members (A, B)
       API->>CG: linkUsersToConversation
-      API-->>U: { conversation nova }
+      API-->>U: conversation nova
     end
   end`} />
 
@@ -79,10 +79,10 @@ Ver [API Reference — Chat](/docs/api/chat/chat-list-conversations).
   participant N as NotificationsService
   participant B as Receiver
 
-  A->>API: POST /chat/dm-requests { receiverId: B }
+  A->>API: POST /chat/dm-requests com receiverId=B
   API->>API: Verifica NÃO há amizade
   API->>DB: INSERT dm_requests (status=pending)
-  API->>N: notify({ recipient: B, type:'dm_request_received' })
+  API->>N: notify recipient=B type=dm_request_received
   N-->>B: notificação real-time
 
   Note over B: Vê em /chat/requests
@@ -92,7 +92,7 @@ Ver [API Reference — Chat](/docs/api/chat/chat-list-conversations).
   API->>DB: INSERT conversation_members
   API->>DB: UPDATE dm_requests status=accepted, conversation_id
   API->>DB: COMMIT
-  API-->>B: { conversation aberta }`} />
+  API-->>B: conversation aberta`} />
 
 ### Enviar mensagem com attachment
 
@@ -109,11 +109,11 @@ Ver [API Reference — Chat](/docs/api/chat/chat-list-conversations).
   FE->>API: POST /chat/conversations/:id/attachments (multipart)
   API->>S3: PUT chat/<convId>/<msgId>/<file>
   API->>DB: INSERT message_attachments (message_id=NULL ainda)
-  API-->>FE: { attachmentId, url, thumb? }
+  API-->>FE: attachmentId, url, thumb opcional
   FE->>FE: Mostra preview clicável
 
   U->>FE: Clica enviar
-  FE->>API: POST /chat/conversations/:id/messages {<br/>content, attachmentIds: [...]<br/>}
+  FE->>API: POST /chat/conversations/:id/messages com content e attachmentIds
   API->>DB: BEGIN
   API->>DB: INSERT messages
   API->>DB: UPDATE message_attachments SET message_id=...
@@ -134,18 +134,18 @@ Ver [API Reference — Chat](/docs/api/chat/chat-list-conversations).
   participant DB as PostgreSQL
   participant Cron as Cleanup Cron
 
-  A->>API: PATCH /chat/conversations/:id/temporary { enabled:true }
+  A->>API: PATCH /chat/conversations/:id/temporary com enabled=true
   API->>DB: UPDATE conversations is_temporary=true
   Note over DB: Mensagens novas marcadas is_temporary
 
   A->>B: envia mensagem (is_temporary)
   B->>B: lê mensagem
   B->>API: POST /chat/conversations/:id/read
-  API->>DB: UPDATE conversation_members[B].last_read_at
+  API->>DB: UPDATE conversation_members last_read_at do membro B
   Note over B: B fecha conversa
 
   Note over Cron: A cada 1 minuto
-  Cron->>DB: SELECT messages.id<br/>WHERE is_temporary AND deleted_at IS NULL<br/>AND TODOS os membros leram (last_read_at > created_at)
+  Cron->>DB: SELECT mensagens temporárias não deletadas onde todos os membros já leram
   Cron->>DB: UPDATE deleted_at = now()
   Note over Cron: Mensagem some pra todos`} />
 
@@ -157,9 +157,9 @@ Ver [API Reference — Chat](/docs/api/chat/chat-list-conversations).
   participant CG as ChatGateway
   participant B as Receiver
 
-  A->>CG: emit 'call:offer' { conversationId, sdp, callId, type:'video' }
-  CG->>B: emit 'call:incoming' { callId, callerId, type, conversationId }
-  B->>CG: emit 'call:answer' { callId, sdp }
+  A->>CG: emit call:offer com conversationId, sdp, callId, type=video
+  CG->>B: emit call:incoming com callId, callerId, type, conversationId
+  B->>CG: emit call:answer com callId e sdp
   CG->>A: relay 'call:answer'
 
   par ICE candidates trocando peer-to-peer
@@ -171,12 +171,12 @@ Ver [API Reference — Chat](/docs/api/chat/chat-list-conversations).
     end
   end
 
-  Note over A,B: Conexão WebRTC P2P estabelecida<br/>Mídia (audio/video) NÃO passa pelo backend
+  Note over A,B: Conexão WebRTC P2P estabelecida — mídia não passa pelo backend
 
   alt Encerrou chamada
-    A->>CG: 'call:hangup' { reason:'completed' }
+    A->>CG: emit call:hangup com reason=completed
     CG->>B: relay
-    Note over CG: Backend cria messages.row com call_metadata<br/>{ status, duration, etc. }
+    Note over CG: Backend cria messages.row com call_metadata de status e duração
   end`} />
 
 ### Mute / Archive / Hide

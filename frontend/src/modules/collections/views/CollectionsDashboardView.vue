@@ -238,7 +238,7 @@ onMounted(async () => {
       </div>
 
       <!-- Tabs de tipos de coleção -->
-      <div v-if="allTypeSections.length > 0">
+      <div v-if="allTypeSections.length > 0" class="space-y-4">
 
         <!-- Seletor de tipo -->
         <div class="flex gap-2 overflow-x-auto pb-1">
@@ -257,7 +257,7 @@ onMounted(async () => {
         </div>
 
         <!-- Gráficos do tipo selecionado -->
-        <template v-if="activeSection">
+        <div v-if="activeSection" class="space-y-4">
           <div
             v-for="chart in activeSection.fieldCharts"
             :key="activeSection.typeKey + chart.fieldKey"
@@ -287,7 +287,7 @@ onMounted(async () => {
               <Bar :data="ratingsChart.data" :options="ratingsChart.options" />
             </div>
           </div>
-        </template>
+        </div>
 
       </div>
       <div v-else class="bg-[#1e2038] rounded-xl border border-[#252640] p-4 md:p-5">

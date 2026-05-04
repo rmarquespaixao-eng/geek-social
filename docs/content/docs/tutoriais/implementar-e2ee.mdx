@@ -1,0 +1,679 @@
+---
+title: Como implementar E2EE (passo a passo)
+description: Tutorial conceitual + prático pra implementar end-to-end encryption num chat — do zero até DM, grupos, backup, rotação e auto-repair. Baseado na implementação real do Geek Social com Signal Protocol via libsignal-wasm.
+---
+
+Este tutorial é o guia que eu queria ter tido quando comecei. Ele explica **o que cada conceito é**, **por que existe**, e **como aplicar**, com referências ao código real do Geek Social. A página de [Criptografia E2EE](/docs/concepts/criptografia-e2ee) é o reference da arquitetura final — esta aqui é o caminho pra chegar lá.
+
+> ⚠️ **Não invente cripto.** Em todos os passos abaixo você vai usar uma biblioteca pronta e bem auditada (libsignal). O trabalho do dev é a **integração** correta, não os algoritmos. Se você está pensando "vou implementar o Double Ratchet do zero", pare.
+
+## Parte 1 — Conceitos (entender antes de codar)
+
+### 1.1 Por que E2EE existe?
+
+E2EE responde a uma pergunta de threat model: **quem você confia com o conteúdo das mensagens?**
+
+| Modelo | Quem lê o plaintext |
+|---|---|
+| **Sem cripto** | Server, operador, atacante MITM, atacante no DB |
+| **TLS only** | Server, operador, atacante no DB |
+| **E2EE** | Apenas remetente e destinatário |
+
+E2EE move a confiança do *server* pros *endpoints* (devices). O server passa a ser apenas um **diretório de chaves públicas + relay de ciphertext**.
+
+**Implicação prática:** o server não pode oferecer features que dependam de ler conteúdo (busca server-side, moderação automática por palavra-chave, sumarização IA do histórico). Decida isso antes de começar.
+
+### 1.2 Os blocos do Signal Protocol
+
+O Signal Protocol é uma composição de quatro primitivas. Entender cada uma resolve 80% das dúvidas de implementação.
+
+#### Identidade de longo prazo (Identity Key)
+
+Um par de chaves Curve25519 que representa "quem você é" criptograficamente. Gerada **uma vez por user** e nunca rotacionada. O hash dela é o que aparece em "verify safety number".
+
+- **Pública** vai pro server (e pros peers)
+- **Privada** **nunca** sai do dispositivo do user (exceto cifrada por backup)
+
+Se a identidade é comprometida, o user é "outra pessoa" — peers verão `IdentityChangedError`.
+
+#### Signed Pre-Key (SPK)
+
+Uma chave Curve25519 de **médio prazo** assinada pela identidade. Rotacionada a cada ~7 dias.
+
+**Por que existe:** o handshake X3DH precisa de uma chave pública do destinatário pra fazer DH **antes** dele estar online. A SPK fica publicada no server pré-assinada — qualquer um pode iniciar uma sessão sem precisar do peer online, e a assinatura prova que foi mesmo o peer que publicou.
+
+#### Kyber Pre-Key (PQXDH)
+
+Mesma ideia da SPK, mas com **Kyber1024** — um KEM (Key Encapsulation Mechanism) pós-quântico. Adiciona um quinto DH (na verdade um encapsulamento) ao handshake.
+
+**Por que existe:** mesmo que daqui a 20 anos um computador quântico quebre Curve25519, o segredo derivado de Kyber permanece. Defesa contra "harvest now, decrypt later" — adversário grava ciphertext hoje pra decifrar no futuro.
+
+#### One-Time Pre-Keys (OTPs)
+
+Chaves Curve25519 **descartáveis**. Cada handshake X3DH consome uma. Publicar em lote (100 por vez) e refill quando o server reportar contagem baixa.
+
+**Por que existem:** sem OTP, o handshake X3DH é deterministicamente idêntico se A inicia 2 sessões com B (mesmas SPK e Kyber) — perdendo forward secrecy do material inicial. A OTP injeta entropia única por sessão.
+
+**Fallback obrigatório:** se acabarem as OTPs, o handshake **ainda funciona** com forward secrecy ligeiramente reduzida. Não bloqueie a primeira mensagem por falta de OTP.
+
+#### X3DH e PQXDH (handshake)
+
+X3DH = "Extended Triple Diffie-Hellman" = 4 DHs entre as chaves disponíveis (identity, SPK, OTP), combinados via HKDF, geram o **root key** inicial da sessão.
+
+PQXDH = X3DH + um encapsulamento Kyber adicional. Da perspectiva da integração, é a **mesma chamada de função** — a libsignal já junta os dois.
+
+#### Double Ratchet
+
+O coração do forward secrecy. A cada mensagem trocada, ambos os lados avançam um *ratchet* (cadeia de chaves derivada por HKDF) e descartam a chave anterior.
+
+Duas garantias:
+
+- **Forward secrecy:** comprometer a chave de hoje não decifra mensagens de ontem (a chave anterior já foi descartada)
+- **Post-compromise security (auto-healing):** se o atacante roubar o estado da sessão, ela "se cura" sozinha após algumas trocas (DH ratchet renova as chaves usando novos efêmeros)
+
+**Implicação operacional:** ciphertexts são *single-use* da perspectiva do receptor — decifrou uma vez, descartou a message key. Recarregar a página e tentar decifrar de novo **não funciona**. Isso vai te morder; ver passo 7.4.
+
+#### Sender Keys (grupos)
+
+Double Ratchet escala mal pra grupos N-N (cada mensagem teria que ser cifrada N-1 vezes). Sender Keys resolvem assim:
+
+1. Cada **sender** tem uma chave simétrica por grupo (a *sender key*)
+2. Distribui a sender key uma vez via DM Signal pra cada membro (*Sender Key Distribution Message* — SKDM)
+3. Daí pra frente, cifra mensagens **uma vez** com a sender key; todos os membros decifram com a mesma chave
+
+A sender key também avança em ratchet a cada mensagem (forward secrecy mantido), mas é **simétrico** — sem DH ratchet. Trade-off explícito do design.
+
+**Rotação:** quando um membro sai/é removido, gera-se um novo `distributionId` (UUID) e os senders distribuem novas sender keys. Mensagens futuras ficam fora do alcance do ex-membro.
+
+#### TOFU (Trust on First Use)
+
+Não tem PKI nem CA. A primeira identidade que A vê de B é "confiada" automaticamente. Próximas mudanças geram alerta. Pra verificação real, **safety numbers** out-of-band (compare a string ou QR pessoalmente / por canal seguro).
+
+### 1.3 O que o server vê e o que não vê
+
+| Vê | Não vê |
+|---|---|
+| Ciphertexts (todos) | Plaintexts |
+| Identidade pública dos users | Identidade privada |
+| SPK/Kyber/OTPs públicas | Chaves privadas correspondentes |
+| Quem fala com quem (metadata) | O que falam |
+| Timestamps, tamanhos | Conteúdo |
+| Backup cifrado da identidade | Senha de derivação do backup |
+
+**Metadata fica visível.** E2EE não é "anti-vigilância" completo — é "anti-leitura de conteúdo". Se você precisa esconder *quem-fala-com-quem*, isso é outro problema (mixnet, sealed sender, etc.) e está fora do escopo deste tutorial.
+
+## Parte 2 — Decisões antes de codar
+
+Faça essas escolhas explicitamente. Cada uma tem consequência permanente.
+
+### 2.1 Single-device vs multi-device
+
+**Single-device** (escolha do Geek Social hoje):
+- ✅ Simples — `deviceId=1` hardcoded
+- ❌ User não usa em 2 navegadores, não migra device sem perder histórico
+
+**Multi-device** (Signal/WhatsApp):
+- Cada device tem `registrationId` próprio
+- Mensagem é cifrada N vezes (uma por device do destinatário)
+- Sincronizar sessões entre devices do mesmo user é complexo (Sesame Protocol)
+
+Comece **single-device** se o produto permitir. Adicionar multi-device depois é viável; o caminho contrário (remover) é trivial mas a UX já criou expectativa.
+
+### 2.2 Backup de identidade — sim ou não?
+
+Sem backup → user que limpa o browser perde a identidade → peers veem "outra pessoa" e o histórico antigo no DB do server vira lixo indecifrável.
+
+Com backup cifrado por **senha de login**:
+- ✅ Restore transparente em outro device com mesma senha
+- ❌ User com senha fraca dá margem pra brute-force offline (mitigado por PBKDF2 ≥ 600k iterações)
+- ❌ Users OAuth-only (Google/Steam) não têm senha — sem backup possível
+
+**Decisão do Geek Social:** backup com senha de login. OAuth-only gera identidade nova a cada device.
+
+### 2.3 Backup de **histórico** de mensagens — não, geralmente
+
+Backup de histórico é uma feature à parte. Exige cifrar plaintexts decifrados com uma chave separada (PIN, senha, ou drive cifrado), upload pro server. **Custo alto, valor médio** — Signal só tem isso há pouco e via cloud externa.
+
+Não implemente no MVP. A documentação explica claramente ao user: "trocar device = perder histórico". É a mesma promessa do Signal/WhatsApp.
+
+### 2.4 Onde fica a libsignal?
+
+Três opções:
+
+| Opção | Pros | Cons |
+|---|---|---|
+| **WASM no browser** | E2EE de verdade, server zero confiança | Bundle pesado (~700KB), API async |
+| **Native mobile** (iOS/Android) | Performance, OS keystore | Não cobre web |
+| **Server-side** | Não é E2EE — é só "TLS reforçado". **Não faça.** | Anula o ponto inteiro |
+
+Geek Social usa [@getmaapp/signal-wasm](https://github.com/getmaapp/signal-wasm) (fork de libsignal compilado pra WASM). Se for native, troque a camada do `SignalClient.ts` pelo binding nativo — o resto da arquitetura é igual.
+
+## Parte 3 — Implementação passo a passo
+
+A partir daqui é prático. Cada passo tem `Conceito → O que codar → Onde no Geek Social está`.
+
+### Passo 1 — Schema de banco (key directory)
+
+**Conceito:** o server precisa armazenar chaves **públicas** dos users e ciphertexts. Nada privado.
+
+**O que codar:** uma migration com cinco tabelas.
+
+```sql
+-- 0045_signal_protocol.sql (resumido)
+CREATE TABLE signal_identity_keys (
+  user_id          uuid PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  identity_key     bytea NOT NULL,       -- 32B Curve25519 pública
+  registration_id  integer NOT NULL,     -- 14-bit, equiv. device-id
+  encrypted_backup bytea,                -- backup cifrado da identidade privada
+  backup_salt      bytea,
+  backup_iv        bytea,
+  created_at       timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE signal_signed_prekeys (
+  user_id     uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  prekey_id   integer NOT NULL,
+  public_key  bytea NOT NULL,
+  signature   bytea NOT NULL,            -- assinatura Ed25519 sobre public_key
+  created_at  timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, prekey_id)
+);
+CREATE INDEX ON signal_signed_prekeys (user_id, created_at DESC);
+
+CREATE TABLE signal_kyber_prekeys ( /* idêntica ao SPK, com Kyber */ );
+CREATE TABLE signal_one_time_prekeys (
+  user_id    uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  prekey_id  integer NOT NULL,
+  public_key bytea NOT NULL,
+  PRIMARY KEY (user_id, prekey_id)
+);
+
+CREATE TABLE signal_sender_key_distributions (
+  conversation_id    uuid NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+  sender_user_id     uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  recipient_user_id  uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  ciphertext         bytea NOT NULL,
+  PRIMARY KEY (conversation_id, sender_user_id, recipient_user_id)
+);
+```
+
+**Pontos críticos:**
+
+- Index DESC em `signal_signed_prekeys.created_at` — você sempre quer a SPK mais recente
+- `ON DELETE CASCADE` em tudo — quando o user for deletado, leva as chaves junto (LGPD)
+- Não armazene chaves privadas. Nem brincando. Não.
+
+**No Geek Social:** `api/src/shared/infra/database/migrations/0045_signal_protocol.sql` e `0046_conv_sender_key_id.sql` (esta última adiciona `conversations.sender_key_id` pra rotação).
+
+### Passo 2 — Endpoints REST do key directory
+
+**Conceito:** rotas pro cliente publicar/buscar material público de chave. Tudo autenticado, tudo validado.
+
+**O que codar:**
+
+| Método | Rota | Função |
+|---|---|---|
+| `PUT` | `/crypto/identity` | Publica identity key + registrationId |
+| `GET` | `/crypto/identity/:userId` | Busca identity de um user (pra TOFU) |
+| `PUT` | `/crypto/signed-prekey` | Publica SPK assinada |
+| `PUT` | `/crypto/kyber-prekey` | Publica Kyber prekey assinada |
+| `POST` | `/crypto/one-time-prekeys` | Publica lote de OTPs (1–200) |
+| `GET` | `/crypto/one-time-prekeys/count` | Contagem (pra refill) |
+| `GET` | `/crypto/prekey-bundle/:userId` | Pacote pra iniciar handshake |
+| `PUT/GET` | `/crypto/backup` | Backup cifrado da identidade |
+| `PUT/GET` | `/crypto/sender-key-distribution/...` | SKDMs de grupo |
+
+**Schema Zod (exemplo):**
+
+```ts
+// api/src/modules/crypto/crypto.schema.ts
+const b64 = z.string().regex(/^[A-Za-z0-9+/=]+$/)
+const uuid = z.string().uuid()
+
+export const putIdentitySchema = z.object({
+  identityKey: b64,
+  registrationId: z.number().int().min(1).max(16383),  // 14-bit
+})
+
+export const postOtpsSchema = z.object({
+  prekeys: z.array(z.object({
+    prekeyId: z.number().int().nonnegative(),
+    publicKey: b64,
+  })).min(1).max(200),
+})
+```
+
+**Atomicidade da OTP — importantíssimo:**
+
+Duas iniciações concorrentes não podem pegar a mesma OTP, senão o handshake quebra silenciosamente. `popOneTimePrekey()` no repository:
+
+```ts
+// api/src/modules/crypto/crypto.repository.ts
+async popOneTimePrekey(userId: string) {
+  // DELETE...RETURNING dentro de uma CTE com FOR UPDATE SKIP LOCKED
+  const result = await this.db.execute(sql`
+    WITH picked AS (
+      SELECT prekey_id FROM signal_one_time_prekeys
+      WHERE user_id = ${userId}
+      ORDER BY prekey_id ASC
+      FOR UPDATE SKIP LOCKED
+      LIMIT 1
+    )
+    DELETE FROM signal_one_time_prekeys
+    WHERE user_id = ${userId} AND prekey_id IN (SELECT prekey_id FROM picked)
+    RETURNING prekey_id, public_key
+  `)
+  return result.rows[0] ?? null
+}
+```
+
+**Validações de negócio:**
+
+- `PUT /crypto/sender-key-distribution/:conversationId` deve verificar que o caller **e** todos os recipients são membros da conversa. Sem isso, qualquer user pode injetar SKDMs em conversa alheia.
+- Limite de tamanho do backup (256 KB no Geek Social). Sem limite, atacante pode encher o DB.
+
+**No Geek Social:** `api/src/modules/crypto/{routes,service,repository,schema}.ts`.
+
+### Passo 3 — Cliente WASM no frontend
+
+**Conceito:** uma camada TS sobre a libsignal-wasm que persiste estado em IndexedDB. Esta é a única parte do código que toca chaves diretamente.
+
+**O que codar:**
+
+```ts
+// frontend/src/shared/crypto/signal/SignalClient.ts (estrutura)
+import init, { WasmSignalClient } from '@getmaapp/signal-wasm'
+
+let wasmReady: Promise<void> | null = null
+async function ensureWasm() {
+  if (!wasmReady) wasmReady = init()
+  await wasmReady
+}
+
+export class SignalSession {
+  constructor(
+    private readonly userId: string,
+    private readonly client: WasmSignalClient,
+    private readonly idb: IDBDatabase,
+  ) {}
+
+  static async create(userId: string): Promise<SignalSession> {
+    await ensureWasm()
+    const idb = await openIdb('geek-signal-v1', 3)
+    const meta = await getMeta(idb, userId)
+    const client = meta
+      ? WasmSignalClient.from_records(meta.identityPrivateKey, meta.registrationId, ...)
+      : WasmSignalClient.generate(userId)
+    return new SignalSession(userId, client, idb)
+  }
+
+  // ...encryptMessage, decryptMessage, processPreKeyBundle, etc.
+}
+```
+
+**Object stores no IndexedDB:**
+
+| Store | Chave | Conteúdo |
+|---|---|---|
+| `meta` | `userId` | Identity (pub+priv), registrationId, contadores `nextPrekeyId/nextSignedPrekeyId/nextKyberPrekeyId` |
+| `prekeys` | `userId:prekeyId` | OTPs locais |
+| `signedPrekeys` | `userId:prekeyId` | SPKs (incluindo antigas — pra decifrar mensagens em trânsito) |
+| `kyberPrekeys` | `userId:prekeyId` | Kyber prekeys |
+| `sessions` | `userId:contactUuid:deviceId` | Estado Double Ratchet |
+| `senderKeys` | `userId:memberUuid:deviceId:distributionId` | Sender keys de grupos |
+| `identities` | `userId:contactUuid` | Pub key conhecida + status TOFU |
+| `dmPlaintexts` | `userId:messageId` | Cache de plaintexts (passo 7.4) |
+
+**Pontos críticos:**
+
+- `IDBOpenDBRequest.onupgradeneeded` é o **único** lugar onde você cria/migra stores. Versionar (`v1`, `v2`, `v3`) e ter migrations pra cada.
+- **Não** retenha SPKs antigas no server, mas **sim** no cliente. Mensagem cifrada antes da rotação ainda precisa decifrar.
+- Cada operação que escreve no IDB precisa ser dentro de uma transaction `readwrite`. WASM é sync; IDB é async. Não tente intercalar.
+- Identidade privada NUNCA sai do IDB exceto cifrada no backup.
+
+**No Geek Social:** `frontend/src/shared/crypto/signal/SignalClient.ts`.
+
+### Passo 4 — Bootstrap (login flow)
+
+**Conceito:** todo login precisa rodar um orquestrador que decide entre três caminhos:
+
+<Mermaid chart={`flowchart TD
+  Start([Login completo]) --> A{IDB tem identidade?}
+  A -- Sim --> A1[Restore local]
+  A1 --> A2{Server tem identidade?}
+  A2 -- Não --> A3[publishKeys: re-publica tudo]
+  A2 -- Sim --> A4[runKeyMaintenance:<br/>rota SPK/Kyber se >7d, refill OTPs]
+  A3 --> Done([Pronto])
+  A4 --> Done
+
+  A -- Não --> B{Tem senha + backup no server?}
+  B -- Sim --> B2[loadFromBackup<br/>PBKDF2 + AES-GCM]
+  B2 -- ok --> B3[publishKeys novos OTPs]
+  B3 --> Done
+  B2 -- fail --> C
+
+  B -- Não --> C[Gera identidade nova,<br/>publica, salva backup com senha]
+  C --> Done
+`} />
+
+**O que codar:**
+
+```ts
+// frontend/src/shared/auth/cryptoBootstrap.ts
+export async function bootstrapCrypto(opts: { userId: string; loginPassword?: string }) {
+  const session = await SignalSession.create(opts.userId)
+  const localIdentity = await session.getLocalIdentity()
+  const serverIdentity = await api.getIdentity(opts.userId).catch(() => null)
+
+  if (localIdentity) {
+    if (!serverIdentity) await session.publishKeys()
+    else await session.runKeyMaintenance()
+    return session
+  }
+
+  const backup = await api.getBackup().catch(() => null)
+  if (backup && opts.loginPassword) {
+    try {
+      await session.loadFromBackup(backup, opts.loginPassword)
+      await session.publishKeys({ otpsOnly: true })
+      return session
+    } catch {
+      // backup inválido — cai pro fluxo C
+    }
+  }
+
+  await session.generateIdentity()
+  await session.publishKeys()
+  if (opts.loginPassword) await session.saveBackup(opts.loginPassword).catch(() => {})
+  return session
+}
+```
+
+**Pontos críticos:**
+
+- `await session.publishKeys()` é fire-and-forget? Não. Se falhar, peers não conseguem iniciar sessão. Logue o erro mas **não** bloqueie o login (fila de retry).
+- `loadFromBackup` precisa restaurar **todos os contadores** (`nextPrekeyId`, `nextSignedPrekeyId`, `nextKyberPrekeyId`) — senão IDs colidem com o que o server já tem (bug histórico — commit `7b7bb4d`).
+- O fluxo C (identidade nova) é **destrutivo do ponto de vista do peer** — TOFU vai disparar `IdentityChangedError` na próxima mensagem que o peer enviar pra esse user. Documente claramente.
+
+**No Geek Social:** `frontend/src/shared/auth/cryptoBootstrap.ts`.
+
+### Passo 5 — Cifrar/decifrar DM
+
+**Conceito:** primeira mensagem requer handshake (PreKey message, type=3). Subsequentes são `SignalMessage` (type=1).
+
+**Iniciar sessão (sender):**
+
+```ts
+async function startSession(peerUserId: string) {
+  const bundle = await api.getPrekeyBundle(peerUserId)
+
+  // TOFU
+  const known = await idb.getIdentity(peerUserId)
+  if (known && !arrayEquals(known.publicKey, bundle.identityKey)) {
+    await idb.markPendingIdentityChange(peerUserId, bundle.identityKey)
+    throw new IdentityChangedError(peerUserId)
+  }
+  if (!known) await idb.saveIdentity(peerUserId, bundle.identityKey, 'trusted')
+
+  await session.processPreKeyBundle(peerUserId, bundle)
+}
+```
+
+**Cifrar:**
+
+```ts
+const { messageType, body } = await session.encryptMessage(peerUserId, plaintextBytes)
+const wire = `${messageType}.${base64(body)}`  // ex: "3.SGVsbG8="
+await api.sendMessage({ conversationId, ciphertext: wire })
+```
+
+**Decifrar:**
+
+```ts
+const [typeStr, b64body] = wire.split('.', 2)
+const messageType = parseInt(typeStr, 10)
+const plaintext = await session.decryptMessage(senderId, base64Decode(b64body), messageType)
+```
+
+**Pontos críticos:**
+
+- O wire format `"type.base64"` é uma escolha do Geek Social — outras opções: JSON, length-prefixed binary. Escolha uma e seja consistente.
+- `messageType=3` (PreKey) **consome a OTP** localmente. Server nunca decide isso.
+- Se o decrypt falhar com type=3, a OTP foi consumida em vão. Não tente refazer com a mesma — a OTP correspondente já foi deletada do server.
+
+**No Geek Social:** `frontend/src/modules/chat/services/chatCrypto.ts` — funções `encryptDm` e `decryptDm`.
+
+### Passo 6 — Grupos com Sender Keys
+
+**Conceito:** `distributionId` (UUID) identifica a "geração" da sender key. Quando muda, todo mundo regenera.
+
+<Mermaid chart={`sequenceDiagram
+  autonumber
+  participant A as Sender (User A)
+  participant API as Backend
+  participant B as User B
+  participant C as User C
+
+  Note over A: distributionId = conversation.sender_key_id
+  A->>A: createSenderKeyDistribution(distributionId) = SKDM
+  A->>A: Pra cada membro:<br/>encryptDm(member, SKDM)
+  A->>API: PUT /crypto/sender-key-distribution/:convId<br/>{ distributions: [{B, encDm(SKDM,B)}, {C, encDm(SKDM,C)}] }
+  API-->>A: 204
+
+  Note over B,C: ao entrar no chat
+  B->>API: GET /crypto/sender-key-distribution/:convId/A
+  API-->>B: { ciphertext }
+  B->>B: decryptDm(A, ciphertext) → SKDM
+  B->>B: processSenderKeyDistribution(A, SKDM, distributionId)`} />
+
+**Cifrar mensagem em grupo:**
+
+```ts
+const ciphertext = await session.encryptGroupMessage(distributionId, plaintextBytes)
+const wire = base64(ciphertext)  // sem prefixo de type
+```
+
+**Decifrar (receptor) com auto-fetch de SKDM se faltando:**
+
+```ts
+async function decryptGroup(senderId: string, distributionId: string, wire: string) {
+  try {
+    return await session.decryptGroupMessage(senderId, base64Decode(wire))
+  } catch (err) {
+    if (err.code !== 'NO_SENDER_KEY') throw err
+    // Auto-fetch
+    const skdm = await api.getSenderKeyDistribution(conversationId, senderId)
+    const skdmPlain = await decryptDm(senderId, skdm.ciphertext)
+    await session.processSenderKeyDistribution(senderId, skdmPlain, distributionId)
+    return await session.decryptGroupMessage(senderId, base64Decode(wire))
+  }
+}
+```
+
+**Rotação ao remover/sair:**
+
+```sql
+UPDATE conversations SET sender_key_id = gen_random_uuid() WHERE id = $1;
+DELETE FROM signal_sender_key_distributions WHERE conversation_id = $1;
+```
+
+Os clientes detectam a mudança via socket `conversation:updated`, regeneram sender keys e redistribuem.
+
+**No Geek Social:** `frontend/src/modules/chat/services/chatCrypto.ts:209–214` — função `decryptGroup`.
+
+### Passo 7 — Cuidados que vão te morder
+
+#### 7.1 Backup transparente sem PIN extra
+
+UX ruim mata adoção. Pedir PIN separado pra cada user é fricção desnecessária quando a senha de login já é um segredo derivável.
+
+```ts
+// Derivar chave do backup da senha de login
+const salt = crypto.getRandomValues(new Uint8Array(16))
+const iv = crypto.getRandomValues(new Uint8Array(12))
+const keyMaterial = await crypto.subtle.importKey(
+  'raw', new TextEncoder().encode(loginPassword),
+  'PBKDF2', false, ['deriveKey']
+)
+const key = await crypto.subtle.deriveKey(
+  { name: 'PBKDF2', salt, iterations: 600_000, hash: 'SHA-256' },
+  keyMaterial,
+  { name: 'AES-GCM', length: 256 },
+  false, ['encrypt', 'decrypt']
+)
+const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, plaintext)
+```
+
+**Conteúdo do backup:**
+
+```ts
+{
+  identityPublicKey, identityPrivateKey, registrationId, deviceId,
+  nextPrekeyId, nextSignedPrekeyId, nextKyberPrekeyId,    // ← essencial
+  signedPrekeys: [{ id, record(b64) }, ...],              // ← essencial
+  kyberPrekeys:  [{ id, record(b64) }, ...]
+  // OTPs NÃO vão no backup — gere novas no restore
+}
+```
+
+**Por que os contadores são essenciais:** sem eles, no restore você gera SPKs com IDs de 0, 1, 2... colidindo com IDs já no server. Mensagens em trânsito cifradas pra `prekeyId=5` da geração antiga ficam órfãs. Bug `7b7bb4d` no histórico.
+
+**Iterações 600k:** OWASP 2023 mínimo. Argon2id seria melhor mas exige polyfill no browser. Aceitável.
+
+#### 7.2 Manutenção periódica
+
+Rode no bootstrap, fire-and-forget:
+
+```ts
+async function runKeyMaintenance() {
+  const meta = await getMeta()
+  if (Date.now() - meta.lastSpkRotation > 7 * 24 * 60 * 60 * 1000) {
+    await rotateSignedPrekey()
+  }
+  if (Date.now() - meta.lastKyberRotation > 7 * 24 * 60 * 60 * 1000) {
+    await rotateKyberPrekey()
+  }
+  const { count } = await api.getOtpCount()
+  if (count < 20) await refillOtps(100)
+}
+```
+
+Cada step independente — falha de um não bloqueia os outros.
+
+#### 7.3 TOFU + safety numbers
+
+```ts
+// Comparar
+if (known && !arrayEquals(known.publicKey, fetchedIdentityKey)) {
+  await idb.markPendingIdentityChange(peerUserId, fetchedIdentityKey)
+  throw new IdentityChangedError(peerUserId)
+}
+
+// Gerar safety number pra UI mostrar
+const sn = session.generateSafetyNumber(peerUserId, peerIdentityKey)
+// sn.display = string formatada (60 dígitos)
+// sn.qr = bytes pra QR
+
+// Aceitar mudança (user clicou "Confio")
+async function acknowledgeIdentityChange(peerUserId: string) {
+  await idb.promotePendingIdentity(peerUserId)
+  await idb.clearSession(peerUserId)  // próxima msg cria sessão nova
+}
+```
+
+**Não permita user pular o TOFU silenciosamente.** O ponto inteiro é dar visibilidade quando algo muda.
+
+#### 7.4 Cache de plaintext (resolver F5)
+
+Double Ratchet avança a cada decrypt. F5 → server entrega o **mesmo ciphertext** → decifrar de novo falha → bolha mostra `[Mensagem criptografada]`.
+
+```ts
+async function renderMessage(msg: { id: string; ciphertext: string }) {
+  const cached = await idb.getDmPlaintext(msg.id)
+  if (cached) return cached.plaintext
+
+  const plaintext = await decryptDm(msg.senderId, msg.ciphertext)
+  if (plaintext) await idb.saveDmPlaintext(msg.id, plaintext)
+  return plaintext
+}
+```
+
+Faça isso **desde o primeiro dia**. Custou um commit dedicado (`990a91c`) descobrir que faltava.
+
+**Reply previews:** mesmo cache. Não tenha codepath separado — o reply preview usa `messageId` da msg respondida, então `getDmPlaintext(repliedId)` resolve igual (commit `b3c492e`).
+
+#### 7.5 Auto-repair de sessão
+
+Sessões dessincronizam (peer recarregou app, IDB corrompeu, etc.). Decrypt falha em loop.
+
+```ts
+const REPAIR_THROTTLE_MS = 30_000
+const lastRepair = new Map<string, number>()
+
+async function decryptDmWithRepair(senderId: string, wire: string) {
+  try {
+    return await decryptDm(senderId, wire)
+  } catch {
+    const last = lastRepair.get(senderId) ?? 0
+    if (Date.now() - last < REPAIR_THROTTLE_MS) return null
+    lastRepair.set(senderId, Date.now())
+
+    const bundle = await api.getPrekeyBundle(senderId)
+    await session.processPreKeyBundle(senderId, bundle)
+    return await decryptDm(senderId, wire).catch(() => null)
+  }
+}
+```
+
+Se ainda falhar, mostre botão "Tentar novamente" na bolha (commit `cdaca62`). Não trave a UI.
+
+#### 7.6 Push notifications E2E-safe
+
+Service worker **não** tem identidade privada (vive em scope diferente). Push payload deve ser metadata-only:
+
+```ts
+// api/src/modules/chat/chat.gateway.ts
+{ title: 'Nova mensagem', body: '', data: { conversationId, messageId } }
+```
+
+Cliente recebe push → abre app → busca msg pelo socket → decifra localmente.
+
+Se o body do push tivesse plaintext, **o servidor de push (FCM/APNS) leria** — quebra E2EE.
+
+### Passo 8 — Testes manuais
+
+Automatizar testes de E2EE é difícil (envolve dois clientes em estados diferentes). Use checklists.
+
+**Cenários obrigatórios:**
+
+1. **Happy path DM:** A envia pra B (sem sessão). B recebe, decifra, responde. A recebe a resposta.
+2. **F5 com histórico:** A e B trocaram 10 msgs. B dá F5. Todas as 10 msgs continuam legíveis.
+3. **Identidade nova de um peer:** B limpa o IDB e relogia (gera nova identity). A envia uma msg → vê `IdentityChangedError`. Aceita → próxima msg funciona.
+4. **Backup restore:** A limpa IDB. Faz login com mesma senha. Identidade restaurada, manda msg pra B, B decifra OK.
+5. **Backup com senha errada:** A limpa IDB. Login com senha nova. Identidade nova gerada — B recebe TOFU alert.
+6. **Grupo de 3:** A cria grupo com B, C. Manda msg. B e C decifram. C sai. A manda nova msg. B decifra, C **não** tem mais sender key (msg invisível pra C).
+7. **OTP exhaustion:** force `signal_one_time_prekeys` a ficar vazia pro user B. A inicia handshake — deve funcionar (fallback X3DH sem OTP).
+8. **Concurrent session init:** abrir dois tabs do user A simultaneamente, ambos enviando 1ª msg pra B. As duas mensagens devem decifrar (atomicidade da OTP).
+
+**No Geek Social:** `e2e/specs/chat-e2ee.spec.ts` (Playwright) cobre 1, 2 e 3. Os outros estão em backlog.
+
+## Parte 4 — O que fica de fora deste tutorial
+
+- **IDB encryption at-rest** — chave derivada da senha + AES-GCM em cada record. Pacote D do roadmap. Sem isso, malware com privilégios do user no device lê tudo (mesma situação do Signal Desktop).
+- **Sealed sender** — esconder *de quem* uma mensagem é do server. Signal tem; nós não.
+- **Multi-device sync (Sesame)** — cada device com `registrationId` próprio + sincronização cross-device.
+- **Backup de histórico** — vários trade-offs de UX e segurança. Decisão deliberada de não fazer.
+
+## Parte 5 — Pra ler depois
+
+- [Signal Protocol spec](https://signal.org/docs) — fonte primária dos algoritmos
+- [PQXDH whitepaper](https://signal.org/docs/specifications/pqxdh/) — adição pós-quântica
+- [The Double Ratchet Algorithm](https://signal.org/docs/specifications/doubleratchet/) — paper original
+- [libsignal source](https://github.com/signalapp/libsignal) — referência canônica
+- [@getmaapp/signal-wasm](https://github.com/getmaapp/signal-wasm) — fork que o Geek Social usa
+- [Criptografia E2EE (referência)](/docs/concepts/criptografia-e2ee) — arquitetura final do Geek Social
+- Código de referência:
+  - `api/src/modules/crypto/{routes,service,repository,schema}.ts`
+  - `frontend/src/shared/crypto/signal/SignalClient.ts`
+  - `frontend/src/shared/auth/cryptoBootstrap.ts`
+  - `frontend/src/modules/chat/services/chatCrypto.ts`

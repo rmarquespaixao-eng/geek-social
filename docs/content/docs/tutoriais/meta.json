@@ -6,6 +6,7 @@
     "criar-migration",
     "adicionar-tipo-notificacao",
     "adicionar-field-type",
-    "documentar-endpoint"
+    "documentar-endpoint",
+    "implementar-e2ee"
   ]
 }

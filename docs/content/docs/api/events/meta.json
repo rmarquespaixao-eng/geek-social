@@ -1,0 +1,16 @@
+{
+  "title": "Events",
+  "pages": [
+    "create",
+    "get",
+    "delete",
+    "list-participants",
+    "join",
+    "leave",
+    "confirm",
+    "invite",
+    "remove-invite",
+    "list-attending",
+    "list-hosted"
+  ]
+}

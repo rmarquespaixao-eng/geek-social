@@ -1,0 +1,23 @@
+{
+  "title": "Communities",
+  "pages": [
+    "list-joined",
+    "list-owned",
+    "create",
+    "get",
+    "update",
+    "delete",
+    "list-members",
+    "leave",
+    "remove-member",
+    "ban",
+    "unban",
+    "promote",
+    "demote",
+    "list-topics",
+    "create-topic",
+    "list-join-requests",
+    "approve-join-request",
+    "reject-join-request"
+  ]
+}

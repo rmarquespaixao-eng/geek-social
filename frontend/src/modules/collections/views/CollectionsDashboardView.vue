@@ -20,6 +20,7 @@ const router = useRouter()
 const stats = ref<CollectionStats | null>(null)
 const loading = ref(false)
 const error = ref<string | null>(null)
+const selectedTypeKey = ref<string | null>(null)
 
 // Cores semânticas por valor de status (todos os tipos de coleção)
 const STATUS_COLORS: Record<string, string> = {
@@ -86,11 +87,10 @@ const categoryChart = computed(() => {
   }
 })
 
-// --- Seções por tipo de coleção (campo a campo) ---
-const typeSections = computed(() => {
+// --- Todos os tipos disponíveis (para tabs) ---
+const allTypeSections = computed(() => {
   if (!stats.value?.fieldBreakdownByType.length) return []
 
-  // Agrupa: typeKey → fieldKey → values[]
   const typeMap = new Map<string, {
     typeKey: string; typeName: string; typeIcon: string
     fields: Map<string, { fieldName: string; values: { label: string; count: number }[] }>
@@ -109,7 +109,6 @@ const typeSections = computed(() => {
 
   return [...typeMap.values()].map(({ typeKey, typeName, typeIcon, fields }) => {
     const fieldCharts = [...fields.entries()].map(([fieldKey, { fieldName, values }]) => {
-      // Aplica ordenação preferida (status) ou mantém por count DESC
       const order = FIELD_ORDER[typeKey]?.[fieldKey]
       let ordered = values
       if (order) {
@@ -117,12 +116,10 @@ const typeSections = computed(() => {
         ordered = order.filter(s => map.has(s)).map(s => ({ label: s, count: map.get(s)! }))
         values.filter(v => !order.includes(v.label)).forEach(v => ordered.push(v))
       }
-
       const isStatus = fieldKey === 'status'
       const colors = ordered.map((v, i) =>
         isStatus ? (STATUS_COLORS[v.label] ?? PALETTE[i % PALETTE.length]) : PALETTE[i % PALETTE.length],
       )
-
       return {
         fieldKey,
         title: fieldName,
@@ -134,9 +131,16 @@ const typeSections = computed(() => {
         height: Math.max(80, ordered.length * 40),
       }
     })
-
     return { typeKey, typeName, typeIcon, fieldCharts }
   })
+})
+
+// Tipo atualmente selecionado (padrão: primeiro tipo disponível)
+const activeSection = computed(() => {
+  const sections = allTypeSections.value
+  if (!sections.length) return null
+  const key = selectedTypeKey.value ?? sections[0].typeKey
+  return sections.find(s => s.typeKey === key) ?? sections[0]
 })
 
 // --- Zerados por ano (games) ---
@@ -224,7 +228,7 @@ onMounted(async () => {
         </div>
       </div>
 
-      <!-- Itens por categoria -->
+      <!-- Itens por categoria (visão geral) -->
       <div class="bg-[#1e2038] rounded-xl border border-[#252640] p-4 md:p-5">
         <h2 class="text-[#e2e8f0] font-semibold text-[14px] mb-4">Itens por categoria</h2>
         <div v-if="stats.itemsByType.length === 0" class="text-[#94a3b8] text-sm">Nenhum item ainda.</div>
@@ -233,38 +237,60 @@ onMounted(async () => {
         </div>
       </div>
 
-      <!-- Seções por tipo de coleção -->
-      <template v-for="section in typeSections" :key="section.typeKey">
+      <!-- Tabs de tipos de coleção -->
+      <div v-if="allTypeSections.length > 0">
 
-        <!-- Gráfico por campo select -->
-        <div
-          v-for="chart in section.fieldCharts"
-          :key="section.typeKey + chart.fieldKey"
-          class="bg-[#1e2038] rounded-xl border border-[#252640] p-4 md:p-5"
-        >
-          <h2 class="text-[#e2e8f0] font-semibold text-[14px] mb-4">
-            {{ section.typeIcon ? `${section.typeIcon} ` : '' }}{{ section.typeName }} — {{ chart.title }}
-          </h2>
-          <div :style="{ height: chart.height + 'px' }">
-            <Bar :data="chart.data" :options="chart.options" />
-          </div>
+        <!-- Seletor de tipo -->
+        <div class="flex gap-2 overflow-x-auto pb-1">
+          <button
+            v-for="section in allTypeSections"
+            :key="section.typeKey"
+            class="flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-[13px] font-semibold whitespace-nowrap transition-all"
+            :class="activeSection?.typeKey === section.typeKey
+              ? 'bg-[#f59e0b] text-[#0f0f1a]'
+              : 'bg-[#1e2038] border border-[#2e3050] text-[#94a3b8] hover:text-[#e2e8f0]'"
+            @click="selectedTypeKey = section.typeKey"
+          >
+            <span v-if="section.typeIcon">{{ section.typeIcon }}</span>
+            {{ section.typeName }}
+          </button>
         </div>
 
-        <!-- Zerados por ano (exclusivo games) -->
-        <div
-          v-if="section.typeKey === 'games' && yearChart"
-          class="bg-[#1e2038] rounded-xl border border-[#252640] p-4 md:p-5"
-        >
-          <h2 class="text-[#e2e8f0] font-semibold text-[14px] mb-4">🎮 Jogos zerados por ano</h2>
-          <div :style="{ height: yearChart.height + 'px' }">
-            <Bar :data="yearChart.data" :options="yearChart.options" />
+        <!-- Gráficos do tipo selecionado -->
+        <template v-if="activeSection">
+          <div
+            v-for="chart in activeSection.fieldCharts"
+            :key="activeSection.typeKey + chart.fieldKey"
+            class="bg-[#1e2038] rounded-xl border border-[#252640] p-4 md:p-5"
+          >
+            <h2 class="text-[#e2e8f0] font-semibold text-[14px] mb-4">{{ chart.title }}</h2>
+            <div :style="{ height: chart.height + 'px' }">
+              <Bar :data="chart.data" :options="chart.options" />
+            </div>
           </div>
-        </div>
 
-      </template>
+          <!-- Zerados por ano (exclusivo games) -->
+          <div
+            v-if="activeSection.typeKey === 'games' && yearChart"
+            class="bg-[#1e2038] rounded-xl border border-[#252640] p-4 md:p-5"
+          >
+            <h2 class="text-[#e2e8f0] font-semibold text-[14px] mb-4">Jogos zerados por ano</h2>
+            <div :style="{ height: yearChart.height + 'px' }">
+              <Bar :data="yearChart.data" :options="yearChart.options" />
+            </div>
+          </div>
 
-      <!-- Classificações (universal) -->
-      <div class="bg-[#1e2038] rounded-xl border border-[#252640] p-4 md:p-5">
+          <!-- Classificações do tipo selecionado -->
+          <div class="bg-[#1e2038] rounded-xl border border-[#252640] p-4 md:p-5">
+            <h2 class="text-[#e2e8f0] font-semibold text-[14px] mb-4">Classificações por estrelas</h2>
+            <div :style="{ height: ratingsChart.height + 'px' }">
+              <Bar :data="ratingsChart.data" :options="ratingsChart.options" />
+            </div>
+          </div>
+        </template>
+
+      </div>
+      <div v-else class="bg-[#1e2038] rounded-xl border border-[#252640] p-4 md:p-5">
         <h2 class="text-[#e2e8f0] font-semibold text-[14px] mb-4">Classificações por estrelas</h2>
         <div :style="{ height: ratingsChart.height + 'px' }">
           <Bar :data="ratingsChart.data" :options="ratingsChart.options" />

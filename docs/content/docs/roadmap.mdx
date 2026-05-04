@@ -48,6 +48,9 @@ Tudo que está rodando hoje (referências cruzadas com a documentação técnica
 - Items com fields JSONB + rating + comment + cover
 - Filtros dinâmicos na listagem (por field, range, sort customizável)
 - Cursor pagination
+- **Lista global de itens** cross-coleção com filtro por coleção, busca e ordenação
+- **Dashboard de coleções** — gráficos de itens por tipo, breakdown de campos, classificações por estrelas, jogos zerados por ano (Chart.js, tabs por tipo)
+- **Integração IGDB** — busca de jogos com preenchimento automático de nome, capa, gênero, plataforma e desenvolvedor (token caching, mapeamento EN→PT)
 - 📖 [Módulo Collections+Items](/docs/modules/collections-items)
 
 ### ✅ Feed e posts
@@ -69,6 +72,15 @@ Tudo que está rodando hoje (referências cruzadas com a documentação técnica
 - Read receipts respeitando `show_read_receipts`
 - Mute, archive, hide per-conversation
 - 📖 [Módulo Chat](/docs/modules/chat)
+
+### ✅ Criptografia E2E (DMs)
+- **Signal Protocol** completo — X3DH (handshake assíncrono) + Double Ratchet (chave por mensagem)
+- PreKeys publicadas no servidor (até 100 one-time prekeys por usuário)
+- Forward secrecy + post-compromise security garantidos pelo Double Ratchet
+- Backup cifrado de chaves com versionamento (counters SPK/Kyber)
+- Auto-retry com repair throttle + botão "Tentar novamente" no bubble de erro
+- Cache de plaintext para mensagens próprias (evita re-decrypt no reload)
+- Escopo: DMs 1-1; grupos continuam em texto plano (MLS fora do escopo atual)
 
 ### ✅ Vitrine (marketplace)
 - Listings com status (`active/paused/closed`) + auto-rejeição de offers em close
@@ -120,9 +132,15 @@ Espaços temáticos que reúnem pessoas em torno de um interesse (gênero, jogo 
 - Tópicos de comunidade **não aparecem no feed global**
 - 📖 [Módulo Communities](/docs/modules/communities)
 
-### ✅ Reports
+### ✅ Reports e moderação admin
 - Denúncias em 5 superfícies (user, message, post, collection, conversation)
 - 5 razões (spam, harassment, nsfw, hate, other)
+- **Painel admin** live em `geeksocialadmin.homelab-cloud.com` (restrito por CIDR)
+- Dashboard com KPIs: usuários, reports pendentes, conteúdo sinalizado
+- Moderação de usuários: banimento, suspensão, força logout, reset de senha
+- **Feature flags** — tabela `feature_flags`, toggle em runtime via painel, rollout percentual
+- **Audit log** de ações de moderação (`admin_audit_log`) com actor + alvo + metadata JSONB
+- Painel de reports com ações por tipo de alvo e gráfico de severidade
 - 📖 [Módulo Reports](/docs/modules/reports)
 
 ### ✅ Realtime + infra
@@ -131,12 +149,20 @@ Espaços temáticos que reúnem pessoas em torno de um interesse (gênero, jogo 
 - pg-boss queue persistida no PG pra jobs assíncronos
 - 📖 [Conceito Realtime](/docs/concepts/realtime) · [Eventos socket](/docs/reference/eventos-socket)
 
+### ✅ Deploy em produção
+- Stack Docker Compose completa em VPS (`187.77.230.35`)
+- nginx-proxy com SSL automático Let's Encrypt (certbot) para todos os subdomínios
+- Subdomínios: app · api · admin · docs · minio · keycloak
+- Pipeline de sync `geek-sync` (GitHub → SSH sem token exposto)
+- Usuário admin criado + Feature Flags seedadas na inicialização
+
 ### ✅ Documentação
-- Portal Fumadocs self-hosted com 681 páginas estáticas
-- API Reference auto-gerada de Zod schemas (143 endpoints)
+- Portal Fumadocs self-hosted em `geeksocial.doc.rafaelmarquesdev.com` (domínio público, sem VPN)
+- API Reference auto-gerada de Zod schemas (143+ endpoints)
 - Sandbox interativo Scalar embedado em cada endpoint
 - Dicionário de banco com 28 tabelas + ER diagrams Mermaid
 - Filosofia, conceitos, tutoriais, frontend, operations
+- Módulos completos: Events (11 endpoints), Communities (18 endpoints), Integrations (IGDB)
 - 📖 Você está nele
 
 ---
@@ -174,32 +200,6 @@ Hoje o feed é cronológico simples. Migrar pra **ranking inteligente** que mist
 
 📋 **Pesquisa antes**: revisão de papers + benchmark de complexidade vs ganho.
 
-### 🚧 Criptografia E2E (chat)
-
-Mensagens cifradas **end-to-end** — só remetente e destinatário leem; servidor vê apenas blob criptografado.
-
-**Padrão de referência: Signal Protocol** (X3DH + Double Ratchet)
-- X3DH (Extended Triple Diffie-Hellman) — handshake inicial entre dois users
-- Double Ratchet — chave por mensagem com forward + post-compromise security
-- PreKeys publicadas no servidor pra setup assíncrono (offline contact)
-
-**Implicações no design atual:**
-- `messages.content` armazenado **cifrado** (servidor não consegue indexar full-text)
-- Search dentro de conversas precisa ser client-side
-- Notificações push: payload mínimo ("Nova mensagem de Joe") — conteúdo só é decifrado quando user abre o app
-- Backup/restore complicado (chaves no device → perder device = perder mensagens)
-- Group chat E2E é **muito mais complexo** (Sender Keys ou MLS — RFC 9420)
-- Cuidado com forward de mensagem cifrada (não dá pra forward sem re-cifrar pro novo destino)
-
-**Decisões pendentes:**
-- E2E em DMs apenas, ou grupos também (MLS)?
-- Storage de keys no device — IndexedDB? Web Crypto API?
-- Multi-device (ex: web + mobile do mesmo user)? Usar backend como hub de keys públicas
-- Migração: conversas existentes ficam em texto plano legacy, ou re-cifradas?
-- Modo Snapchat (efêmero) já oferece privacidade alta — vale o custo do E2E completo?
-
-📋 **Spec MUITO detalhada antes de implementar** — este é o item mais arriscado da lista.
-
 ### 🚧 Melhorar lista de amigos
 
 Hoje a lista é simples (nome + avatar). Melhorias planejadas:
@@ -221,71 +221,50 @@ Hoje a lista é simples (nome + avatar). Melhorias planejadas:
 
 ## Plataforma de admin
 
-Hoje **não há painel administrativo**. Tudo é gerenciado por SQL direto + log do app. Roadmap pra um sistema robusto.
+O painel administrativo está **live em produção** em `geeksocialadmin.homelab-cloud.com` (restrito por CIDR). Segue o que está implementado e o que ainda está no backlog.
 
-### 🚧 Painel administrador
+### ✅ Painel administrador (implementado)
 
-**Acesso restrito** por role (`users.role = 'admin'` — coluna a adicionar):
+**Acesso restrito** por role (`users.role = 'admin'`):
 
 #### Dashboard principal
-- Usuários online agora (em tempo real via socket)
 - Total de usuários cadastrados
-- Cadastros novos hoje/semana/mês
-- Posts publicados, mensagens enviadas, ofertas confirmadas (KPIs de saúde)
-- Reports pendentes
-- Imports Steam ativos
-- Erros recentes (5xx, exceções)
+- Reports pendentes por severidade (gráfico)
+- KPIs de saúde da plataforma
 
 #### Moderação de usuários
 - Buscar user por email/displayName/ID
-- Ver histórico completo: posts, ofertas, ratings, denúncias recebidas/feitas
 - **Banir** — flag `users.banned_at` + motivo + auto-logout (revogar refresh tokens)
-- **Suspender** — `users.suspended_until` (data) — login bloqueado, conteúdo escondido temporariamente
-- **Reativar** — limpar flags
+- **Suspender** — `users.suspended_until` (data) — login bloqueado temporariamente
+- **Reativar** — limpar flags de ban/suspensão
 - **Forçar logout** — revogar todos refresh_tokens
 - **Forçar reset de senha** — invalidar password_hash, mandar e-mail de reset
 
-#### Gerenciar conteúdo
-- Listar posts/coleções/mensagens denunciadas
-- Marcar conteúdo como `removed_by_admin` (soft delete com motivo)
-- Restaurar conteúdo removido por engano
-
-### 🚧 Painel de denúncias e remoção de conteúdo
-
-- Lista de reports pendentes ordenados por prioridade (volume, severidade)
+#### Gerenciar reports
+- Lista de reports pendentes com filtro por tipo de alvo
+- Ações por targetType (user, post, message, collection, conversation)
+- Gráfico de severidade com dados reais
 - Histórico de denúncias por target/reporter
-- Marcar como `reviewed` (válida + ação tomada) ou `dismissed`
-- Templates de resposta automática ao denunciante
-- **API de denúncia direta pra casos graves** — webhook que envia pra autoridades quando detectar conteúdo grave automaticamente (CSAM, ameaças explícitas)
-- Integração com Linear/Notion pra tracking?
 
-### 🚧 Sistema de logs de atividade (audit log)
+**Itens ainda no backlog** (incompletos):
+- Busca avançada de conteúdo (posts/coleções/mensagens denunciadas)
+- `removed_by_admin` soft delete com motivo + restauração
+- Erros recentes (5xx, exceções) no dashboard
 
-Tabela `audit_log` dedicada (ver [Observability](/docs/concepts/observability)):
+### ✅ Sistema de audit log (admin actions)
+
+Tabela `admin_audit_log` — registra todas as ações administrativas:
 
 ```sql
-audit_log
-├── id, user_id, action, target_type, target_id
+admin_audit_log
+├── id, admin_id, action, target_type, target_id
 ├── metadata JSONB
-├── ip_address inet
-├── geo_location (cidade aproximada via GeoIP)
-├── user_agent
 └── created_at
 ```
 
-**Eventos a logar:**
-- Login (sucesso/falha) com IP e UA
-- Logout
-- Mudança de senha / e-mail / settings
-- Posts criados/editados/deletados
-- Coleções criadas/deletadas
-- Listings/offers criadas/aceitas/canceladas
-- Reports criados
-- Bans/suspensões aplicadas pelo admin
-- Bloqueios feitos
-- Mudanças de privacy
+**Eventos logados:** ban, unban, suspend, unsuspend, force-logout, force-reset-password, report-dismiss, report-resolve
 
-**Privacidade**: log é interno; user **vê só os próprios** via `GET /users/me/activity-log`. Admin vê todos. Retenção: 1 ano? Definir.
+**Pendente:** audit log de ações do usuário comum (`user_activity_log` — login, mudança de senha, etc.)
 
 ### 🚧 Conformidade LGPD
 
@@ -318,27 +297,14 @@ audit_log
 - AI vision pra flag de NSFW (não bloqueia, mas marca pra review do admin + esconde de minors)
 - Manual review apenas pra reports
 
-### 🚧 Feature flags
+### ✅ Feature flags (implementado)
 
-Habilitar/desabilitar recursos sem deploy. Permite:
-- Rollout gradual (10% dos users → 50% → 100%)
-- Killswitch em prod (algo deu errado, desliga sem revert)
-- A/B testing
-- Beta features opt-in
-
-**Implementação possível:**
+Habilitar/desabilitar recursos sem deploy:
 - Tabela `feature_flags` (key, enabled, rollout_percentage, target_user_ids)
-- Service `FeatureFlagsService.isEnabled(flag, userId)`
-- Hooks no frontend pra esconder UI de features off
-- Hooks no backend pra rejeitar endpoints de features off
-- Admin UI pra toggle em runtime
-
-**Alternativas SaaS** (se decidir abrir mão do "100% self-host"):
-- GrowthBook self-host (gratuito, open-source)
-- Unleash self-host
-- LaunchDarkly (caro)
-
-📋 Decisão na sessão de implementação: rolar próprio simples ou usar GrowthBook self-host.
+- Service `FeatureFlagsService.isEnabled(flag, userId)` no backend
+- Toggle em runtime via painel admin (sem deploy)
+- Flags seedadas na inicialização da plataforma
+- Middleware frontend esconde UI de features desabilitadas
 
 ### 🚧 Verificação de idade (16+)
 
@@ -400,9 +366,11 @@ Itens cross-cutting já mencionados acima, agrupados:
 - ✅ Erros tipados (já implementado)
 - ✅ Cookies HttpOnly/Secure (já)
 - ✅ bcrypt + sha256 (já)
-- 🚧 Rate limiting backend (`@fastify/rate-limit`)
-- 🚧 Helmet headers (CSP, HSTS, X-Frame-Options)
-- 🚧 Audit log estruturado (descrito acima)
+- ✅ Rate limiting backend (`@fastify/rate-limit` + Redis — auditoria OWASP round 1)
+- ✅ Helmet headers (CSP, HSTS, X-Frame-Options, Referrer-Policy — auditoria OWASP round 1)
+- ✅ Audit log de ações admin (descrito acima)
+- ✅ Criptografia E2E para DMs (Signal Protocol — descrito em Estado atual)
+- 🚧 Audit log de ações do usuário comum (login, senha, privacy)
 - 🚧 Signed URLs S3 pra mídia private
 - 🚧 Criptografia at-rest pra `steam_api_key` em DB
 - 🚧 `npm audit` em CI + Dependabot
@@ -483,26 +451,25 @@ Hoje a estrutura é razoável mas tem inconsistências históricas. Reorganizar 
 Ordem de execução proposta (cada bloco = sub-projeto com spec própria + plano + execução):
 
 ### Próximas 1-2 sessões (curto prazo)
-1. **Painel administrador básico + audit log** — fundação pra moderação
-2. **Lista de amigos melhorada** — UX win rápido
-3. **Comunidades: notificações + cross-post** — completar loop social das comunidades
+1. **Lista de amigos melhorada** — UX win rápido (status online, filtros, favoritos)
+2. **Comunidades: notificações + cross-post** — completar loop social das comunidades
+3. **LGPD: portabilidade (export)** — endpoint `GET /users/me/export` com bundle ZIP
 
 ### Médio prazo
-4. **Feature flags** — habilitador de features futuras com rollout gradual
-5. **Comunidades: chat próprio + eventos da comunidade**
-6. **LGPD: portabilidade (export) + audit log self-service**
-7. **Verificação de idade (self-declaration + gate)**
-8. **Moderação AI básica** (texto via Detoxify open-source)
+4. **Comunidades: chat próprio + eventos da comunidade**
+5. **Audit log self-service do usuário** (`GET /users/me/activity-log`)
+6. **Verificação de idade (self-declaration + gate no signup)**
+7. **Moderação AI básica** (texto via Perspective API ou Detoxify)
 
 ### Longo prazo (requer pesquisa/spec extensa)
-9. **Feed com recomendações** — após coletar dados de engajamento
-10. **Criptografia E2E em DMs** — investimento alto, recompensa alta
-11. **Moderação de mídia (NCMEC + AI vision)**
-12. **Refator de arquitetura backend** — quando o volume de features novas baixar
+8. **Feed com recomendações** — após coletar dados de engajamento
+9. **E2E em grupos** — MLS (RFC 9420), muito mais complexo que DMs
+10. **Moderação de mídia (NCMEC + AI vision)**
+11. **Refator de arquitetura backend** — quando o volume de features novas baixar
 
-### Sub-projeto E (paralelo, qualquer momento)
-- Deploy + CI/CD em produção real (descrito em [Operations](/docs/operations/arquitetura))
+### Paralelo, qualquer momento
 - Observability stack completa (Loki + Prometheus + Jaeger + GlitchTip)
+- `npm audit` em CI + Dependabot automático
 
 ---
 
@@ -532,5 +499,5 @@ Tracking aproximado de quando cada bloco entrou:
 | Sessão 2026-04-28 | Vitrine completa (listings + offer_proposals + ratings) · Keycloak removido · Cor sólida capa/fundo · Excluir conta |
 | Sessão 2026-04-29 | Portal de documentação completo (681 páginas) |
 | Sessão 2026-05-01 | Comunidades — CRUD, membros, moderação, tópicos, join-requests, audit log |
-
-Próximas sessões: este roadmap.
+| Sessão 2026-05-03 | Painel admin + Feature Flags + Audit log · Criptografia E2E (Signal Protocol) · Auditoria OWASP (rate limiting + Helmet) · Rolê (Eventos) · Deploy em produção com SSL |
+| Sessão 2026-05-04 | Integração IGDB · Dashboard de coleções (Chart.js) · Lista global de itens com filtros · Docs em domínio público · Mermaid v11 fix em 8 módulos · Módulos Events + Communities na doc |

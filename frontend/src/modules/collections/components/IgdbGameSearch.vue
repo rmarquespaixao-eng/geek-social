@@ -49,6 +49,10 @@ function clear() {
   results.value = []
   open.value = false
 }
+
+function scheduleClose() {
+  setTimeout(() => { open.value = false }, 150)
+}
 </script>
 
 <template>
@@ -61,7 +65,7 @@ function clear() {
         placeholder="Buscar jogo na IGDB..."
         class="w-full bg-[#1e2038] border border-[#252640] hover:border-[#f59e0b]/40 focus:border-[#f59e0b] text-[#e2e8f0] placeholder-[#475569] text-[13px] pl-8 pr-8 py-2.5 rounded-lg outline-none transition-colors"
         @focus="open = results.length > 0"
-        @blur.capture="setTimeout(() => { open = false }, 150)"
+        @blur.capture="scheduleClose"
       />
       <Loader2 v-if="loading" :size="14" class="absolute right-3 text-[#94a3b8] animate-spin" />
       <button

@@ -3,7 +3,7 @@ title: Como implementar E2EE (passo a passo)
 description: Tutorial conceitual + prático pra implementar end-to-end encryption num chat — do zero até DM, grupos, backup, rotação e auto-repair. Baseado na implementação real do Geek Social com Signal Protocol via libsignal-wasm.
 ---
 
-Este tutorial é o guia que eu queria ter tido quando comecei. Ele explica **o que cada conceito é**, **por que existe**, e **como aplicar**, com referências ao código real do Geek Social. A página de [Criptografia E2EE](/docs/concepts/criptografia-e2ee) é o reference da arquitetura final — esta aqui é o caminho pra chegar lá.
+Este tutorial é o guia que eu queria ter tido quando comecei. Ele explica **o que cada conceito é**, **por que existe**, e **como aplicar**, com referências ao código real do Geek Social. A página de [Criptografia E2EE](/docs/concepts/criptografia-e2ee) é a referência da arquitetura final — esta aqui é o caminho pra chegar lá.
 
 > ⚠️ **Não invente cripto.** Em todos os passos abaixo você vai usar uma biblioteca pronta e bem auditada (libsignal). O trabalho do dev é a **integração** correta, não os algoritmos. Se você está pensando "vou implementar o Double Ratchet do zero", pare.
 
@@ -11,7 +11,7 @@ Este tutorial é o guia que eu queria ter tido quando comecei. Ele explica **o q
 
 ### 1.1 Por que E2EE existe?
 
-E2EE responde a uma pergunta de threat model: **quem você confia com o conteúdo das mensagens?**
+E2EE responde a uma pergunta de threat model: **a quem você confia o conteúdo das mensagens?**
 
 | Modelo | Quem lê o plaintext |
 |---|---|
@@ -29,12 +29,12 @@ O Signal Protocol é uma composição de quatro primitivas. Entender cada uma re
 
 #### Identidade de longo prazo (Identity Key)
 
-Um par de chaves Curve25519 que representa "quem você é" criptograficamente. Gerada **uma vez por user** e nunca rotacionada. O hash dela é o que aparece em "verify safety number".
+Um par de chaves Curve25519 que representa "quem você é" criptograficamente. Gerado **uma vez por user** e nunca rotacionado. O hash da chave pública é o que aparece em "verify safety number".
 
 - **Pública** vai pro server (e pros peers)
-- **Privada** **nunca** sai do dispositivo do user (exceto cifrada por backup)
+- **Privada** **nunca** sai do dispositivo do user (exceto cifrada no backup)
 
-Se a identidade é comprometida, o user é "outra pessoa" — peers verão `IdentityChangedError`.
+Se a identidade for comprometida, o user vira "outra pessoa" — peers verão `IdentityChangedError`.
 
 #### Signed Pre-Key (SPK)
 
@@ -50,9 +50,9 @@ Mesma ideia da SPK, mas com **Kyber1024** — um KEM (Key Encapsulation Mechanis
 
 #### One-Time Pre-Keys (OTPs)
 
-Chaves Curve25519 **descartáveis**. Cada handshake X3DH consome uma. Publicar em lote (100 por vez) e refill quando o server reportar contagem baixa.
+Chaves Curve25519 **descartáveis**. Cada handshake X3DH consome uma. Publique em lote (100 por vez) e faça refill quando o server reportar contagem baixa.
 
-**Por que existem:** sem OTP, o handshake X3DH é deterministicamente idêntico se A inicia 2 sessões com B (mesmas SPK e Kyber) — perdendo forward secrecy do material inicial. A OTP injeta entropia única por sessão.
+**Por que existem:** sem OTP, o handshake X3DH é deterministicamente idêntico se A iniciar 2 sessões com B (mesmas SPK e Kyber) — perdendo forward secrecy do material inicial. A OTP injeta entropia única por sessão.
 
 **Fallback obrigatório:** se acabarem as OTPs, o handshake **ainda funciona** com forward secrecy ligeiramente reduzida. Não bloqueie a primeira mensagem por falta de OTP.
 
@@ -81,7 +81,7 @@ Double Ratchet escala mal pra grupos N-N (cada mensagem teria que ser cifrada N-
 2. Distribui a sender key uma vez via DM Signal pra cada membro (*Sender Key Distribution Message* — SKDM)
 3. Daí pra frente, cifra mensagens **uma vez** com a sender key; todos os membros decifram com a mesma chave
 
-A sender key também avança em ratchet a cada mensagem (forward secrecy mantido), mas é **simétrico** — sem DH ratchet. Trade-off explícito do design.
+A sender key também avança em ratchet a cada mensagem (forward secrecy mantida), mas o ratchet é **simétrico** — sem DH ratchet. Trade-off explícito do design.
 
 **Rotação:** quando um membro sai/é removido, gera-se um novo `distributionId` (UUID) e os senders distribuem novas sender keys. Mensagens futuras ficam fora do alcance do ex-membro.
 
@@ -100,7 +100,7 @@ Não tem PKI nem CA. A primeira identidade que A vê de B é "confiada" automati
 | Timestamps, tamanhos | Conteúdo |
 | Backup cifrado da identidade | Senha de derivação do backup |
 
-**Metadata fica visível.** E2EE não é "anti-vigilância" completo — é "anti-leitura de conteúdo". Se você precisa esconder *quem-fala-com-quem*, isso é outro problema (mixnet, sealed sender, etc.) e está fora do escopo deste tutorial.
+**Metadata fica visível.** E2EE não é "anti-vigilância" completa — é "anti-leitura de conteúdo". Se você precisa esconder *quem-fala-com-quem*, isso é outro problema (mixnet, sealed sender, etc.) e está fora do escopo deste tutorial.
 
 ## Parte 2 — Decisões antes de codar
 
@@ -110,14 +110,14 @@ Faça essas escolhas explicitamente. Cada uma tem consequência permanente.
 
 **Single-device** (escolha do Geek Social hoje):
 - ✅ Simples — `deviceId=1` hardcoded
-- ❌ User não usa em 2 navegadores, não migra device sem perder histórico
+- ❌ User não usa em 2 navegadores, não consegue trocar de device sem perder histórico
 
 **Multi-device** (Signal/WhatsApp):
 - Cada device tem `registrationId` próprio
 - Mensagem é cifrada N vezes (uma por device do destinatário)
 - Sincronizar sessões entre devices do mesmo user é complexo (Sesame Protocol)
 
-Comece **single-device** se o produto permitir. Adicionar multi-device depois é viável; o caminho contrário (remover) é trivial mas a UX já criou expectativa.
+Comece **single-device** se o produto permitir. Adicionar multi-device depois é viável; o caminho contrário (remover) é trivial, mas a UX já criou expectativa.
 
 ### 2.2 Backup de identidade — sim ou não?
 
@@ -132,7 +132,7 @@ Com backup cifrado por **senha de login**:
 
 ### 2.3 Backup de **histórico** de mensagens — não, geralmente
 
-Backup de histórico é uma feature à parte. Exige cifrar plaintexts decifrados com uma chave separada (PIN, senha, ou drive cifrado), upload pro server. **Custo alto, valor médio** — Signal só tem isso há pouco e via cloud externa.
+Backup de histórico é uma feature à parte. Exige cifrar plaintexts decifrados com uma chave separada (PIN, senha ou drive cifrado) e fazer upload pro server. **Custo alto, valor médio** — o Signal lançou isso recentemente, via cloud externa.
 
 Não implemente no MVP. A documentação explica claramente ao user: "trocar device = perder histórico". É a mesma promessa do Signal/WhatsApp.
 
@@ -144,7 +144,7 @@ Três opções:
 |---|---|---|
 | **WASM no browser** | E2EE de verdade, server zero confiança | Bundle pesado (~700KB), API async |
 | **Native mobile** (iOS/Android) | Performance, OS keystore | Não cobre web |
-| **Server-side** | Não é E2EE — é só "TLS reforçado". **Não faça.** | Anula o ponto inteiro |
+| **Server-side** | Não é E2EE — é só "TLS reforçado". **Não faça.** | Anula o propósito todo |
 
 Geek Social usa [@getmaapp/signal-wasm](https://github.com/getmaapp/signal-wasm) (fork de libsignal compilado pra WASM). Se for native, troque a camada do `SignalClient.ts` pelo binding nativo — o resto da arquitetura é igual.
 
@@ -270,7 +270,7 @@ async popOneTimePrekey(userId: string) {
 **Validações de negócio:**
 
 - `PUT /crypto/sender-key-distribution/:conversationId` deve verificar que o caller **e** todos os recipients são membros da conversa. Sem isso, qualquer user pode injetar SKDMs em conversa alheia.
-- Limite de tamanho do backup (256 KB no Geek Social). Sem limite, atacante pode encher o DB.
+- Limite de tamanho do backup (256 KB no Geek Social). Sem limite, um atacante pode encher o DB.
 
 **No Geek Social:** `api/src/modules/crypto/{routes,service,repository,schema}.ts`.
 
@@ -326,7 +326,7 @@ export class SignalSession {
 
 **Pontos críticos:**
 
-- `IDBOpenDBRequest.onupgradeneeded` é o **único** lugar onde você cria/migra stores. Versionar (`v1`, `v2`, `v3`) e ter migrations pra cada.
+- `IDBOpenDBRequest.onupgradeneeded` é o **único** lugar onde você cria/migra stores. Versione (`v1`, `v2`, `v3`) e tenha migrations pra cada.
 - **Não** retenha SPKs antigas no server, mas **sim** no cliente. Mensagem cifrada antes da rotação ainda precisa decifrar.
 - Cada operação que escreve no IDB precisa ser dentro de uma transaction `readwrite`. WASM é sync; IDB é async. Não tente intercalar.
 - Identidade privada NUNCA sai do IDB exceto cifrada no backup.
@@ -391,7 +391,7 @@ export async function bootstrapCrypto(opts: { userId: string; loginPassword?: st
 
 **Pontos críticos:**
 
-- `await session.publishKeys()` é fire-and-forget? Não. Se falhar, peers não conseguem iniciar sessão. Logue o erro mas **não** bloqueie o login (fila de retry).
+- `await session.publishKeys()` é fire-and-forget? Não. Se falhar, peers não conseguem iniciar sessão. Logue o erro, mas **não** bloqueie o login (fila de retry).
 - `loadFromBackup` precisa restaurar **todos os contadores** (`nextPrekeyId`, `nextSignedPrekeyId`, `nextKyberPrekeyId`) — senão IDs colidem com o que o server já tem (bug histórico — commit `7b7bb4d`).
 - O fluxo C (identidade nova) é **destrutivo do ponto de vista do peer** — TOFU vai disparar `IdentityChangedError` na próxima mensagem que o peer enviar pra esse user. Documente claramente.
 
@@ -438,7 +438,7 @@ const plaintext = await session.decryptMessage(senderId, base64Decode(b64body), 
 **Pontos críticos:**
 
 - O wire format `"type.base64"` é uma escolha do Geek Social — outras opções: JSON, length-prefixed binary. Escolha uma e seja consistente.
-- `messageType=3` (PreKey) **consome a OTP** localmente. Server nunca decide isso.
+- `messageType=3` (PreKey) **consome a OTP** localmente. O server nunca decide isso.
 - Se o decrypt falhar com type=3, a OTP foi consumida em vão. Não tente refazer com a mesma — a OTP correspondente já foi deletada do server.
 
 **No Geek Social:** `frontend/src/modules/chat/services/chatCrypto.ts` — funções `encryptDm` e `decryptDm`.
@@ -538,7 +538,7 @@ const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, pla
 
 **Por que os contadores são essenciais:** sem eles, no restore você gera SPKs com IDs de 0, 1, 2... colidindo com IDs já no server. Mensagens em trânsito cifradas pra `prekeyId=5` da geração antiga ficam órfãs. Bug `7b7bb4d` no histórico.
 
-**Iterações 600k:** OWASP 2023 mínimo. Argon2id seria melhor mas exige polyfill no browser. Aceitável.
+**Iterações 600k:** mínimo recomendado pela OWASP 2023. Argon2id seria melhor, mas exige polyfill no browser. Aceitável.
 
 #### 7.2 Manutenção periódica
 
@@ -558,7 +558,7 @@ async function runKeyMaintenance() {
 }
 ```
 
-Cada step independente — falha de um não bloqueia os outros.
+Cada passo é independente — falha de um não bloqueia os outros.
 
 #### 7.3 TOFU + safety numbers
 
@@ -581,7 +581,7 @@ async function acknowledgeIdentityChange(peerUserId: string) {
 }
 ```
 
-**Não permita user pular o TOFU silenciosamente.** O ponto inteiro é dar visibilidade quando algo muda.
+**Não permita que o user pule o TOFU silenciosamente.** O propósito é dar visibilidade quando algo muda.
 
 #### 7.4 Cache de plaintext (resolver F5)
 
@@ -604,7 +604,7 @@ Faça isso **desde o primeiro dia**. Custou um commit dedicado (`990a91c`) desco
 
 #### 7.5 Auto-repair de sessão
 
-Sessões dessincronizam (peer recarregou app, IDB corrompeu, etc.). Decrypt falha em loop.
+Sessões dessincronizam (peer recarregou o app, IDB se corrompeu, etc.). Decrypt falha em loop.
 
 ```ts
 const REPAIR_THROTTLE_MS = 30_000
@@ -629,7 +629,7 @@ Se ainda falhar, mostre botão "Tentar novamente" na bolha (commit `cdaca62`). N
 
 #### 7.6 Push notifications E2E-safe
 
-Service worker **não** tem identidade privada (vive em scope diferente). Push payload deve ser metadata-only:
+Service worker **não** tem identidade privada (vive em escopo diferente). Push payload deve ser metadata-only:
 
 ```ts
 // api/src/modules/chat/chat.gateway.ts
@@ -648,12 +648,12 @@ Automatizar testes de E2EE é difícil (envolve dois clientes em estados diferen
 
 1. **Happy path DM:** A envia pra B (sem sessão). B recebe, decifra, responde. A recebe a resposta.
 2. **F5 com histórico:** A e B trocaram 10 msgs. B dá F5. Todas as 10 msgs continuam legíveis.
-3. **Identidade nova de um peer:** B limpa o IDB e relogia (gera nova identity). A envia uma msg → vê `IdentityChangedError`. Aceita → próxima msg funciona.
+3. **Identidade nova de um peer:** B limpa o IDB e faz login de novo (gera nova identity). A envia uma msg → vê `IdentityChangedError`. Aceita → próxima msg funciona.
 4. **Backup restore:** A limpa IDB. Faz login com mesma senha. Identidade restaurada, manda msg pra B, B decifra OK.
 5. **Backup com senha errada:** A limpa IDB. Login com senha nova. Identidade nova gerada — B recebe TOFU alert.
 6. **Grupo de 3:** A cria grupo com B, C. Manda msg. B e C decifram. C sai. A manda nova msg. B decifra, C **não** tem mais sender key (msg invisível pra C).
 7. **OTP exhaustion:** force `signal_one_time_prekeys` a ficar vazia pro user B. A inicia handshake — deve funcionar (fallback X3DH sem OTP).
-8. **Concurrent session init:** abrir dois tabs do user A simultaneamente, ambos enviando 1ª msg pra B. As duas mensagens devem decifrar (atomicidade da OTP).
+8. **Concurrent session init:** abrir duas abas do user A simultaneamente, ambas enviando 1ª msg pra B. As duas mensagens devem decifrar (atomicidade da OTP).
 
 **No Geek Social:** `e2e/specs/chat-e2ee.spec.ts` (Playwright) cobre 1, 2 e 3. Os outros estão em backlog.
 
